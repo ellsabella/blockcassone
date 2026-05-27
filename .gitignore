@@ -1,0 +1,5 @@
+.env
+contracts/cache/
+contracts/out/
+broadcast/
+node_modules/

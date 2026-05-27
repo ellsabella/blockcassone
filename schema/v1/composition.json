@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "blockcassone/composition/v1",
+  "title": "Blockcassone Composition",
+  "description": "Top-level canonical artwork definition. Contains only the data needed to deterministically reproduce the artwork structure. Visual style (colours, glow, animation) lives in the renderer — not here.",
+
+  "type": "object",
+  "required": ["schemaVersion", "seed", "hilbert", "placement"],
+
+  "properties": {
+
+    "schemaVersion": {
+      "const": 1,
+      "description": "Schema version. Increment on breaking changes."
+    },
+
+    "seed": {
+      "type": "object",
+      "description": "Deterministic seed. All randomness (material assignment, edge patterns, placement order) derives from this hash.",
+      "required": ["hash"],
+      "properties": {
+        "hash": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$",
+          "description": "66-character hex string (0x + 64 hex chars)."
+        }
+      }
+    },
+
+    "hilbert": {
+      "type": "object",
+      "description": "Hilbert curve structure.",
+      "required": ["order"],
+      "properties": {
+        "order": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Hilbert order k. Produces 8^k vertices, 8^(k-1) cube motifs, and 3×8^(k-1) planes."
+        }
+      }
+    },
+
+    "placement": {
+      "type": "object",
+      "description": "How planes are selected for inclusion in this composition.",
+      "required": ["strategy"],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["jigsaw", "random", "fill_all"],
+          "description": "'jigsaw' = edge-compatible neighbor-first. 'random' = unconstrained. 'fill_all' = every valid plane."
+        },
+        "includeBoundary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether boundary planes (spanning two adjacent motifs) are eligible."
+        }
+      }
+    },
+
+    "params": {
+      "type": "object",
+      "description": "Structural generation parameters baked into the plane data. Changing these changes the canonical output, not just its appearance.",
+      "properties": {
+        "edgeSubdivisions": {
+          "type": "integer",
+          "default": 8,
+          "description": "Sub-vertex divisions per plane edge. Determines the length of each plane's edgePatterns arrays."
+        },
+        "edgePointProbability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Probability each sub-vertex is active (1). Seeded by the composition hash."
+        }
+      }
+    },
+
+    "tokens": {
+      "type": "array",
+      "description": "Placed tokens. Each entry is a token occupying one cube slot. See token.json.",
+      "items": { "$ref": "token.json" }
+    }
+  }
+}

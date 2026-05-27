@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pipeline</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #0a0a0a;
+      color: #bbb;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+      height: 100%;
+    }
+    #gl {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    #log {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      font-size: 11px;
+      color: #666;
+      pointer-events: none;
+      white-space: pre;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <div id="log"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

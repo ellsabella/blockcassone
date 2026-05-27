@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data:; connect-src 'self' http: https:;">
+  <title>Blockcassone — viewer</title>
+  <style>
+    @font-face {
+      font-family: 'NormiesFont';
+      src: url('/viewer/assets/NormiesFont.otf') format('opentype');
+      font-display: block;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #000;
+      color: #bbb;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+      height: 100%;
+    }
+    #gl { display: block; width: 100vw; height: 100vh; }
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: auto;
+      width: 360px;
+    }
+    #log {
+      font-size: 11px;
+      color: #777;
+      white-space: pre;
+      line-height: 1.4;
+      pointer-events: none;
+    }
+    #controls, #category-controls, #cube-type-controls, #wallet-controls, #mint-controls {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    #wallet-controls, #mint-controls {
+      background: rgba(14, 14, 18, 0.78);
+      border: 1px solid #303038;
+      padding: 8px;
+      flex-direction: column;
+    }
+    .panel-title {
+      font-size: 10px;
+      color: #777;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    .panel-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    #wallet-controls input {
+      width: 100%;
+      background: rgba(20, 20, 22, 0.8);
+      border: 1px solid #333;
+      color: #bbb;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      padding: 6px 8px;
+    }
+    #wallet-status {
+      font-size: 10px;
+      color: #888;
+      align-self: center;
+    }
+    #mint-count {
+      width: 46px;
+      text-align: center;
+      background: rgba(20, 20, 22, 0.8);
+      border: 1px solid #333;
+      color: #bbb;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      padding: 6px 4px;
+    }
+    #mint-status {
+      font-size: 10px;
+      color: #888;
+      line-height: 1.35;
+    }
+    button {
+      background: rgba(20, 20, 22, 0.8);
+      border: 1px solid #333;
+      color: #bbb;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    button:hover   { background: rgba(40, 40, 48, 0.9); color: #fff; }
+    button.active  { background: rgba(60, 60, 80, 0.9); color: #fff; border-color: #88a; }
+    #lights-panel {
+      position: fixed;
+      bottom: 12px;
+      left: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: auto;
+    }
+    #nft-label {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      max-width: min(460px, calc(100vw - 24px));
+      padding: 6px 8px;
+      background: rgba(14, 14, 18, 0.72);
+      border: 1px solid rgba(80, 80, 90, 0.55);
+      color: #aaa;
+      font-size: 11px;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+    }
+    .light-group {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      background: rgba(14, 14, 18, 0.8);
+      border: 1px solid #333;
+      padding: 6px 8px;
+    }
+    .light-label {
+      font-size: 10px;
+      color: #888;
+      margin-bottom: 2px;
+    }
+    .light-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .light-row span {
+      font-size: 10px;
+      color: #666;
+      width: 10px;
+    }
+    .light-row input[type=range] {
+      width: 120px;
+      accent-color: #88a;
+      cursor: pointer;
+    }
+    .light-row .val {
+      font-size: 10px;
+      color: #aaa;
+      width: 36px;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <div id="nft-label">NFT: none</div>
+  <div id="hud">
+    <div id="controls">
+      <button id="mode-2d">2D</button>
+      <button id="mode-3d">3D</button>
+      <button id="mode-big" class="active">Big Cube</button>
+    </div>
+    <div id="category-controls">
+      <button class="active" data-category="all">All</button>
+      <button data-category="0">0 Burned</button>
+      <button data-category="1">1 Base</button>
+      <button data-category="2">2 Edited</button>
+      <button data-category="3">3 Awake</button>
+      <button data-category="4">4 Elite</button>
+    </div>
+    <div id="cube-type-controls">
+      <button class="active" data-cube-type="all">All Cubes</button>
+      <button data-cube-type="normie">Normie</button>
+      <button data-cube-type="non">Non-normie</button>
+    </div>
+    <div id="wallet-controls">
+      <div class="panel-title">Wallet</div>
+      <input id="wallet-address" spellcheck="false" value="0x15F89dC0088F13FFABBC75FF3F279c9570a69c33" aria-label="Wallet address">
+      <div class="panel-row">
+        <button id="wallet-load">Load Wallet NFTs</button>
+        <span id="wallet-status">wallet: not loaded</span>
+      </div>
+    </div>
+    <div id="mint-controls">
+      <div class="panel-title">Mint Simulation</div>
+      <div class="panel-row">
+        <button id="mint-minus" aria-label="Decrease mint count">-</button>
+        <input id="mint-count" value="1" inputmode="numeric" aria-label="Mint count">
+        <button id="mint-plus" aria-label="Increase mint count">+</button>
+        <button id="mint-run">Mint</button>
+        <button id="mint-reset">Reset</button>
+      </div>
+      <div id="mint-status">minted: 0 | empty slots: 64</div>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <!-- Blockcassone data layer (globals) -->
+  <script src="/public/config.js"></script>
+  <script src="/public/inputdata.js"></script>
+  <script src="/public/random.js"></script>
+  <script src="/public/hilbert.js"></script>
+  <script src="/public/linestyles.js"></script>
+  <script src="/public/planes.js"></script>
+  <script src="/public/blocks.js"></script>
+  <script src="/public/placement.js"></script>
+  <!-- Viewer (ES module) -->
+  <script type="module" src="./main.js"></script>
+
+  <div id="lights-panel">
+    <div id="lights-selected" style="font-size:10px;color:#888;margin-bottom:4px;">Lights</div>
+    <div class="light-group" id="light-0">
+      <div class="light-label">Light 1 — red</div>
+      <div class="light-row"><span>X</span><input type="range" min="-3" max="3" step="0.05" value="0.7" data-light="0" data-axis="0"><span class="val">0.70</span></div>
+      <div class="light-row"><span>Y</span><input type="range" min="-3" max="3" step="0.05" value="0.5" data-light="0" data-axis="1"><span class="val">0.50</span></div>
+      <div class="light-row"><span>Z</span><input type="range" min="-3" max="3" step="0.05" value="0.7" data-light="0" data-axis="2"><span class="val">0.70</span></div>
+    </div>
+    <div class="light-group" id="light-1">
+      <div class="light-label">Light 2 — green</div>
+      <div class="light-row"><span>X</span><input type="range" min="-3" max="3" step="0.05" value="-0.7" data-light="1" data-axis="0"><span class="val">-0.70</span></div>
+      <div class="light-row"><span>Y</span><input type="range" min="-3" max="3" step="0.05" value="0.3" data-light="1" data-axis="1"><span class="val">0.30</span></div>
+      <div class="light-row"><span>Z</span><input type="range" min="-3" max="3" step="0.05" value="0.5" data-light="1" data-axis="2"><span class="val">0.50</span></div>
+    </div>
+    <div class="light-group" id="light-2">
+      <div class="light-label">Light 3 — blue</div>
+      <div class="light-row"><span>X</span><input type="range" min="-3" max="3" step="0.05" value="0.2" data-light="2" data-axis="0"><span class="val">0.20</span></div>
+      <div class="light-row"><span>Y</span><input type="range" min="-3" max="3" step="0.05" value="0.9" data-light="2" data-axis="1"><span class="val">0.90</span></div>
+      <div class="light-row"><span>Z</span><input type="range" min="-3" max="3" step="0.05" value="-0.7" data-light="2" data-axis="2"><span class="val">-0.70</span></div>
+    </div>
+  </div>
+</html>

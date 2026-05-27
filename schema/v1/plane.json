@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "blockcassone/plane/v1",
+  "title": "Blockcassone Plane",
+  "description": "The atomic canonical unit. A plane is a quad defined by 4 consecutive Hilbert vertices. Its structural properties (position, material, edge patterns) are derived deterministically from the composition seed. Visual rendering properties live in the renderer.",
+
+  "type": "object",
+  "required": ["id", "axis", "vertices", "material", "edgePatterns", "hierarchy"],
+
+  "properties": {
+
+    "id": {
+      "type": "integer",
+      "description": "Unique plane index within the composition."
+    },
+
+    "type": {
+      "type": "string",
+      "enum": ["regular", "boundary"],
+      "description": "'regular' = within one 8-vertex motif. 'boundary' = spans two adjacent motifs."
+    },
+
+    "axis": {
+      "type": "string",
+      "enum": ["x", "y", "z"],
+      "description": "Which axis this plane is perpendicular to. Determined by the relative positions of its 4 vertices."
+    },
+
+    "vertices": {
+      "type": "object",
+      "description": "The 4 vertex positions defining this plane.",
+      "required": ["indices", "positions"],
+      "properties": {
+        "indices": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 4,
+          "maxItems": 4,
+          "description": "Hilbert curve vertex indices [i0, i1, i2, i3]. Consecutive in curve order."
+        },
+        "positions": {
+          "type": "array",
+          "description": "Raw integer lattice positions [{x,y,z}, ...]. Renderer normalises to world space as needed.",
+          "items": {
+            "type": "object",
+            "required": ["x", "y", "z"],
+            "properties": {
+              "x": { "type": "integer" },
+              "y": { "type": "integer" },
+              "z": { "type": "integer" }
+            }
+          },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      }
+    },
+
+    "material": {
+      "type": "string",
+      "enum": ["water", "stone", "forest"],
+      "description": "Material type. Assigned deterministically via seeded PRNG. A semantic tag — the renderer decides what this looks like."
+    },
+
+    "edgePatterns": {
+      "type": "array",
+      "description": "3 binary activity patterns — one per curve-traced edge (v0→v1, v1→v2, v2→v3). Each array has length edgeSubdivisions. 1 = active point, 0 = inactive. The 4th (open) edge has no pattern.",
+      "items": {
+        "type": "array",
+        "items": { "type": "integer", "enum": [0, 1] }
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+
+    "edges": {
+      "type": "array",
+      "description": "The 3 curve-traced edges.",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "integer", "description": "Start vertex index in the Hilbert curve." },
+          "to":   { "type": "integer", "description": "End vertex index in the Hilbert curve." }
+        }
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+
+    "hierarchy": {
+      "type": "object",
+      "description": "Where this plane sits in the block hierarchy.",
+      "required": ["motifIndex"],
+      "properties": {
+        "motifIndex": {
+          "type": "integer",
+          "description": "Which 8-vertex motif (cube) this plane belongs to. = floor(vertexStart / 8)."
+        },
+        "positionInMotif": {
+          "type": "integer",
+          "enum": [0, 1, 2],
+          "description": "Which of the 3 planes within its motif (0=first, 1=middle, 2=last)."
+        },
+        "blockPath": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "description": "Path from root to leaf in the block hierarchy. E.g. [2, 5, 3] = level-2 block #2 → level-1 block #5 → level-0 block #3."
+        }
+      }
+    },
+
+    "bridgesMotifs": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "Boundary planes only: the two motif indices this plane spans [m-1, m]."
+    }
+  }
+}

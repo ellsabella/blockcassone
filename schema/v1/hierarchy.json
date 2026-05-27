@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "blockcassone/hierarchy/v1",
+  "title": "Blockcassone Hierarchy",
+  "description": "Block hierarchy structure. Fully derived from the Hilbert order — not seeded, not stored onchain. Included as a reference for renderers that need to understand the cube grouping structure.",
+
+  "type": "object",
+  "required": ["order", "levels"],
+
+  "properties": {
+
+    "order": {
+      "type": "integer",
+      "description": "Hilbert order k."
+    },
+
+    "levels": {
+      "type": "array",
+      "description": "Level definitions from level 0 (individual cubes, 8 vertices each) up to level k-1 (the whole curve).",
+      "items": {
+        "type": "object",
+        "required": ["level", "blockCount", "verticesPerBlock", "planesPerBlock"],
+        "properties": {
+          "level": {
+            "type": "integer",
+            "description": "Level index. 0 = cube (8 verts), 1 = super-cube (64 verts), etc."
+          },
+          "blockCount": {
+            "type": "integer",
+            "description": "Number of blocks at this level. = 8^(order-1-level)."
+          },
+          "verticesPerBlock": {
+            "type": "integer",
+            "description": "Vertices per block. = 8^(level+1)."
+          },
+          "planesPerBlock": {
+            "type": "integer",
+            "description": "Regular planes per block. = 3 × 8^level."
+          },
+          "childrenPerBlock": {
+            "type": "integer",
+            "const": 8,
+            "description": "Always 8 — the Hilbert subdivision factor."
+          }
+        }
+      }
+    },
+
+    "counts": {
+      "type": "object",
+      "description": "Summary counts for order-3 (current production configuration).",
+      "properties": {
+        "totalVertices":       { "type": "integer", "description": "8^order = 512 for order 3." },
+        "totalSegments":       { "type": "integer", "description": "8^order − 1 = 511." },
+        "totalMotifs":         { "type": "integer", "description": "8^(order−1) = 64 cube motifs for order 3." },
+        "totalRegularPlanes":  { "type": "integer", "description": "3 × 8^(order−1) = 192 regular planes for order 3." },
+        "totalBoundaryPlanes": { "type": "integer", "description": "Depends on Hilbert path orientation. Approximately 64-80 for order 3." }
+      }
+    }
+  }
+}

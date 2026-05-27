@@ -1,0 +1,29 @@
+// UI — wallet status and mint simulation controls.
+
+import { getWalletState } from '../wallet-nfts.js';
+import { mintSimulationSummary } from '../mint-simulator.js';
+
+export function updateWalletStatus(el) {
+  if (!el) return;
+  const state = getWalletState();
+  if (state.loading)       el.textContent = 'wallet: loading...';
+  else if (state.error)    el.textContent = `wallet: ${state.error}`;
+  else if (state.loaded)   el.textContent = `wallet: ${state.nfts.length} NFTs | normies ${state.normies.length} | non ${state.nonNormies.length}`;
+  else                     el.textContent = 'wallet: not loaded';
+}
+
+export function mintCountValue(input) {
+  return Math.max(1, Math.min(64, Math.floor(Number(input?.value) || 1)));
+}
+
+export function setMintCountValue(input, next) {
+  if (!input) return;
+  input.value = String(Math.max(1, Math.min(64, Math.floor(Number(next) || 1))));
+}
+
+export function updateMintStatus(el, uniqueMotifs) {
+  if (!el) return;
+  const summary = mintSimulationSummary();
+  const empty   = Math.max(0, uniqueMotifs.length - summary.slots);
+  el.textContent = `minted: ${summary.total} | normie ${summary.normies} | non ${summary.external} | empty slots: ${empty}`;
+}
