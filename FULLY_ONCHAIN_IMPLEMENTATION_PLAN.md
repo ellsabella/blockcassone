@@ -282,11 +282,11 @@ The final world supply is a 5th-order Hilbert cube:
 8^(5 - 1) = 4096 cube slots
 ```
 
-Each token should expose placement traits derived from its slot:
+Each token should expose placement traits derived from its slot. Indices are 0-based because the Hilbert path and contract storage are 0-based:
 
-- `Hilbert Slot`: the exact cube slot in the 5th-order path, `0..4095`.
-- `Neighbourhood`: the local 3rd-order Hilbert block containing the cube.
-- `Region`: the local 4th-order Hilbert block containing the cube.
+- `plot`: the exact cube slot in the 5th-order path, `0..4095`.
+- `neighbourhood`: the local 3rd-order Hilbert block containing the cube, `0..63`.
+- `region`: the local 4th-order Hilbert block containing the cube, `0..511`.
 
 For an order-5 world, the block math is:
 
@@ -296,6 +296,21 @@ neighbourhood(order 3) = floor(slot / 64)
 ```
 
 These traits should be emitted in token metadata and used by the offchain big-cube viewer for filtering, navigation, local context, and possible neighbourhood/region-level visual systems.
+
+The conceptual model is a city-like big block inhabited by the NFT entities that compose it. Source NFTs are not only visual inputs; they may represent agents, characters, tools, identities, or other entity-like contracts. At mint time, the offchain mint pipeline should capture any source-agent binding data exposed by OpenSea or source contracts and commit the relevant stable fields onchain.
+
+Agentic metadata requirements:
+
+- `Agentic`: binary `Y` / `N` trait.
+- `Agent ID`: stable agent binding identifier when available.
+- Agent data must be captured at mint time and stored or attested onchain if it affects permanent token traits or art.
+- Agentic status may affect the token renderer visually, especially in the city/big-block viewer.
+
+OpenSea API data may be used by the mint UI to discover agentic details, but the token must not depend on OpenSea after mint. Any OpenSea-derived agent fields used by the final NFT must be included in the signed mint payload and stored onchain, or be independently recoverable from source contracts.
+
+Initial OpenSea API probing shows that the account NFT list response does not currently include agent data, while the single-NFT detail response includes an `agent_binding` field. In the first sampled wallet responses this field was present but `null`. The mint UI should therefore fetch per-token details for the selected source NFT before minting, preserve the raw `agent_binding` payload for inspection, and only then derive the permanent `Agentic` and `Agent ID` values.
+
+Do not finalize the Solidity type for `Agent ID` until we have a positive `agent_binding` sample. If it is numeric, store `uint256 agentId`. If it is an opaque identifier, store a compact string or canonical `bytes32` plus enough renderer logic to expose the marketplace-readable value.
 
 ## Implementation Phases
 
@@ -364,6 +379,7 @@ These traits should be emitted in token metadata and used by the offchain big-cu
 - Exact Hilbert order and total cube supply.
 - Whether external source uniqueness is mandatory for all non-Normie NFTs.
 - Whether non-Normie v1 stores 2-bit bands only or allows grayscale payloads.
+- Exact positive OpenSea/source-contract schema for non-null `agent_binding` values.
 - Attestation signer model: project signer, threshold signers, or owner-controlled signer.
 - Randomness provider.
 - Renderer governance and owner renderer pinning.

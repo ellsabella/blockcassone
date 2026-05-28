@@ -36,6 +36,31 @@ function normalizeAddress(addr) {
   return String(addr || '').toLowerCase();
 }
 
+function extractAgentBinding(raw) {
+  const binding = raw?.agent_binding || raw?.nft?.agent_binding || null;
+  if (!binding) {
+    return { agentic: false, agentId: '', agentBinding: null };
+  }
+
+  const agentId =
+    binding.agent_id ||
+    binding.agentId ||
+    binding.identifier ||
+    binding.id ||
+    binding.token_id ||
+    binding.tokenId ||
+    binding.agent?.agent_id ||
+    binding.agent?.id ||
+    binding.agent?.identifier ||
+    '';
+
+  return {
+    agentic: true,
+    agentId: agentId === '' || agentId === undefined || agentId === null ? '' : String(agentId),
+    agentBinding: binding,
+  };
+}
+
 function isLikelySvgArtUrl(url) {
   const clean = String(url || '').trim().toLowerCase();
   if (!clean) return false;
@@ -82,7 +107,13 @@ function normalizeNft(raw, chain) {
     name: raw.name || raw.nft?.name || `${collectionSlug || 'NFT'} #${tokenId}`,
     collection: collectionSlug,
     imageUrl,
+    agentic: false,
+    agentId: '',
+    agentBinding: null,
+    agentBindingLoaded: false,
   };
+  Object.assign(normal, extractAgentBinding(raw));
+  normal.agentBindingLoaded = Boolean(raw.agent_binding !== undefined || raw.nft?.agent_binding !== undefined);
   normal.isNormie = normal.contract === NORMIES_CONTRACT;
   normal.normieId = normal.isNormie ? Number(normal.tokenId) : null;
   normal.isSvgArt = !normal.isNormie && isLikelySvgArtUrl(normal.imageUrl);
@@ -97,6 +128,16 @@ async function fetchWalletPage(address, chain, cursor) {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`OpenSea wallet fetch failed ${res.status}: ${text.slice(0, 160)}`);
+  }
+  return res.json();
+}
+
+async function fetchNftDetail(nft) {
+  const url = new URL(`/api/opensea/chain/${nft.chain}/contract/${nft.contract}/nfts/${nft.tokenId}`, window.location.origin);
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`OpenSea NFT detail fetch failed ${res.status}: ${text.slice(0, 160)}`);
   }
   return res.json();
 }
@@ -143,6 +184,8 @@ export async function loadWalletNfts(address, chain = 'ethereum') {
         imageUrl: n.imageUrl,
         collection: n.collection,
         name: n.name,
+        agentic: n.agentic,
+        agentId: n.agentId,
       })),
     });
     walletState = {
@@ -167,6 +210,23 @@ export async function loadWalletNfts(address, chain = 'ethereum') {
     notify();
     throw err;
   }
+}
+
+export async function loadAgentBindingForNft(nft) {
+  if (!nft || !nft.contract || !nft.tokenId) return null;
+  if (nft.agentBindingLoaded) return nft;
+
+  const detail = await fetchNftDetail(nft);
+  const agent = extractAgentBinding(detail.nft || detail);
+  Object.assign(nft, agent, { agentBindingLoaded: true });
+
+  const key = nftKey(nft);
+  for (const item of walletState.nfts) {
+    if (nftKey(item) === key) Object.assign(item, agent, { agentBindingLoaded: true });
+  }
+
+  notify();
+  return nft;
 }
 
 export function getWalletState() {

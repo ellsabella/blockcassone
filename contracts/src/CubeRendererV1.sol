@@ -76,11 +76,11 @@ contract CubeRendererV1 is ICubeRenderer {
         returns (string memory)
     {
         return string.concat(
-            _trait("Hilbert Slot", uint256(data.slot).toString()),
+            _trait("plot", uint256(data.slot).toString()),
             ",",
-            _trait("Region", regionForSlot(data.slot).toString()),
+            _trait("region", regionForSlot(data.slot).toString()),
             ",",
-            _trait("Neighbourhood", neighbourhoodForSlot(data.slot).toString())
+            _trait("neighbourhood", neighbourhoodForSlot(data.slot).toString())
         );
     }
 

@@ -42,9 +42,9 @@ contract CubeRendererV1Test is Test {
 
         string memory json = renderer.metadataJSON(cubeId);
         assertTrue(_contains(json, '"name":"Blockcassone Cube #1"'));
-        assertTrue(_contains(json, '"trait_type":"Hilbert Slot","value":"1734"'));
-        assertTrue(_contains(json, '"trait_type":"Region","value":"216"'));
-        assertTrue(_contains(json, '"trait_type":"Neighbourhood","value":"27"'));
+        assertTrue(_contains(json, '"trait_type":"plot","value":"1734"'));
+        assertTrue(_contains(json, '"trait_type":"region","value":"216"'));
+        assertTrue(_contains(json, '"trait_type":"neighbourhood","value":"27"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"Normie"'));
         assertTrue(_contains(json, '"image":"data:image/svg+xml;base64,'));
         assertTrue(_contains(json, '"animation_url":"data:text/html;base64,'));
@@ -55,9 +55,9 @@ contract CubeRendererV1Test is Test {
         uint256 cubeId = cubes.mintExternalERC721Cube(address(externalNft), 1, 64, bytes32("seed"));
 
         string memory json = renderer.metadataJSON(cubeId);
-        assertTrue(_contains(json, '"trait_type":"Hilbert Slot","value":"64"'));
-        assertTrue(_contains(json, '"trait_type":"Region","value":"8"'));
-        assertTrue(_contains(json, '"trait_type":"Neighbourhood","value":"1"'));
+        assertTrue(_contains(json, '"trait_type":"plot","value":"64"'));
+        assertTrue(_contains(json, '"trait_type":"region","value":"8"'));
+        assertTrue(_contains(json, '"trait_type":"neighbourhood","value":"1"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"External ERC-721"'));
         assertTrue(_contains(json, '"trait_type":"Payload Version","value":"0"'));
     }
