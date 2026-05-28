@@ -43,8 +43,9 @@ contract CubeRendererV1Test is Test {
         string memory json = renderer.metadataJSON(cubeId);
         assertTrue(_contains(json, '"name":"Blockcassone Cube #1"'));
         assertTrue(_contains(json, '"trait_type":"plot","value":"1734"'));
-        assertTrue(_contains(json, '"trait_type":"region","value":"216"'));
+        assertTrue(_contains(json, '"trait_type":"region","value":"3"'));
         assertTrue(_contains(json, '"trait_type":"neighbourhood","value":"27"'));
+        assertTrue(_contains(json, '"trait_type":"street","value":"216"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"Normie"'));
         assertTrue(_contains(json, '"trait_type":"Agentic","value":"N"'));
         assertTrue(_contains(json, '"trait_type":"Agent ID","value":"0"'));
@@ -58,8 +59,9 @@ contract CubeRendererV1Test is Test {
 
         string memory json = renderer.metadataJSON(cubeId);
         assertTrue(_contains(json, '"trait_type":"plot","value":"64"'));
-        assertTrue(_contains(json, '"trait_type":"region","value":"8"'));
+        assertTrue(_contains(json, '"trait_type":"region","value":"0"'));
         assertTrue(_contains(json, '"trait_type":"neighbourhood","value":"1"'));
+        assertTrue(_contains(json, '"trait_type":"street","value":"8"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"External ERC-721"'));
         assertTrue(_contains(json, '"trait_type":"Payload Version","value":"0"'));
         assertTrue(_contains(json, '"trait_type":"Agentic","value":"N"'));
@@ -114,12 +116,14 @@ contract CubeRendererV1Test is Test {
         assertTrue(_startsWith(renderer.animationURI(cubeId), "data:text/html;base64,"));
     }
 
-    function testRegionAndNeighbourhoodHelpers() public view {
+    function testRegionNeighbourhoodAndStreetHelpers() public view {
         assertEq(renderer.regionForSlot(0), 0);
-        assertEq(renderer.regionForSlot(7), 0);
-        assertEq(renderer.regionForSlot(8), 1);
+        assertEq(renderer.regionForSlot(511), 0);
+        assertEq(renderer.regionForSlot(512), 1);
         assertEq(renderer.neighbourhoodForSlot(63), 0);
         assertEq(renderer.neighbourhoodForSlot(64), 1);
+        assertEq(renderer.streetForSlot(7), 0);
+        assertEq(renderer.streetForSlot(8), 1);
     }
 
     function _startsWith(string memory value, string memory prefix) private pure returns (bool) {

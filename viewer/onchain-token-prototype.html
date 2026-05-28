@@ -49,8 +49,9 @@
       tokenId: 1,
       slot: 1734,
       hilbertOrder: 5,
+      regionOrder: 2,
       neighbourhoodOrder: 3,
-      regionOrder: 4,
+      streetOrder: 4,
       sourceKind: 2,
       sourceContract: "0x1234567890abcdef1234567890abcdef12345678",
       sourceTokenId: "42",
@@ -198,6 +199,7 @@
         " | slot " + TOKEN.slot +
         " | region " + regionIndex(TOKEN.slot, TOKEN.regionOrder) +
         " | neighbourhood " + regionIndex(TOKEN.slot, TOKEN.neighbourhoodOrder) +
+        " | street " + regionIndex(TOKEN.slot, TOKEN.streetOrder) +
         " | drag orbit / wheel zoom / double-click reset";
 
       requestAnimationFrame(frame);

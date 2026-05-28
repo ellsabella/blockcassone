@@ -18,7 +18,7 @@ Important current direction:
 - `CubeNFT` currently stores early plot/source/agent facts.
 - `agentic` and numeric `agentId` are permanent metadata fields for now.
 - Non-Normie flattened art payloads are attested before mint.
-- Placement is currently simple slot occupancy, but final placement is expected to become mutable world state.
+- Placement is currently simple slot occupancy, with plot, street, neighbourhood, and region derived from the slot. Final placement is expected to become mutable world state.
 
 Likely future contracts:
 

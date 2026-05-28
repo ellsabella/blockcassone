@@ -248,10 +248,10 @@ Responsibilities:
 - track occupied Hilbert slots
 - assign one random available slot per minted cube
 - expose occupancy for the world viewer
-- derive neighbourhood and region indices
+- derive street, neighbourhood, and region indices
 - store neighbourhood environment type
-- track neighbourhood and region population
-- track neighbourhood and region agentic population
+- track street, neighbourhood, and region population
+- track street, neighbourhood, and region agentic population
 - support owner movement to vacant plots
 - support consolidation checks for full-neighbourhood ownership
 
@@ -262,8 +262,9 @@ Randomness options:
 - avoid relying only on block data if placement has market value
 
 Placement policy should be developed first in the dev simulator. Candidate
-rules include maximum agentic cubes per neighbourhood, maximum agentic cubes per
-region, and environment-specific restrictions.
+rules include maximum agentic cubes per street, maximum agentic cubes per
+neighbourhood, maximum agentic cubes per region, and environment-specific
+restrictions.
 
 ### Renderer Registry
 
@@ -404,7 +405,7 @@ Purpose:
 - serve as the project home and canonical mint UI
 - render natural neighbourhood environments before they are occupied
 - preview movement to vacant plots
-- show neighbourhood and region population
+- show street, neighbourhood, and region population
 - show consolidation eligibility
 
 Deployment:
@@ -443,7 +444,7 @@ Immutable:
 
 Evolvable:
 
-- Hilbert plot / neighbourhood / region after movement
+- Hilbert plot / street / neighbourhood / region after movement
 - renderer version
 - global collection epoch
 - cube behavior params

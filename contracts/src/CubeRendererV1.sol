@@ -80,7 +80,9 @@ contract CubeRendererV1 is ICubeRenderer {
             ",",
             _trait("region", regionForSlot(data.slot).toString()),
             ",",
-            _trait("neighbourhood", neighbourhoodForSlot(data.slot).toString())
+            _trait("neighbourhood", neighbourhoodForSlot(data.slot).toString()),
+            ",",
+            _trait("street", streetForSlot(data.slot).toString())
         );
     }
 
@@ -135,6 +137,8 @@ contract CubeRendererV1 is ICubeRenderer {
             regionForSlot(data.slot).toString(),
             " / neighbourhood ",
             neighbourhoodForSlot(data.slot).toString(),
+            " / street ",
+            streetForSlot(data.slot).toString(),
             "</text>",
             "</svg>"
         );
@@ -157,6 +161,8 @@ contract CubeRendererV1 is ICubeRenderer {
             regionForSlot(data.slot).toString(),
             " / neighbourhood ",
             neighbourhoodForSlot(data.slot).toString(),
+            " / street ",
+            streetForSlot(data.slot).toString(),
             "</p><p>Final orbit, zoom, glass, voxel, contour, and banner rendering will be supplied by renderer asset chunks.</p></main></body></html>"
         );
 
@@ -164,11 +170,15 @@ contract CubeRendererV1 is ICubeRenderer {
     }
 
     function regionForSlot(uint32 slot) public pure returns (uint256) {
-        return uint256(slot) / 8;
+        return uint256(slot) / 512;
     }
 
     function neighbourhoodForSlot(uint32 slot) public pure returns (uint256) {
         return uint256(slot) / 64;
+    }
+
+    function streetForSlot(uint32 slot) public pure returns (uint256) {
+        return uint256(slot) / 8;
     }
 
     function sourceKindName(uint8 sourceKind) public pure returns (string memory) {

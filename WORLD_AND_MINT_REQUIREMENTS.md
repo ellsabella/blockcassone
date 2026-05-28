@@ -64,15 +64,17 @@ The final world supply remains a 5th-order Hilbert cube:
 
 ```text
 4096 plots
+8 regions
 64 neighbourhoods
-512 regions
+512 streets
 ```
 
 Traits already required:
 
 - `plot`: 0-based Hilbert slot, `0..4095`.
+- `region`: 0-based 4th-order Hilbert block, `0..7`; 512 plots each.
 - `neighbourhood`: 0-based neighbourhood, `0..63`.
-- `region`: 0-based region, `0..511`.
+- `street`: 0-based 8-cube Hilbert subset, `0..511`.
 - `Agentic`: `Y` / `N`.
 - `Agent ID`: numeric agent binding ID, `0` when not agentic.
 - `Source Contract`.
@@ -82,8 +84,10 @@ New dynamic or world-derived traits under consideration:
 
 - `Environment`
 - `Neighbourhood Population`
+- `Street Population`
 - `Region Population`
 - `Neighbourhood Agents`
+- `Street Agents`
 - `Region Agents`
 
 Population traits are dynamic. They may change when new cubes mint, move, or
@@ -99,6 +103,7 @@ The contract architecture should allow placement policies such as:
 - one cube per plot
 - source uniqueness
 - maximum agentic cubes per neighbourhood
+- maximum agentic cubes per street
 - maximum agentic cubes per region
 - possible environment-specific placement rules
 - possible community or wallet preference rules
@@ -116,7 +121,7 @@ communities.
 
 Movement means:
 
-- `plot`, `neighbourhood`, and `region` are mutable world-state facts.
+- `plot`, `street`, `neighbourhood`, and `region` are mutable world-state facts.
 - source identity remains permanent.
 - slot occupancy must update atomically.
 - population counters must update atomically.
@@ -159,6 +164,7 @@ Responsibilities:
 - plot occupancy
 - movement
 - neighbourhood and region derivation
+- street derivation
 - environment assignment
 - population counters
 - agentic population counters

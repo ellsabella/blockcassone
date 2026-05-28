@@ -14,7 +14,7 @@ Initial test coverage should focus on:
 
 Future world-state test coverage should include:
 
-- neighbourhood and region derivation.
+- street, neighbourhood, and region derivation.
 - environment assignment.
 - population counter updates on mint and movement.
 - agentic population caps.
