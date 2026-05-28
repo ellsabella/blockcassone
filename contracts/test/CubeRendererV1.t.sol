@@ -47,6 +47,7 @@ contract CubeRendererV1Test is Test {
         assertTrue(_contains(json, '"trait_type":"neighbourhood","value":"27"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"Normie"'));
         assertTrue(_contains(json, '"trait_type":"Agentic","value":"N"'));
+        assertTrue(_contains(json, '"trait_type":"Agent ID","value":"0"'));
         assertTrue(_contains(json, '"image":"data:image/svg+xml;base64,'));
         assertTrue(_contains(json, '"animation_url":"data:text/html;base64,'));
     }
@@ -73,11 +74,28 @@ contract CubeRendererV1Test is Test {
             128,
             bytes32("seed"),
             1,
-            true
+            true,
+            32813
         );
 
         string memory json = renderer.metadataJSON(cubeId);
         assertTrue(_contains(json, '"trait_type":"Agentic","value":"Y"'));
+        assertTrue(_contains(json, '"trait_type":"Agent ID","value":"32813"'));
+    }
+
+    function testMetadataJSONIncludesNormieAgentId() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintNormieCubeForWithAgent(
+            MINTER,
+            101,
+            128,
+            bytes32("seed"),
+            32813
+        );
+
+        string memory json = renderer.metadataJSON(cubeId);
+        assertTrue(_contains(json, '"trait_type":"Agentic","value":"Y"'));
+        assertTrue(_contains(json, '"trait_type":"Agent ID","value":"32813"'));
     }
 
     function testCubeNFTTokenURIDelegatesToRenderer() public {

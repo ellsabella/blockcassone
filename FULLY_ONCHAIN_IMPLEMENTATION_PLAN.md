@@ -308,11 +308,11 @@ Agentic metadata requirements:
 
 OpenSea API data may be used by the mint UI to discover agentic details, but the token must not depend on OpenSea after mint. Any OpenSea-derived agent fields used by the final NFT must be included in the signed mint payload and stored onchain, or be independently recoverable from source contracts.
 
-The current contract boundary stores the stable `agentic` boolean in `CubeNFT.CubeData`, binds it into the non-Normie flattening attestation, and renders it as the `Agentic` metadata trait. `Agent ID` remains intentionally deferred until a non-null `agent_binding` sample confirms the identifier format.
+The current contract boundary stores the stable `agentic` boolean and numeric `agentId` in `CubeNFT.CubeData`, binds both fields into the non-Normie flattening attestation, and renders them as `Agentic` and `Agent ID` metadata traits.
 
-Initial OpenSea API probing shows that the account NFT list response does not currently include agent data, while the single-NFT detail response includes an `agent_binding` field. In the first sampled wallet responses this field was present but `null`. The mint UI should therefore fetch per-token details for the selected source NFT before minting, preserve the raw `agent_binding` payload for inspection, and only then derive the permanent `Agentic` and `Agent ID` values.
+Initial OpenSea API probing shows that the account NFT list response does not currently include agent data, while the single-NFT detail response includes an `agent_binding` field. A positive Normies sample returned `agent_binding.agent_id` as a numeric string, with matching `agent.token_id`, so the current onchain representation uses `uint256 agentId` and `0` as the non-agent sentinel. The mint UI should fetch per-token details for the selected source NFT before minting, preserve the raw `agent_binding` payload for inspection, and derive permanent `Agentic` / `Agent ID` values from that detail response.
 
-Do not finalize the Solidity type for `Agent ID` until we have a positive `agent_binding` sample. If it is numeric, store `uint256 agentId`. If it is an opaque identifier, store a compact string or canonical `bytes32` plus enough renderer logic to expose the marketplace-readable value.
+If future non-Normies use a non-numeric binding ID, add a second versioned source-agent record rather than overloading `agentId`.
 
 ## Implementation Phases
 
@@ -381,7 +381,7 @@ Do not finalize the Solidity type for `Agent ID` until we have a positive `agent
 - Exact Hilbert order and total cube supply.
 - Whether external source uniqueness is mandatory for all non-Normie NFTs.
 - Whether non-Normie v1 stores 2-bit bands only or allows grayscale payloads.
-- Exact positive OpenSea/source-contract schema for non-null `agent_binding` values.
+- Whether to also store agent contract, binding contract, and registering wallet from OpenSea `agent_binding`.
 - Attestation signer model: project signer, threshold signers, or owner-controlled signer.
 - Randomness provider.
 - Renderer governance and owner renderer pinning.

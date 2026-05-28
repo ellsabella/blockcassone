@@ -161,6 +161,15 @@ contract FlatteningAttestationTest is Test {
         verifier.verifyAttestation(attestation, signature);
     }
 
+    function testSignatureBindsAgentId() public {
+        FlatteningAttestation.Attestation memory attestation = _attestation(1, block.timestamp + 1 days);
+        bytes memory signature = _sign(attestation, SIGNER_KEY);
+        attestation.agentId = 32813;
+
+        vm.expectRevert();
+        verifier.verifyAttestation(attestation, signature);
+    }
+
     function _attestation(uint256 nonce, uint256 deadline)
         private
         pure
@@ -172,6 +181,7 @@ contract FlatteningAttestationTest is Test {
             sourceTokenId: 42,
             payloadVersion: 1,
             agentic: false,
+            agentId: 0,
             flatteningVersion: 1,
             payloadHash: keccak256("payload"),
             nonce: nonce,

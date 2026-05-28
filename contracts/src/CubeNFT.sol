@@ -16,11 +16,25 @@ contract CubeNFT is ERC721, Ownable {
         uint8 rendererVersion;
         uint8 payloadVersion;
         bool agentic;
+        uint256 agentId;
         uint64 mintedAt;
         uint256 sourceChainId;
         address sourceContract;
         uint256 sourceTokenId;
         bytes32 seed;
+    }
+
+    struct MintParams {
+        address to;
+        uint32 slot;
+        uint8 sourceKind;
+        address sourceContract;
+        uint256 sourceTokenId;
+        bytes32 sourceKey;
+        bytes32 seed;
+        uint8 payloadVersion;
+        bool agentic;
+        uint256 agentId;
     }
 
     error InvalidNormieContract();
@@ -31,6 +45,7 @@ contract CubeNFT is ERC721, Ownable {
     error NormieAlreadyCubed(uint256 normieId, uint256 cubeId);
     error SourceAlreadyCubed(bytes32 sourceKey, uint256 cubeId);
     error ExternalSourceIsNormie();
+    error InvalidAgentBinding(bool agentic, uint256 agentId);
     error NonexistentCube(uint256 cubeId);
     error RendererNotSet();
 
@@ -42,6 +57,7 @@ contract CubeNFT is ERC721, Ownable {
         address sourceContract,
         uint256 sourceTokenId,
         bool agentic,
+        uint256 agentId,
         bytes32 seed
     );
     event RendererUpdated(address indexed oldRenderer, address indexed newRenderer);
@@ -94,7 +110,7 @@ contract CubeNFT is ERC721, Ownable {
         _requireSourceOwner(normieContract, normieId, minter);
 
         bytes32 key = sourceKey(block.chainid, normieContract, normieId);
-        cubeId = _mintCube(
+        cubeId = _mintCube(_mintParams(
             minter,
             slot,
             SOURCE_KIND_NORMIE,
@@ -103,8 +119,37 @@ contract CubeNFT is ERC721, Ownable {
             key,
             seed,
             0,
-            false
-        );
+            false,
+            0
+        ));
+        cubeForNormieId[normieId] = cubeId;
+    }
+
+    function mintNormieCubeForWithAgent(
+        address minter,
+        uint256 normieId,
+        uint32 slot,
+        bytes32 seed,
+        uint256 agentId
+    ) external onlyOwner returns (uint256 cubeId) {
+        uint256 existingCubeId = cubeForNormieId[normieId];
+        if (existingCubeId != 0) revert NormieAlreadyCubed(normieId, existingCubeId);
+
+        _requireSourceOwner(normieContract, normieId, minter);
+
+        bytes32 key = sourceKey(block.chainid, normieContract, normieId);
+        cubeId = _mintCube(_mintParams(
+            minter,
+            slot,
+            SOURCE_KIND_NORMIE,
+            normieContract,
+            normieId,
+            key,
+            seed,
+            0,
+            true,
+            agentId
+        ));
         cubeForNormieId[normieId] = cubeId;
     }
 
@@ -121,7 +166,8 @@ contract CubeNFT is ERC721, Ownable {
             slot,
             seed,
             0,
-            false
+            false,
+            0
         );
     }
 
@@ -139,7 +185,8 @@ contract CubeNFT is ERC721, Ownable {
             slot,
             seed,
             0,
-            false
+            false,
+            0
         );
     }
 
@@ -158,7 +205,8 @@ contract CubeNFT is ERC721, Ownable {
             slot,
             seed,
             payloadVersion,
-            false
+            false,
+            0
         );
     }
 
@@ -169,7 +217,8 @@ contract CubeNFT is ERC721, Ownable {
         uint32 slot,
         bytes32 seed,
         uint8 payloadVersion,
-        bool agentic
+        bool agentic,
+        uint256 agentId
     ) external onlyOwner returns (uint256 cubeId) {
         cubeId = _mintExternalERC721CubeFor(
             minter,
@@ -178,7 +227,8 @@ contract CubeNFT is ERC721, Ownable {
             slot,
             seed,
             payloadVersion,
-            agentic
+            agentic,
+            agentId
         );
     }
 
@@ -189,7 +239,8 @@ contract CubeNFT is ERC721, Ownable {
         uint32 slot,
         bytes32 seed,
         uint8 payloadVersion,
-        bool agentic
+        bool agentic,
+        uint256 agentId
     ) private returns (uint256 cubeId) {
         if (sourceContract == normieContract) revert ExternalSourceIsNormie();
         if (sourceContract.code.length == 0) revert InvalidSourceContract();
@@ -197,7 +248,7 @@ contract CubeNFT is ERC721, Ownable {
         _requireSourceOwner(sourceContract, sourceTokenId, minter);
 
         bytes32 key = sourceKey(block.chainid, sourceContract, sourceTokenId);
-        cubeId = _mintCube(
+        cubeId = _mintCube(_mintParams(
             minter,
             slot,
             SOURCE_KIND_EXTERNAL_ERC721,
@@ -206,8 +257,9 @@ contract CubeNFT is ERC721, Ownable {
             key,
             seed,
             payloadVersion,
-            agentic
-        );
+            agentic,
+            agentId
+        ));
     }
 
     function cubeData(uint256 cubeId) external view returns (CubeData memory data) {
@@ -239,7 +291,7 @@ contract CubeNFT is ERC721, Ownable {
         return keccak256(abi.encode(chainId, sourceContract, sourceTokenId));
     }
 
-    function _mintCube(
+    function _mintParams(
         address to,
         uint32 slot,
         uint8 sourceKind,
@@ -248,35 +300,67 @@ contract CubeNFT is ERC721, Ownable {
         bytes32 key,
         bytes32 seed,
         uint8 payloadVersion,
-        bool agentic
-    ) private returns (uint256 cubeId) {
-        if (slot >= totalSlots) revert InvalidSlot(slot);
-
-        uint256 existingSlotCubeId = cubeForSlot[slot];
-        if (existingSlotCubeId != 0) revert SlotOccupied(slot, existingSlotCubeId);
-
-        uint256 existingSourceCubeId = cubeForSourceKey[key];
-        if (existingSourceCubeId != 0) revert SourceAlreadyCubed(key, existingSourceCubeId);
-
-        cubeId = _nextCubeId++;
-        cubeForSlot[slot] = cubeId;
-        cubeForSourceKey[key] = cubeId;
-        _cubeData[cubeId] = CubeData({
+        bool agentic,
+        uint256 agentId
+    ) private pure returns (MintParams memory params) {
+        params = MintParams({
+            to: to,
             slot: slot,
             sourceKind: sourceKind,
-            rendererVersion: 1,
-            payloadVersion: payloadVersion,
-            agentic: agentic,
-            mintedAt: uint64(block.timestamp),
-            sourceChainId: block.chainid,
             sourceContract: sourceContract,
             sourceTokenId: sourceTokenId,
-            seed: seed
+            sourceKey: key,
+            seed: seed,
+            payloadVersion: payloadVersion,
+            agentic: agentic,
+            agentId: agentId
+        });
+    }
+
+    function _mintCube(MintParams memory params) private returns (uint256 cubeId) {
+        if (params.agentic == (params.agentId == 0)) {
+            revert InvalidAgentBinding(params.agentic, params.agentId);
+        }
+        if (params.slot >= totalSlots) revert InvalidSlot(params.slot);
+
+        uint256 existingSlotCubeId = cubeForSlot[params.slot];
+        if (existingSlotCubeId != 0) revert SlotOccupied(params.slot, existingSlotCubeId);
+
+        uint256 existingSourceCubeId = cubeForSourceKey[params.sourceKey];
+        if (existingSourceCubeId != 0) {
+            revert SourceAlreadyCubed(params.sourceKey, existingSourceCubeId);
+        }
+
+        cubeId = _nextCubeId++;
+        cubeForSlot[params.slot] = cubeId;
+        cubeForSourceKey[params.sourceKey] = cubeId;
+        _cubeData[cubeId] = CubeData({
+            slot: params.slot,
+            sourceKind: params.sourceKind,
+            rendererVersion: 1,
+            payloadVersion: params.payloadVersion,
+            agentic: params.agentic,
+            agentId: params.agentId,
+            mintedAt: uint64(block.timestamp),
+            sourceChainId: block.chainid,
+            sourceContract: params.sourceContract,
+            sourceTokenId: params.sourceTokenId,
+            seed: params.seed
         });
 
-        _safeMint(to, cubeId);
+        _safeMint(params.to, cubeId);
 
-        emit CubeMinted(cubeId, to, slot, sourceKind, sourceContract, sourceTokenId, agentic, seed);
+        emit CubeMinted(
+            cubeId,
+            params.to,
+            params.slot,
+            params.sourceKind,
+            params.sourceContract,
+            params.sourceTokenId,
+            params.agentic,
+            params.agentId,
+            params.seed
+        );
     }
 
     function _requireSourceOwner(address sourceContract, uint256 sourceTokenId, address expectedOwner)

@@ -19,6 +19,7 @@ contract CubeMintController {
         uint256 sourceTokenId,
         uint32 slot,
         bool agentic,
+        uint256 agentId,
         bytes32 payloadHash
     );
 
@@ -69,7 +70,8 @@ contract CubeMintController {
             slot,
             seed,
             NonNormieArt.PAYLOAD_VERSION_TONAL_BANDS_2BIT,
-            attestation.agentic
+            attestation.agentic,
+            attestation.agentId
         );
         artStore.recordTonalBands2Bit(cubeId, tonalBands2Bit);
 
@@ -80,6 +82,7 @@ contract CubeMintController {
             sourceTokenId,
             slot,
             attestation.agentic,
+            attestation.agentId,
             payloadHash
         );
     }

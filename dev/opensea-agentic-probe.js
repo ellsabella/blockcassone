@@ -69,6 +69,30 @@ async function fetchJson(path) {
 async function main() {
   loadDotEnv('.env');
   const apiKey = process.env.OPENSEA_API_KEY;
+  if (process.argv[2] === '--nft') {
+    const chain = process.argv[3] || 'ethereum';
+    const contract = process.argv[4];
+    const identifiers = process.argv.slice(5);
+    if (!apiKey) throw new Error('Missing OPENSEA_API_KEY');
+    if (!/^0x[a-fA-F0-9]{40}$/.test(contract || '')) {
+      throw new Error('Usage: node dev/opensea-agentic-probe.js --nft ethereum 0xContract tokenId [tokenId...]');
+    }
+    if (!identifiers.length) throw new Error('Pass at least one token ID');
+
+    for (const identifier of identifiers) {
+      const detail = await fetchJson(`chain/${chain}/contract/${contract}/nfts/${identifier}`);
+      const nft = detail.nft || detail;
+      const hits = findAgenticValues(nft);
+      console.log(`\n${chain}:${contract} #${identifier}`);
+      console.log(JSON.stringify({
+        name: nft.name,
+        agent_binding: nft.agent_binding,
+        agentLookingFields: hits,
+      }, null, 2));
+    }
+    return;
+  }
+
   const address = process.argv[2] || process.env.OPENSEA_DEFAULT_WALLET;
   const chain = process.argv[3] || 'ethereum';
   if (!apiKey) throw new Error('Missing OPENSEA_API_KEY');

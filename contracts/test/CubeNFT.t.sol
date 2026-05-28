@@ -66,6 +66,7 @@ contract CubeNFTTest is Test {
         assertEq(data.rendererVersion, 1);
         assertEq(data.payloadVersion, 0);
         assertFalse(data.agentic);
+        assertEq(data.agentId, 0);
         assertEq(data.sourceChainId, block.chainid);
         assertEq(data.sourceContract, address(normies));
         assertEq(data.sourceTokenId, 101);
@@ -90,6 +91,7 @@ contract CubeNFTTest is Test {
         assertEq(data.slot, 9);
         assertEq(data.sourceKind, cubes.SOURCE_KIND_EXTERNAL_ERC721());
         assertFalse(data.agentic);
+        assertEq(data.agentId, 0);
         assertEq(data.sourceContract, address(externalNft));
         assertEq(data.sourceTokenId, 1);
         assertEq(data.seed, seed);
@@ -104,12 +106,36 @@ contract CubeNFTTest is Test {
             12,
             bytes32("seed"),
             1,
-            true
+            true,
+            32813
         );
 
         CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
         assertTrue(data.agentic);
+        assertEq(data.agentId, 32813);
         assertEq(data.payloadVersion, 1);
+    }
+
+    function testOwnerCanMintNormieCubeWithAgentId() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintNormieCubeForWithAgent(
+            MINTER,
+            101,
+            12,
+            bytes32("seed"),
+            32813
+        );
+
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
+        assertTrue(data.agentic);
+        assertEq(data.agentId, 32813);
+        assertEq(cubes.cubeForNormieId(101), cubeId);
+    }
+
+    function testCannotMintAgenticCubeWithoutAgentId() public {
+        vm.prank(OWNER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.InvalidAgentBinding.selector, true, 0));
+        cubes.mintNormieCubeForWithAgent(MINTER, 101, 12, bytes32("seed"), 0);
     }
 
     function testOwnerCanMintNormieCubeForMinter() public {

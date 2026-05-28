@@ -94,7 +94,9 @@ contract CubeRendererV1 is ICubeRenderer {
             ",",
             _trait("Source Token ID", data.sourceTokenId.toString()),
             ",",
-            _trait("Agentic", data.agentic ? "Y" : "N")
+            _trait("Agentic", data.agentic ? "Y" : "N"),
+            ",",
+            _trait("Agent ID", data.agentId.toString())
         );
     }
 
