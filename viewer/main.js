@@ -18,9 +18,8 @@ import {
 import { buildHilbertLines, buildFullHilbertPath } from './hilbert-lines.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
 import { buildStoneWalker }   from './materials/stone-walker.js';
-import { buildNonNormieEdgeLattice } from './non-normie-edge-lattice.js';
 import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner } from './non-normie-art-plane.js';
-import { loadWalletNfts, setWalletDataReadyCallback } from './wallet-nfts.js';
+import { isAgenticNonNormieCube, loadWalletNfts, setWalletDataReadyCallback } from './wallet-nfts.js';
 import { serializeAllPlaced } from '/core/serialize.js';
 import {
   clearMintSimulationSilent,
@@ -34,6 +33,7 @@ import {
 } from './mint-simulator.js';
 import {
   applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor, applyBannerGlitch,
+  applyAgenticAwakening, applyAgenticBannerPulse,
 } from './scene/styling.js';
 import {
   ensureMotifCategory, visibleMotifs, visiblePlanes, categoryCounts,
@@ -286,9 +286,10 @@ function resetMintAndScene() {
 }
 
 
-function runMintSimulation() {
+async function runMintSimulation() {
+  if (mintRunBtn) mintRunBtn.disabled = true;
   try {
-    const minted = simulateMintBatch(_mintCountValue(), uniqueMotifs);
+    const minted = await simulateMintBatch(_mintCountValue(), uniqueMotifs);
     clearGeneratedMeshes();
     if (minted.length > 0) {
       const first = minted[0].slot;
@@ -305,6 +306,8 @@ function runMintSimulation() {
     rebuildScene();
   } catch (err) {
     log(`mint failed: ${String(err?.message || err)}`);
+  } finally {
+    if (mintRunBtn) mintRunBtn.disabled = false;
   }
 }
 
@@ -793,40 +796,40 @@ function rebuildScene() {
   // --- Per-cube items ---
   for (const motifIdx of motifsToRender) {
     const cat = ensureMotifCategory(motifIdx);
+    const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
     const dim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
       ? 0.15 : 1.0;
 
     if (showCubeGlass && mode === '3D') {
       const items = buildCubeGlass(motifIdx, hilbert, gl, meshes, mode);
       applyMotifStyle(items, cat, motifIdx);
+      if (agenticNonNormie) applyAgenticAwakening(items);
       if (items?.length) sceneItems.push(...items);
     }
 
     const walkerItems = buildStoneWalker(motifIdx, hilbert, serializedPlanes, gl, meshes);
     applyMotifStyle(walkerItems, cat, motifIdx);
+    if (agenticNonNormie) applyAgenticAwakening(walkerItems);
     applyDim(walkerItems, dim);
     if (walkerItems?.length) sceneItems.push(...walkerItems);
 
     const voxelItems = build3DVoxels(motifIdx, hilbert, serializedPlanes, gl, meshes);
     applyMotifStyle(voxelItems, cat, motifIdx);
+    if (agenticNonNormie) applyAgenticAwakening(voxelItems);
     applyDim(voxelItems, dim);
     if (voxelItems?.length) sceneItems.push(...voxelItems);
 
     const hlItems = buildHilbertLines(motifIdx, hilbert, gl, meshes);
     applyMotifStyle(hlItems, cat, motifIdx);
+    if (agenticNonNormie) applyAgenticAwakening(hlItems);
     applyDim(hlItems, dim);
     if (hlItems?.length) sceneItems.push(...hlItems);
 
     const cardItems = buildCubeCardioid(motifIdx, hilbert, serializedPlanes, gl, meshes);
     applyMotifStyle(cardItems, cat, motifIdx);
+    if (agenticNonNormie) applyAgenticAwakening(cardItems);
     applyDim(cardItems, dim);
     if (cardItems?.length) sceneItems.push(...cardItems);
-
-    if (!isNormieCube(motifIdx)) {
-      const latticeItems = buildNonNormieEdgeLattice(motifIdx, hilbert, gl, meshes);
-      applyDim(latticeItems, dim);
-      if (latticeItems?.length) sceneItems.push(...latticeItems);
-    }
   }
 
   // Light markers — once in any non-2D mode, anchored to the active cube.
@@ -873,6 +876,7 @@ function rebuildScene() {
   for (const plane of planesToRender) {
     const motifIdx = plane.hierarchy.motifIndex;
     const cat      = ensureMotifCategory(motifIdx);
+    const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
     const dim      = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
       ? 0.15 : 1.0;
     const cubeCtx = cubeCtxMap[motifIdx];
@@ -889,17 +893,28 @@ function rebuildScene() {
       }
     } else {
       const artItems = buildNonNormieArtworkPlane(plane, serializedPlanes, gl, meshes);
+      if (agenticNonNormie) applyAgenticAwakening(artItems);
       applyDim(artItems, dim);
       if (artItems?.length) sceneItems.push(...artItems);
 
       const nonNormieWalkerItems = buildNonNormieWalker(plane, serializedPlanes, gl, meshes);
+      if (agenticNonNormie) applyAgenticAwakening(nonNormieWalkerItems);
       applyDim(nonNormieWalkerItems, dim);
       if (nonNormieWalkerItems?.length) sceneItems.push(...nonNormieWalkerItems);
 
       const bannerItems = buildNonNormieBanner(plane, serializedPlanes, gl, meshes);
       applyBannerGlitch(bannerItems, null);
+      if (agenticNonNormie) applyAgenticBannerPulse(bannerItems);
       applyDim(bannerItems, dim);
       if (bannerItems?.length) sceneItems.push(...bannerItems);
+
+      if (agenticNonNormie) {
+        const forestItems = buildForestPlane(plane, hilbert, gl, meshes, mode, cubeCtx);
+        const items = Array.isArray(forestItems) ? forestItems : (forestItems ? [forestItems] : []);
+        applyAgenticAwakening(items);
+        applyDim(items, dim);
+        if (items.length) sceneItems.push(...items);
+      }
     }
 
     const outlineItems = build2DOutline(plane, gl, meshes);

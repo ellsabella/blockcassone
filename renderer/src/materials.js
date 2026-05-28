@@ -40,7 +40,7 @@ const STANDARD_UNIFORMS = [
   'uCamRight', 'uCamUp',                                                // camera basis
   'uNormieTex',                                                         // normie pixel overlay
   'uLightScale', 'uCubeCenter', 'uCubeHalfSize',                        // per-cube light anchoring
-  'uTextTex', 'uMode', 'uGlitch',                                       // text-banner texture + mode + glitch
+  'uTextTex', 'uMode', 'uGlitch', 'uTimeScale',                         // text-banner texture + mode + glitch
 ];
 
 // ---------- Program compilation ----------

@@ -113,7 +113,7 @@ function normalizeNft(raw, chain) {
     agentBindingLoaded: false,
   };
   Object.assign(normal, extractAgentBinding(raw));
-  normal.agentBindingLoaded = Boolean(raw.agent_binding !== undefined || raw.nft?.agent_binding !== undefined);
+  normal.agentBindingLoaded = Boolean(normal.agentBinding);
   normal.isNormie = normal.contract === NORMIES_CONTRACT;
   normal.normieId = normal.isNormie ? Number(normal.tokenId) : null;
   normal.isSvgArt = !normal.isNormie && isLikelySvgArtUrl(normal.imageUrl);
@@ -258,6 +258,8 @@ export function getWalletAssignmentForCube(motifIdx) {
       imageUrl: nft.imageUrl,
       name: nft.name,
       collection: nft.collection,
+      agentic: nft.agentic,
+      agentId: nft.agentId,
     });
   }
   return nft;
@@ -271,6 +273,11 @@ export function isAssignedNormieCube(motifIdx) {
 export function normieIdFromAssignedNft(motifIdx) {
   const nft = getWalletAssignmentForCube(motifIdx);
   return nft?.isNormie ? nft.normieId : null;
+}
+
+export function isAgenticNonNormieCube(motifIdx) {
+  const nft = getWalletAssignmentForCube(motifIdx);
+  return Boolean(nft && !nft.isNormie && nft.agentic);
 }
 
 export function ensureNonNormieGridFetched(motifIdx) {

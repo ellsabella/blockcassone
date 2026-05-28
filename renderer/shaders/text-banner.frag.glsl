@@ -15,6 +15,7 @@ uniform vec3      uTint;
 uniform float     uAlpha;
 uniform float     uMode;
 uniform float     uGlitch;
+uniform float     uTimeScale;
 uniform float     uTime;
 
 out vec4 fragColor;
@@ -25,10 +26,11 @@ float rand(vec2 co) {
 
 void main() {
   vec2 uv = vUv;
+  float timeScale = max(uTimeScale, 1.0);
 
   // Scanline tear: displace a random subset of horizontal bands.
   float row       = floor(uv.y * 64.0);
-  float tearSeed  = rand(vec2(row, floor(uTime * 6.0)));
+  float tearSeed  = rand(vec2(row, floor(uTime * 6.0 * timeScale)));
   float tearThresh = 1.0 - uGlitch * 0.70;
   float tearAmt   = (tearSeed > tearThresh) ? (tearSeed - tearThresh) * uGlitch * 0.45 : 0.0;
   uv.x = fract(uv.x + tearAmt);

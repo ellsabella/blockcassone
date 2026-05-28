@@ -60,6 +60,29 @@ export function applyAwakenedPulse(items, motifIdx) {
   }
 }
 
+export function applyAgenticAwakening(items) {
+  if (!items) return;
+  for (const it of items) {
+    if (!it || !it.uniforms) continue;
+    if (it.uniforms.uLineOpacity !== undefined) it.uniforms.uLineOpacity *= 1.25;
+    if (it.uniforms.uAlpha       !== undefined) it.uniforms.uAlpha       *= 1.18;
+    if (it.uniforms.uOpacity     !== undefined) it.uniforms.uOpacity     *= 1.18;
+    if (it.uniforms.uLightScale  !== undefined) it.uniforms.uLightScale  *= 1.45;
+    it.awakenedLights = true;
+    it.lightSpeedMult = 1.65;
+    it.lightIntensityScale = (it.lightIntensityScale ?? 1.0) * 1.35;
+  }
+}
+
+export function applyAgenticBannerPulse(items) {
+  if (!items) return;
+  for (const it of items) {
+    if (!it || !it.uniforms) continue;
+    it.uniforms.uGlitch = Math.max(it.uniforms.uGlitch ?? 0, 0.85);
+    it.uniforms.uTimeScale = 2.1;
+  }
+}
+
 // category must be pre-resolved by caller (via ensureMotifCategory).
 export function applyMotifStyle(items, category, motifIdx) {
   if (category === 0) applyBurnedDesaturation(items);

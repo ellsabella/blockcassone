@@ -1,4 +1,4 @@
-import { NORMIES_CONTRACT, getWalletState, nftKey } from './wallet-nfts.js';
+import { NORMIES_CONTRACT, getWalletState, loadAgentBindingForNft, nftKey } from './wallet-nfts.js';
 import { hashInt as hash1 } from './tree-walker.js';
 
 let minted = [];
@@ -106,7 +106,7 @@ function mintOne(nft, slot) {
   return cube;
 }
 
-export function simulateMintBatch(count, allSlots) {
+export async function simulateMintBatch(count, allSlots) {
   const wallet = getWalletState();
   if (!wallet.loaded) throw new Error('Load wallet NFTs before minting');
   const requested = Math.max(0, Math.floor(Number(count) || 0));
@@ -119,6 +119,8 @@ export function simulateMintBatch(count, allSlots) {
   if (sources.length < requested) {
     sources.push(...externalSources(wallet, requested - sources.length, minted.length));
   }
+
+  await Promise.all(sources.filter(nft => !nft.isNormie).map(nft => loadAgentBindingForNft(nft)));
 
   for (const nft of sources) {
     const slot = pickSlot(allSlots, minted.length, nftKey(nft));
