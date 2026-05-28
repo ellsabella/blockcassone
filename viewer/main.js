@@ -149,6 +149,7 @@ function rayAABBIntersect(ro, rd, mn, mx) {
 // ---------- Mode + navigation ----------
 let mode = 'BIG';
 let selectedMotifIdx = null;   // BIG mode: which cube is focused (null = none)
+let selectedNeighbourhoodIdx = null;
 const lightsSelectedEl = document.getElementById('lights-selected');
 
 const btn2D  = document.getElementById('mode-2d');
@@ -172,6 +173,7 @@ function setMode(next) {
   btnBig.classList.toggle('active', mode === 'BIG');
   if (mode === 'BIG') {
     selectedMotifIdx = currentPlane().hierarchy.motifIndex;
+    selectedNeighbourhoodIdx = null;
     recentreOrbit();
   } else {
     recentreOrbit();
@@ -241,6 +243,7 @@ function setCategoryFilter(next) {
   categoryFilter = next;
   for (const motifIdx of uniqueMotifs) ensureMotifCategory(motifIdx);
   selectedMotifIdx = null;
+  selectedNeighbourhoodIdx = null;
   const hasVisible = jumpToFirstVisibleForFilter();
   _updateCategoryButtons();
   _updateCubeTypeButtons();
@@ -263,6 +266,7 @@ function setCubeTypeFilter(next) {
   cubeTypeFilter = next;
   if (cubeTypeFilter !== 'normie' && categoryFilter !== null) categoryFilter = null;
   selectedMotifIdx = null;
+  selectedNeighbourhoodIdx = null;
   const hasVisible = jumpToFirstVisibleForFilter();
   _updateCategoryButtons();
   _updateCubeTypeButtons();
@@ -294,11 +298,16 @@ async function resetMintAndScene() {
     cubeDetailEl.setAttribute('aria-hidden', 'true');
   }
   selectedMotifIdx = null;
+  selectedNeighbourhoodIdx = null;
   currentPlaneIdx = 0;
   _updateMintStatus();
   _updateNftLabel();
   recentreOrbit();
   rebuildScene();
+}
+
+function neighbourhoodIndexForMotif(motifIdx) {
+  return Math.floor((Number(motifIdx) || 0) / 8);
 }
 
 function openMintSuccess(count) {
@@ -327,10 +336,11 @@ function applyCubeDetailWidth(width) {
   cubeDetailEl.style.width = `${cubeDetailWidthPx}px`;
 }
 
-function openCubeDetail(motifIdx) {
+function openCubeDetail(motifIdx, { preserveNeighbourhood = false } = {}) {
   const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === motifIdx);
   if (idx >= 0) currentPlaneIdx = idx;
   selectedMotifIdx = motifIdx;
+  if (!preserveNeighbourhood) selectedNeighbourhoodIdx = null;
   cubeDetailOpen = true;
   if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube ${motifIdx}`;
   if (cubeDetailEl) {
@@ -342,9 +352,14 @@ function openCubeDetail(motifIdx) {
     cubeDetailEl.setAttribute('aria-hidden', 'false');
   }
   recentreDetailOrbit();
-  recentreOrbit();
   _updateNftLabel();
   rebuildScene();
+}
+
+function selectNeighbourhood(motifIdx) {
+  selectedNeighbourhoodIdx = neighbourhoodIndexForMotif(motifIdx);
+  openCubeDetail(motifIdx, { preserveNeighbourhood: true });
+  log(`neighbourhood ${selectedNeighbourhoodIdx} selected`);
 }
 
 function closeCubeDetail() {
@@ -431,6 +446,7 @@ async function loadWalletFromInput() {
       cubeDetailEl.setAttribute('aria-hidden', 'true');
     }
     selectedMotifIdx = null;
+    selectedNeighbourhoodIdx = null;
     currentPlaneIdx = 0;
     _updateMintStatus();
     _updateCategoryButtons();
@@ -741,13 +757,10 @@ btnNext.addEventListener('click', recentreOrbit);
 // ---------- BIG-mode cube pick (click, not drag) ----------
 {
   let downX = 0, downY = 0;
-  canvas.addEventListener('mousedown', (e) => { downX = e.clientX; downY = e.clientY; });
-  canvas.addEventListener('mouseup', (e) => {
-    if (mode !== 'BIG') return;
-    if (eventInCubeDetail(e)) return;
-    if (!lastInvVP || !lastCamPos) return;
-    const dx = e.clientX - downX, dy = e.clientY - downY;
-    if (dx*dx + dy*dy > 25) return;  // was a drag, not a click
+  function pickBigMotifAt(e) {
+    if (mode !== 'BIG') return null;
+    if (eventInCubeDetail(e)) return null;
+    if (!lastInvVP || !lastCamPos) return null;
 
     const rect = canvas.getBoundingClientRect();
     const nx = ((e.clientX - rect.left) / rect.width)  *  2 - 1;
@@ -776,15 +789,30 @@ btnNext.addEventListener('click', recentreOrbit);
       const t = rayAABBIntersect(ro, rd, mn, mx);
       if (t < bestT) { bestT = t; hitMotif = motifIdx; }
     }
+    return hitMotif !== null && bestT < Infinity ? hitMotif : null;
+  }
 
-    if (hitMotif !== null && bestT < Infinity) {
+  canvas.addEventListener('mousedown', (e) => { downX = e.clientX; downY = e.clientY; });
+  canvas.addEventListener('mouseup', (e) => {
+    if (mode !== 'BIG') return;
+    if (eventInCubeDetail(e)) return;
+    const dx = e.clientX - downX, dy = e.clientY - downY;
+    if (dx*dx + dy*dy > 25) return;  // was a drag, not a click
+    const hitMotif = pickBigMotifAt(e);
+    if (hitMotif !== null) {
       openCubeDetail(hitMotif);
       return;
     } else {
       selectedMotifIdx = null;
+      selectedNeighbourhoodIdx = null;
     }
     _updateLightsLabel();
     rebuildScene();
+  });
+  canvas.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    const hitMotif = pickBigMotifAt(e);
+    if (hitMotif !== null) selectNeighbourhood(hitMotif);
   });
 }
 
@@ -1004,6 +1032,16 @@ function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
   }
 }
 
+function bigModeDimForMotif(motifIdx) {
+  if (mode !== 'BIG') return 1.0;
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+    return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? 1.0 : 0.08;
+  }
+  return selectedMotifIdx !== null && selectedMotifIdx !== undefined && motifIdx !== selectedMotifIdx
+    ? 0.15
+    : 1.0;
+}
+
 function rebuildScene() {
   sceneItems = [];
   detailSceneItems = [];
@@ -1039,9 +1077,7 @@ function rebuildScene() {
   }
   // --- Per-cube items ---
   for (const motifIdx of motifsToRender) {
-    const focusDim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
-      ? 0.15 : 1.0;
-    pushMotifItems(sceneItems, motifIdx, mode, focusDim);
+    pushMotifItems(sceneItems, motifIdx, mode, bigModeDimForMotif(motifIdx));
   }
 
   // Light markers — once in any non-2D mode, anchored to the active cube.
@@ -1087,9 +1123,7 @@ function rebuildScene() {
   // --- Per-plane items ---
   for (const plane of planesToRender) {
     const motifIdx = plane.hierarchy.motifIndex;
-    const focusDim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
-      ? 0.15 : 1.0;
-    pushPlaneItems(sceneItems, plane, mode, cubeCtxMap[motifIdx], focusDim);
+    pushPlaneItems(sceneItems, plane, mode, cubeCtxMap[motifIdx], bigModeDimForMotif(motifIdx));
   }
 
   if (cubeDetailOpen && selectedMotifIdx !== null && selectedMotifIdx !== undefined && isMintedSlot(selectedMotifIdx)) {
