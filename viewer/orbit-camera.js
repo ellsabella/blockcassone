@@ -10,6 +10,7 @@
 import { mat4, vec3, lookAt, perspective } from '/renderer/src/math.js';
 
 export function createOrbitCamera(canvas, opts = {}) {
+  const shouldHandleEvent = opts.shouldHandleEvent || (() => true);
   const state = {
     target:   vec3(opts.target?.[0] ?? 0, opts.target?.[1] ?? 0, opts.target?.[2] ?? 0),
     distance: opts.distance ?? 4.0,
@@ -28,6 +29,7 @@ export function createOrbitCamera(canvas, opts = {}) {
   let lastX = 0, lastY = 0;
 
   canvas.addEventListener('mousedown', (e) => {
+    if (!shouldHandleEvent(e)) return;
     if (e.button === 0)      dragging = 'rotate';
     else if (e.button === 2) dragging = 'pan';
     else return;
@@ -65,6 +67,7 @@ export function createOrbitCamera(canvas, opts = {}) {
     }
   });
   canvas.addEventListener('wheel', (e) => {
+    if (!shouldHandleEvent(e)) return;
     e.preventDefault();
     state.distance *= Math.exp(e.deltaY * 0.0009);
     state.distance = Math.max(state.minDist, Math.min(state.maxDist, state.distance));

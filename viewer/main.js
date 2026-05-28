@@ -207,6 +207,7 @@ const mintSuccessCloseBtn = document.getElementById('mint-success-close');
 const cubeDetailEl = document.getElementById('cube-detail');
 const cubeDetailTitleEl = document.getElementById('cube-detail-title');
 const cubeDetailCloseBtn = document.getElementById('cube-detail-close');
+let cubeDetailOpen = false;
 
 window.__PIPELINE_MINT_SOURCE_FOR_SLOT__ = sourceNftForSlot;
 
@@ -282,6 +283,11 @@ const _setMintCountValue  = (v) => setMintCountValue(mintCountInput, v);
 async function resetMintAndScene() {
   clearGeneratedMeshes();
   await resetMintSimulation();
+  cubeDetailOpen = false;
+  if (cubeDetailEl) {
+    cubeDetailEl.classList.remove('open');
+    cubeDetailEl.setAttribute('aria-hidden', 'true');
+  }
   selectedMotifIdx = null;
   currentPlaneIdx = 0;
   _updateMintStatus();
@@ -309,15 +315,13 @@ function openCubeDetail(motifIdx) {
   const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === motifIdx);
   if (idx >= 0) currentPlaneIdx = idx;
   selectedMotifIdx = motifIdx;
-  mode = '3D';
-  btn2D.classList.toggle('active', false);
-  btn3D.classList.toggle('active', true);
-  btnBig.classList.toggle('active', false);
+  cubeDetailOpen = true;
   if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube ${motifIdx}`;
   if (cubeDetailEl) {
     cubeDetailEl.classList.add('open');
     cubeDetailEl.setAttribute('aria-hidden', 'false');
   }
+  recentreDetailOrbit();
   recentreOrbit();
   _updateNftLabel();
   rebuildScene();
@@ -328,11 +332,7 @@ function closeCubeDetail() {
     cubeDetailEl.classList.remove('open');
     cubeDetailEl.setAttribute('aria-hidden', 'true');
   }
-  mode = 'BIG';
-  btn2D.classList.toggle('active', false);
-  btn3D.classList.toggle('active', false);
-  btnBig.classList.toggle('active', true);
-  recentreOrbit();
+  cubeDetailOpen = false;
   rebuildScene();
 }
 
@@ -384,6 +384,11 @@ async function loadWalletFromInput() {
     const failed = Object.keys(state.chainErrors || {});
     log(`wallet loaded ${state.nfts.length} NFTs on ${chainNote} | normies=${state.normies.length} non=${state.nonNormies.length}${failed.length ? ` | failed ${failed.join(',')}` : ''}`);
     clearGeneratedMeshes();
+    cubeDetailOpen = false;
+    if (cubeDetailEl) {
+      cubeDetailEl.classList.remove('open');
+      cubeDetailEl.setAttribute('aria-hidden', 'true');
+    }
     selectedMotifIdx = null;
     currentPlaneIdx = 0;
     _updateMintStatus();
@@ -606,7 +611,20 @@ log(`materials: ${Object.keys(materialsMap).join(', ')}`);
 const BUILDERS = [buildForestPlane];
 
 // ---------- Orbit camera + debug lights ----------
-const orbit  = createOrbitCamera(canvas, { distance: 3.5 });
+function eventInCubeDetail(e) {
+  if (!cubeDetailOpen || !cubeDetailEl) return false;
+  const r = cubeDetailEl.getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+}
+
+const orbit = createOrbitCamera(canvas, {
+  distance: 3.5,
+  shouldHandleEvent: e => !eventInCubeDetail(e),
+});
+const detailOrbit = createOrbitCamera(canvas, {
+  distance: 3.5,
+  shouldHandleEvent: eventInCubeDetail,
+});
 const lights = createLights();
 
 // Wire light-position sliders to the lights object.
@@ -662,6 +680,13 @@ function recentreOrbit() {
 }
 recentreOrbit();
 
+function recentreDetailOrbit() {
+  if (selectedMotifIdx === null || selectedMotifIdx === undefined) return;
+  const { mn, mx } = cubeAABBFor(selectedMotifIdx);
+  detailOrbit.setTarget((mn[0]+mx[0])*0.5, (mn[1]+mx[1])*0.5, (mn[2]+mx[2])*0.5);
+  detailOrbit.setDistance(Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 2.7);
+}
+
 // Wrap navigate so target follows the active cube. The previously-installed
 // click + key handlers call `navigate` by reference in the closure; we can't
 // easily reassign that, so instead we install one extra listener that fires
@@ -678,6 +703,7 @@ btnNext.addEventListener('click', recentreOrbit);
   canvas.addEventListener('mousedown', (e) => { downX = e.clientX; downY = e.clientY; });
   canvas.addEventListener('mouseup', (e) => {
     if (mode !== 'BIG') return;
+    if (eventInCubeDetail(e)) return;
     if (!lastInvVP || !lastCamPos) return;
     const dx = e.clientX - downX, dy = e.clientY - downY;
     if (dx*dx + dy*dy > 25) return;  // was a drag, not a click
@@ -822,13 +848,124 @@ function setUniformByName(gl, loc, name, value) {
 
 // ---------- Scene build ----------
 let sceneItems = [];
+let detailSceneItems = [];
 let lastInvVP  = null;
 let lastCamPos = null;
 
 // applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor imported from scene/styling.js
 
+function pushMotifItems(itemsOut, motifIdx, renderMode, dim) {
+  const cat = ensureMotifCategory(motifIdx);
+  const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
+
+  if (showCubeGlass && renderMode === '3D') {
+    const glassItems = buildCubeGlass(motifIdx, hilbert, gl, meshes, renderMode);
+    applyMotifStyle(glassItems, cat, motifIdx);
+    if (agenticNonNormie) applyAgenticAwakening(glassItems);
+    if (glassItems?.length) itemsOut.push(...glassItems);
+  }
+
+  const walkerItems = buildStoneWalker(motifIdx, hilbert, serializedPlanes, gl, meshes);
+  applyMotifStyle(walkerItems, cat, motifIdx);
+  if (agenticNonNormie) applyAgenticAwakening(walkerItems);
+  applyDim(walkerItems, dim);
+  if (walkerItems?.length) itemsOut.push(...walkerItems);
+
+  const voxelItems = build3DVoxels(motifIdx, hilbert, serializedPlanes, gl, meshes);
+  applyMotifStyle(voxelItems, cat, motifIdx);
+  if (agenticNonNormie) applyAgenticAwakening(voxelItems);
+  applyDim(voxelItems, dim);
+  if (voxelItems?.length) itemsOut.push(...voxelItems);
+
+  const hlItems = buildHilbertLines(motifIdx, hilbert, gl, meshes);
+  applyMotifStyle(hlItems, cat, motifIdx);
+  if (agenticNonNormie) applyAgenticAwakening(hlItems);
+  applyDim(hlItems, dim);
+  if (hlItems?.length) itemsOut.push(...hlItems);
+
+  const cardItems = buildCubeCardioid(motifIdx, hilbert, serializedPlanes, gl, meshes);
+  applyMotifStyle(cardItems, cat, motifIdx);
+  if (agenticNonNormie) applyAgenticAwakening(cardItems);
+  applyDim(cardItems, dim);
+  if (cardItems?.length) itemsOut.push(...cardItems);
+}
+
+function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
+  const motifIdx = plane.hierarchy.motifIndex;
+  const cat = ensureMotifCategory(motifIdx);
+  const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
+
+  if (isNormieCube(motifIdx)) {
+    for (const builder of BUILDERS) {
+      const result = builder(plane, hilbert, gl, meshes, renderMode, cubeCtx);
+      if (!result) continue;
+      const items = Array.isArray(result) ? result : [result];
+      applyMotifStyle(items, cat, motifIdx);
+      applyDim(items, dim);
+      itemsOut.push(...items);
+      break;
+    }
+  } else {
+    const artItems = buildNonNormieArtworkPlane(plane, serializedPlanes, gl, meshes);
+    if (agenticNonNormie) applyAgenticAwakening(artItems);
+    applyDim(artItems, dim);
+    if (artItems?.length) itemsOut.push(...artItems);
+
+    const nonNormieWalkerItems = buildNonNormieWalker(plane, serializedPlanes, gl, meshes);
+    if (agenticNonNormie) applyAgenticAwakening(nonNormieWalkerItems);
+    applyDim(nonNormieWalkerItems, dim);
+    if (nonNormieWalkerItems?.length) itemsOut.push(...nonNormieWalkerItems);
+
+    const bannerItems = buildNonNormieBanner(plane, serializedPlanes, gl, meshes);
+    applyBannerGlitch(bannerItems, null);
+    if (agenticNonNormie) applyAgenticBannerPulse(bannerItems);
+    applyDim(bannerItems, dim);
+    if (bannerItems?.length) itemsOut.push(...bannerItems);
+
+    if (agenticNonNormie) {
+      const forestItems = buildForestPlane(plane, hilbert, gl, meshes, renderMode, cubeCtx);
+      const items = Array.isArray(forestItems) ? forestItems : (forestItems ? [forestItems] : []);
+      applyAgenticAwakening(items);
+      applyDim(items, dim);
+      if (items.length) itemsOut.push(...items);
+    }
+  }
+
+  const outlineItems = build2DOutline(plane, gl, meshes);
+  applyMotifStyle(outlineItems, cat, motifIdx);
+  applyDim(outlineItems, dim);
+  if (outlineItems?.length) itemsOut.push(...outlineItems);
+
+  if (isNormieCube(motifIdx)) {
+    const idLabelItems = buildNormieIdLabel(plane, gl, meshes);
+    applyMotifStyle(idLabelItems, cat, motifIdx);
+    applyDim(idLabelItems, dim);
+    if (idLabelItems?.length) itemsOut.push(...idLabelItems);
+
+    const traitsBannerItems = buildNormieTraitsBanner(plane, hilbert, gl, meshes);
+    applyMotifStyle(traitsBannerItems, cat, motifIdx);
+    applyBannerGlitch(traitsBannerItems, cat);
+    applyDim(traitsBannerItems, dim);
+    if (traitsBannerItems?.length) itemsOut.push(...traitsBannerItems);
+  }
+
+  const hilbertEdgeItems = buildPlaneOutline(plane, gl, meshes);
+  applyMotifStyle(hilbertEdgeItems, cat, motifIdx);
+  applyDim(hilbertEdgeItems, dim);
+  if (hilbertEdgeItems?.length) itemsOut.push(...hilbertEdgeItems);
+
+  if (showEdgePoints) {
+    const dbg = buildEdgePointDebug(plane, gl, meshes);
+    const items = Array.isArray(dbg) ? dbg.filter(Boolean) : (dbg ? [dbg] : []);
+    applyMotifStyle(items, cat, motifIdx);
+    applyDim(items, dim);
+    itemsOut.push(...items);
+  }
+}
+
 function rebuildScene() {
   sceneItems = [];
+  detailSceneItems = [];
   jumpToFirstVisibleForFilter();
   _updateNftLabel();
   const p0 = currentPlane();
@@ -853,6 +990,7 @@ function rebuildScene() {
   // Always include the current plane's motif so 2D mode forest has context.
   const cubeCtxMap = {};
   const motifsForCtx = new Set([...motifsToRender, p0.hierarchy.motifIndex]);
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) motifsForCtx.add(selectedMotifIdx);
   for (const motifIdx of motifsForCtx) {
     cubeCtxMap[motifIdx] = {
       slicesByAxis: computeMirrorSlices(motifIdx, hilbert, serializedPlanes),
@@ -860,42 +998,9 @@ function rebuildScene() {
   }
   // --- Per-cube items ---
   for (const motifIdx of motifsToRender) {
-    const cat = ensureMotifCategory(motifIdx);
-    const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
     const focusDim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
       ? 0.15 : 1.0;
-    const dim = focusDim;
-
-    if (showCubeGlass && mode === '3D') {
-      const items = buildCubeGlass(motifIdx, hilbert, gl, meshes, mode);
-      applyMotifStyle(items, cat, motifIdx);
-      if (agenticNonNormie) applyAgenticAwakening(items);
-      if (items?.length) sceneItems.push(...items);
-    }
-
-    const walkerItems = buildStoneWalker(motifIdx, hilbert, serializedPlanes, gl, meshes);
-    applyMotifStyle(walkerItems, cat, motifIdx);
-    if (agenticNonNormie) applyAgenticAwakening(walkerItems);
-    applyDim(walkerItems, dim);
-    if (walkerItems?.length) sceneItems.push(...walkerItems);
-
-    const voxelItems = build3DVoxels(motifIdx, hilbert, serializedPlanes, gl, meshes);
-    applyMotifStyle(voxelItems, cat, motifIdx);
-    if (agenticNonNormie) applyAgenticAwakening(voxelItems);
-    applyDim(voxelItems, dim);
-    if (voxelItems?.length) sceneItems.push(...voxelItems);
-
-    const hlItems = buildHilbertLines(motifIdx, hilbert, gl, meshes);
-    applyMotifStyle(hlItems, cat, motifIdx);
-    if (agenticNonNormie) applyAgenticAwakening(hlItems);
-    applyDim(hlItems, dim);
-    if (hlItems?.length) sceneItems.push(...hlItems);
-
-    const cardItems = buildCubeCardioid(motifIdx, hilbert, serializedPlanes, gl, meshes);
-    applyMotifStyle(cardItems, cat, motifIdx);
-    if (agenticNonNormie) applyAgenticAwakening(cardItems);
-    applyDim(cardItems, dim);
-    if (cardItems?.length) sceneItems.push(...cardItems);
+    pushMotifItems(sceneItems, motifIdx, mode, focusDim);
   }
 
   // Light markers — once in any non-2D mode, anchored to the active cube.
@@ -941,78 +1046,16 @@ function rebuildScene() {
   // --- Per-plane items ---
   for (const plane of planesToRender) {
     const motifIdx = plane.hierarchy.motifIndex;
-    const cat      = ensureMotifCategory(motifIdx);
-    const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
     const focusDim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
       ? 0.15 : 1.0;
-    const dim = focusDim;
-    const cubeCtx = cubeCtxMap[motifIdx];
+    pushPlaneItems(sceneItems, plane, mode, cubeCtxMap[motifIdx], focusDim);
+  }
 
-    if (isNormieCube(motifIdx)) {
-      for (const builder of BUILDERS) {
-        const result = builder(plane, hilbert, gl, meshes, mode, cubeCtx);
-        if (!result) continue;
-        const items = Array.isArray(result) ? result : [result];
-        applyMotifStyle(items, cat, motifIdx);
-        applyDim(items, dim);
-        sceneItems.push(...items);
-        break;
-      }
-    } else {
-      const artItems = buildNonNormieArtworkPlane(plane, serializedPlanes, gl, meshes);
-      if (agenticNonNormie) applyAgenticAwakening(artItems);
-      applyDim(artItems, dim);
-      if (artItems?.length) sceneItems.push(...artItems);
-
-      const nonNormieWalkerItems = buildNonNormieWalker(plane, serializedPlanes, gl, meshes);
-      if (agenticNonNormie) applyAgenticAwakening(nonNormieWalkerItems);
-      applyDim(nonNormieWalkerItems, dim);
-      if (nonNormieWalkerItems?.length) sceneItems.push(...nonNormieWalkerItems);
-
-      const bannerItems = buildNonNormieBanner(plane, serializedPlanes, gl, meshes);
-      applyBannerGlitch(bannerItems, null);
-      if (agenticNonNormie) applyAgenticBannerPulse(bannerItems);
-      applyDim(bannerItems, dim);
-      if (bannerItems?.length) sceneItems.push(...bannerItems);
-
-      if (agenticNonNormie) {
-        const forestItems = buildForestPlane(plane, hilbert, gl, meshes, mode, cubeCtx);
-        const items = Array.isArray(forestItems) ? forestItems : (forestItems ? [forestItems] : []);
-        applyAgenticAwakening(items);
-        applyDim(items, dim);
-        if (items.length) sceneItems.push(...items);
-      }
-    }
-
-    const outlineItems = build2DOutline(plane, gl, meshes);
-    applyMotifStyle(outlineItems, cat, motifIdx);
-    applyDim(outlineItems, dim);
-    if (outlineItems?.length) sceneItems.push(...outlineItems);
-
-    if (isNormieCube(motifIdx)) {
-      const idLabelItems = buildNormieIdLabel(plane, gl, meshes);
-      applyMotifStyle(idLabelItems, cat, motifIdx);
-      applyDim(idLabelItems, dim);
-      if (idLabelItems?.length) sceneItems.push(...idLabelItems);
-
-      const traitsBannerItems = buildNormieTraitsBanner(plane, hilbert, gl, meshes);
-      applyMotifStyle(traitsBannerItems, cat, motifIdx);
-      applyBannerGlitch(traitsBannerItems, cat);
-      applyDim(traitsBannerItems, dim);
-      if (traitsBannerItems?.length) sceneItems.push(...traitsBannerItems);
-    }
-
-    const hilbertEdgeItems = buildPlaneOutline(plane, gl, meshes);
-    applyMotifStyle(hilbertEdgeItems, cat, motifIdx);
-    applyDim(hilbertEdgeItems, dim);
-    if (hilbertEdgeItems?.length) sceneItems.push(...hilbertEdgeItems);
-
-    if (showEdgePoints) {
-      const dbg = buildEdgePointDebug(plane, gl, meshes);
-      const items = Array.isArray(dbg) ? dbg.filter(Boolean) : (dbg ? [dbg] : []);
-      applyMotifStyle(items, cat, motifIdx);
-      applyDim(items, dim);
-      sceneItems.push(...items);
+  if (cubeDetailOpen && selectedMotifIdx !== null && selectedMotifIdx !== undefined && isMintedSlot(selectedMotifIdx)) {
+    const cubeCtx = cubeCtxMap[selectedMotifIdx];
+    pushMotifItems(detailSceneItems, selectedMotifIdx, '3D', 1.0);
+    for (const plane of serializedPlanes.filter(p => p.hierarchy.motifIndex === selectedMotifIdx)) {
+      pushPlaneItems(detailSceneItems, plane, '3D', cubeCtx, 1.0);
     }
   }
 
@@ -1061,62 +1104,26 @@ sse.onmessage = (e) => {
 // ---------- Render loop (placeholder — Phase B will add the cameras + passes) ----------
 const startT = performance.now();
 
-function frame() {
-  resize();
-  const t = (performance.now() - startT) * 0.001;
-  if (mode !== '2D' && showLightMarkers) {
-    const activeMotif = (mode === 'BIG') ? selectedMotifIdx : currentPlane().hierarchy.motifIndex;
-    if (activeMotif !== null && activeMotif !== undefined && [3, 4].includes(ensureMotifCategory(activeMotif))) {
-      const { mn, mx } = cubeAABBFor(activeMotif);
-      const cc = new Float32Array([
-        (mn[0]+mx[0])*0.5, (mn[1]+mx[1])*0.5, (mn[2]+mx[2])*0.5,
-      ]);
-      const hs = Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 0.5;
-      const markerItem = { uniforms: { uCubeCenter: cc, uCubeHalfSize: hs } };
-      buildAwakenedLightBuffers(markerItem, t, awakenedLightPosBuf, awakenedLightColBuf);
-      lights.buildMarkerItems(gl, meshes, 0.04, cc, hs, awakenedLightPosBuf, awakenedLightColBuf);
-    }
-  }
-
-  gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.clearColor(0.02, 0.03, 0.05, 1.0);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-  const aspect = canvas.width / Math.max(1, canvas.height);
-  const cam = (mode === '2D')
-    ? faceOnCamera(currentPlane(), aspect)
-    : orbit.camera(aspect);
-
-  // Camera basis in world space — first row of the view matrix (column-major).
+function drawScene(items, cam, t) {
   const camRight = new Float32Array([cam.view[0], cam.view[4], cam.view[8]]);
-  const camUp    = new Float32Array([cam.view[1], cam.view[5], cam.view[9]]);
+  const camUp = new Float32Array([cam.view[1], cam.view[5], cam.view[9]]);
+  const opaqueItems = items.filter(it => !it.blend || it.blend === 'opaque');
+  const alphaItems = items.filter(it => it.blend === 'alpha' && !it.transparentLayer);
+  const alphaOverlayItems = items.filter(it => it.blend === 'alpha' && it.transparentLayer);
+  const additiveItems = items.filter(it => it.blend === 'additive');
 
-  gl.viewport(0, 0, canvas.width, canvas.height);
-
-  const VP = mat4(); multiply(VP, cam.proj, cam.view);
-  const invVP = mat4(); invert(invVP, VP);
-  lastInvVP  = invVP;
-  lastCamPos = cam.pos;
-
-  // Render order: opaque first (depth writes), then alpha-blended glass
-  // (depth reads only), then additive particles/lines/halos on top.
-  const opaqueItems   = sceneItems.filter(it => !it.blend || it.blend === 'opaque');
-  const alphaItems    = sceneItems.filter(it => it.blend === 'alpha' && !it.transparentLayer);
-  const alphaOverlayItems = sceneItems.filter(it => it.blend === 'alpha' && it.transparentLayer);
-  const additiveItems = sceneItems.filter(it => it.blend === 'additive');
-
-  function drawItems(items, blendMode) {
+  function drawItems(drawList, blendMode) {
     if (blendMode === 'additive') {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.depthMask(false);
-      gl.depthFunc(gl.LEQUAL);  // allow surface-coincident additive overlays
+      gl.depthFunc(gl.LEQUAL);
       gl.disable(gl.CULL_FACE);
     } else if (blendMode === 'alpha') {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false);
-      gl.disable(gl.CULL_FACE);  // glass is two-sided
+      gl.disable(gl.CULL_FACE);
     } else {
       gl.disable(gl.BLEND);
       gl.depthMask(true);
@@ -1127,7 +1134,7 @@ function frame() {
 
     let currentProg = null;
     let L = null;
-    for (const item of items) {
+    for (const item of drawList) {
       const mat = materialsMap[item.material];
       if (!mat) continue;
 
@@ -1135,23 +1142,19 @@ function frame() {
         gl.useProgram(mat.program);
         currentProg = mat.program;
         L = mat.locations;
-        if (L.uView)     gl.uniformMatrix4fv(L.uView,  false, cam.view);
-        if (L.uProj)     gl.uniformMatrix4fv(L.uProj,  false, cam.proj);
-        if (L.uCamPos)   gl.uniform3fv(L.uCamPos,      cam.pos);
-        if (L.uCamRight) gl.uniform3fv(L.uCamRight,    camRight);
-        if (L.uCamUp)    gl.uniform3fv(L.uCamUp,       camUp);
-        if (L.uLightDir) gl.uniform3fv(L.uLightDir,    lightDir);
-        if (L.uTime)     gl.uniform1f(L.uTime,         t);
-        // Shared env texture / layout — bound for any material that wants it.
-        // Lives on unit 0; per-item samplers below may rebind, but every
-        // program switch re-binds here so the next stretch of items is OK.
+        if (L.uView) gl.uniformMatrix4fv(L.uView, false, cam.view);
+        if (L.uProj) gl.uniformMatrix4fv(L.uProj, false, cam.proj);
+        if (L.uCamPos) gl.uniform3fv(L.uCamPos, cam.pos);
+        if (L.uCamRight) gl.uniform3fv(L.uCamRight, camRight);
+        if (L.uCamUp) gl.uniform3fv(L.uCamUp, camUp);
+        if (L.uLightDir) gl.uniform3fv(L.uLightDir, lightDir);
+        if (L.uTime) gl.uniform1f(L.uTime, t);
         if (L.uEnvTex) {
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, envTex);
           gl.uniform1i(L.uEnvTex, 0);
         }
         if (L.uEnvLayout) gl.uniform1i(L.uEnvLayout, envLayout);
-        // Point lights — uploaded for any material that declares these uniforms.
         if (L.uPointLightCount) gl.uniform1i(L.uPointLightCount, lights.count);
       }
 
@@ -1184,8 +1187,6 @@ function frame() {
         setUniformByName(gl, L[name], name, value);
       }
 
-      // Texture samplers: { uName: tex | () => tex }. Bound to sequential
-      // texture units; the corresponding uniform is set to the unit index.
       if (item.samplers) {
         let unit = 0;
         for (const [name, src] of Object.entries(item.samplers)) {
@@ -1212,23 +1213,69 @@ function frame() {
     gl.bindVertexArray(null);
   }
 
-  drawItems(opaqueItems,   'opaque');
-  drawItems(alphaItems,    'alpha');
+  drawItems(opaqueItems, 'opaque');
+  drawItems(alphaItems, 'alpha');
   drawItems(alphaOverlayItems, 'alpha');
   drawItems(additiveItems, 'additive');
+}
 
-  // Reset blend state.
+function frame() {
+  resize();
+  const t = (performance.now() - startT) * 0.001;
+  if (mode !== '2D' && showLightMarkers) {
+    const activeMotif = (mode === 'BIG') ? selectedMotifIdx : currentPlane().hierarchy.motifIndex;
+    if (activeMotif !== null && activeMotif !== undefined && [3, 4].includes(ensureMotifCategory(activeMotif))) {
+      const { mn, mx } = cubeAABBFor(activeMotif);
+      const cc = new Float32Array([
+        (mn[0]+mx[0])*0.5, (mn[1]+mx[1])*0.5, (mn[2]+mx[2])*0.5,
+      ]);
+      const hs = Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 0.5;
+      const markerItem = { uniforms: { uCubeCenter: cc, uCubeHalfSize: hs } };
+      buildAwakenedLightBuffers(markerItem, t, awakenedLightPosBuf, awakenedLightColBuf);
+      lights.buildMarkerItems(gl, meshes, 0.04, cc, hs, awakenedLightPosBuf, awakenedLightColBuf);
+    }
+  }
+
+  gl.clearColor(0.02, 0.03, 0.05, 1.0);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.disable(gl.SCISSOR_TEST);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  const aspect = canvas.width / Math.max(1, canvas.height);
+  const mainCam = (mode === '2D')
+    ? faceOnCamera(currentPlane(), aspect)
+    : orbit.camera(aspect);
+
+  const VP = mat4(); multiply(VP, mainCam.proj, mainCam.view);
+  const invVP = mat4(); invert(invVP, VP);
+  lastInvVP = invVP;
+  lastCamPos = mainCam.pos;
+
+  drawScene(sceneItems, mainCam, t);
+
+  if (cubeDetailOpen && detailSceneItems.length > 0 && cubeDetailEl) {
+    const rect = cubeDetailEl.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    const dprX = canvas.width / Math.max(1, canvasRect.width);
+    const dprY = canvas.height / Math.max(1, canvasRect.height);
+    const x = Math.max(0, Math.floor((rect.left - canvasRect.left) * dprX));
+    const y = Math.max(0, Math.floor((canvasRect.bottom - rect.bottom) * dprY));
+    const w = Math.min(canvas.width - x, Math.floor(rect.width * dprX));
+    const h = Math.min(canvas.height - y, Math.floor(rect.height * dprY));
+    if (w > 8 && h > 8) {
+      gl.enable(gl.SCISSOR_TEST);
+      gl.viewport(x, y, w, h);
+      gl.scissor(x, y, w, h);
+      gl.clearColor(0.015, 0.016, 0.02, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      drawScene(detailSceneItems, detailOrbit.camera(w / Math.max(1, h)), t);
+      gl.disable(gl.SCISSOR_TEST);
+    }
+  }
+
   gl.disable(gl.BLEND);
   gl.depthMask(true);
   gl.depthFunc(gl.LESS);
-
-  // --- Wireframe cube overlay (hidden) ---
-  // gl.useProgram(wireMat.program);
-  // ...
-
-
-  gl.depthMask(true);
-  gl.disable(gl.BLEND);
 
   requestAnimationFrame(frame);
 }

@@ -95,11 +95,15 @@
     }
     #cube-detail {
       position: fixed;
-      inset: 58px 12px 12px 12px;
+      top: 62px;
+      right: 12px;
+      bottom: 12px;
+      width: min(440px, 34vw);
       z-index: 2;
       display: none;
       pointer-events: none;
       border: 1px solid rgba(160, 160, 180, 0.28);
+      background: rgba(4, 4, 7, 0.18);
       box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.58), 0 18px 60px rgba(0, 0, 0, 0.22);
     }
     #cube-detail.open { display: block; }
@@ -156,7 +160,14 @@
       #wallet-controls, #mint-controls { justify-content: space-between; }
       #wallet-address { width: 100%; }
       #controls { display: none; }
-      #cube-detail { inset: 126px 8px 46px 8px; }
+      #cube-detail {
+        top: auto;
+        left: 8px;
+        right: 8px;
+        bottom: 42px;
+        width: auto;
+        height: min(42vh, 330px);
+      }
       #nft-label { left: 8px; right: 8px; bottom: 8px; max-width: none; }
     }
   </style>
