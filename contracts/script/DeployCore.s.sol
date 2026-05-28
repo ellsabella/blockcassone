@@ -41,9 +41,9 @@ contract DeployCore is Script {
             "CUBE",
             normies,
             totalSlots,
-            initialOwner
+            address(this)
         );
-        deployment.artStore = new NonNormieArtStore(initialOwner);
+        deployment.artStore = new NonNormieArtStore(address(this));
         deployment.attestation = new FlatteningAttestation(address(this), attestationSigner);
         deployment.controller =
             new CubeMintController(deployment.cubes, deployment.artStore, deployment.attestation);
