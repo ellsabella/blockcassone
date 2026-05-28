@@ -248,6 +248,10 @@ Use shared contracts for:
 
 Browser-side JavaScript should decode the payload and build the voxel mesh. Solidity should not attempt to generate large meshes during `tokenURI`.
 
+The production renderer target is raw WebGL, not Three.js. This preserves long-term compatibility and lets the final onchain token port the visual language from the existing dev renderer with fewer third-party assumptions. Visual iteration should happen first in a standalone, self-contained browser prototype that accepts the same compact token data Solidity will emit. Once the constrained prototype feels correct, its HTML, JavaScript, shaders, and lookup tables can be minified and moved into renderer asset contracts.
+
+Metadata should use `image` as the canonical static thumbnail field. `image_url` may be duplicated only as a compatibility alias. `animation_url` should contain the interactive self-contained HTML/WebGL cube viewer. The static image should be a deterministic default-view thumbnail of the cube, while `animation_url` should support orbit, zoom, and reset controls.
+
 ## Placement And Randomness
 
 Slot assignment should be onchain and collision-free.
@@ -271,6 +275,27 @@ The big-cube viewer remains offchain. It may:
 - Offer filters, wallet views, and high-performance rendering.
 
 The website is not part of the individual token's fully onchain guarantee.
+
+The final world supply is a 5th-order Hilbert cube:
+
+```text
+8^(5 - 1) = 4096 cube slots
+```
+
+Each token should expose placement traits derived from its slot:
+
+- `Hilbert Slot`: the exact cube slot in the 5th-order path, `0..4095`.
+- `Neighbourhood`: the local 3rd-order Hilbert block containing the cube.
+- `Region`: the local 4th-order Hilbert block containing the cube.
+
+For an order-5 world, the block math is:
+
+```text
+region(order 4)        = floor(slot / 8)
+neighbourhood(order 3) = floor(slot / 64)
+```
+
+These traits should be emitted in token metadata and used by the offchain big-cube viewer for filtering, navigation, local context, and possible neighbourhood/region-level visual systems.
 
 ## Implementation Phases
 
@@ -318,6 +343,7 @@ The website is not part of the individual token's fully onchain guarantee.
 - Add first minimal HTML renderer.
 - Confirm `tokenURI` is self-contained.
 - Add base64 encoding and JSON escaping helpers.
+- Keep a standalone raw WebGL prototype in the viewer while visual fidelity is still evolving.
 
 ### Phase 7: Production Renderer Port
 
