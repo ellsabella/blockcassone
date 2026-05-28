@@ -22,6 +22,8 @@ import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner 
 import { isAgenticNonNormieCube, loadWalletNftsAcrossChains, setWalletDataReadyCallback } from './wallet-nfts.js';
 import { serializeAllPlaced } from '/core/serialize.js';
 import {
+  getMintedCubeForSlot,
+  getMintedCubes,
   isMintedSlot,
   loadMintSimulation,
   mintSimulationLoaded,
@@ -47,6 +49,8 @@ import {
 const canvas = document.getElementById('gl');
 const logEl  = document.getElementById('log');
 const nftLabelEl = document.getElementById('nft-label');
+const selectionLinkEl = document.getElementById('selection-link');
+const selectionLinkPathEl = document.getElementById('selection-link-path');
 
 const logLines = [];
 function log(msg) {
@@ -131,6 +135,34 @@ function cubeAABBFor(motifIdx) {
   return { mn, mx };
 }
 
+function aabbForMotifs(motifIndices) {
+  const mn = [Infinity, Infinity, Infinity];
+  const mx = [-Infinity, -Infinity, -Infinity];
+  for (const motifIdx of motifIndices) {
+    const box = cubeAABBFor(motifIdx);
+    for (let i = 0; i < 3; i++) {
+      mn[i] = Math.min(mn[i], box.mn[i]);
+      mx[i] = Math.max(mx[i], box.mx[i]);
+    }
+  }
+  return { mn, mx };
+}
+
+function wireTransformForAABB(box, pad = 0.08) {
+  const sx = (box.mx[0] - box.mn[0]) * (1 + pad);
+  const sy = (box.mx[1] - box.mn[1]) * (1 + pad);
+  const sz = (box.mx[2] - box.mn[2]) * (1 + pad);
+  const cx = (box.mn[0] + box.mx[0]) * 0.5;
+  const cy = (box.mn[1] + box.mx[1]) * 0.5;
+  const cz = (box.mn[2] + box.mx[2]) * 0.5;
+  const M = mat4();
+  M[0] = sx; M[1] = 0;  M[2] = 0;  M[3] = 0;
+  M[4] = 0;  M[5] = sy; M[6] = 0;  M[7] = 0;
+  M[8] = 0;  M[9] = 0;  M[10] = sz; M[11] = 0;
+  M[12] = cx; M[13] = cy; M[14] = cz; M[15] = 1;
+  return M;
+}
+
 function rayAABBIntersect(ro, rd, mn, mx) {
   let tmin = -Infinity, tmax = Infinity;
   for (let i = 0; i < 3; i++) {
@@ -213,8 +245,14 @@ const cubeDetailEl = document.getElementById('cube-detail');
 const cubeDetailResizeEl = document.getElementById('cube-detail-resize');
 const cubeDetailTitleEl = document.getElementById('cube-detail-title');
 const cubeDetailCloseBtn = document.getElementById('cube-detail-close');
+const cubeDetailInfoEl = document.getElementById('cube-detail-info');
+const streetStatsEl = document.getElementById('street-stats');
+const streetStatOccupiedEl = document.getElementById('street-stat-occupied');
+const streetStatTypeEl = document.getElementById('street-stat-type');
+const streetStatIndexEl = document.getElementById('street-stat-index');
 let cubeDetailOpen = false;
 let cubeDetailWidthPx = 0;
+const ownerLabelCache = new Map();
 
 window.__PIPELINE_MINT_SOURCE_FOR_SLOT__ = sourceNftForSlot;
 
@@ -310,6 +348,135 @@ function streetIndexForMotif(motifIdx) {
   return Math.floor((Number(motifIdx) || 0) / 8);
 }
 
+function neighbourhoodIndexForMotif(motifIdx) {
+  return Math.floor((Number(motifIdx) || 0) / 64);
+}
+
+function regionIndexForMotif(motifIdx) {
+  return Math.floor((Number(motifIdx) || 0) / 512);
+}
+
+function environmentForStreet(streetIdx) {
+  return ['desert', 'forest', 'grasslands', 'water'][Math.abs(Number(streetIdx) || 0) % 4];
+}
+
+function shortAddress(address) {
+  const value = String(address || '');
+  return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value || 'unknown';
+}
+
+async function ownerLabelFor(address) {
+  const clean = String(address || '').toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(clean)) return shortAddress(address);
+  if (ownerLabelCache.has(clean)) return ownerLabelCache.get(clean);
+  ownerLabelCache.set(clean, shortAddress(clean));
+  try {
+    const res = await fetch(`/api/opensea/accounts/resolve/${clean}`);
+    if (res.ok) {
+      const data = await res.json();
+      const label = data.ens || data.ens_name || data.primary_ens || data.username || shortAddress(clean);
+      ownerLabelCache.set(clean, label);
+      return label;
+    }
+  } catch (_) {}
+  return ownerLabelCache.get(clean);
+}
+
+function setDetailInfo(rows) {
+  if (!cubeDetailInfoEl) return;
+  cubeDetailInfoEl.replaceChildren();
+  for (const [label, value] of rows) {
+    const k = document.createElement('span');
+    const v = document.createElement('span');
+    k.textContent = label;
+    v.textContent = value;
+    cubeDetailInfoEl.append(k, v);
+  }
+}
+
+function updateCubeDetailInfo() {
+  const motifIdx = selectedMotifIdx;
+  if (motifIdx === null || motifIdx === undefined) {
+    setDetailInfo([]);
+    return;
+  }
+  const minted = getMintedCubeForSlot(motifIdx);
+  const owner = minted?.wallet || '';
+  const street = streetIndexForMotif(motifIdx);
+  const rows = [
+    ['owner', shortAddress(owner)],
+    ['plot', String(motifIdx)],
+    ['street', String(street)],
+    ['neighbourhood', String(neighbourhoodIndexForMotif(motifIdx))],
+    ['region', String(regionIndexForMotif(motifIdx))],
+    ['environment', environmentForStreet(street)],
+  ];
+  setDetailInfo(rows);
+  if (owner) {
+    ownerLabelFor(owner).then(label => {
+      if (selectedMotifIdx !== motifIdx) return;
+      rows[0] = ['owner', label];
+      setDetailInfo(rows);
+    });
+  }
+}
+
+function updateStreetStats() {
+  if (!streetStatsEl) return;
+  if (selectedStreetIdx === null || selectedStreetIdx === undefined || !cubeDetailOpen || !cubeDetailEl) {
+    streetStatsEl.classList.remove('open');
+    return;
+  }
+  const rect = cubeDetailEl.getBoundingClientRect();
+  streetStatsEl.style.left = `${rect.left}px`;
+  streetStatsEl.style.top = `${rect.top}px`;
+  streetStatsEl.style.width = `${rect.width}px`;
+  streetStatsEl.style.height = `${rect.height}px`;
+  const occupied = getMintedCubes().filter(cube => streetIndexForMotif(cube.slot) === selectedStreetIdx).length;
+  if (streetStatOccupiedEl) streetStatOccupiedEl.textContent = `occupied ${occupied}/8`;
+  if (streetStatTypeEl) streetStatTypeEl.textContent = environmentForStreet(selectedStreetIdx);
+  if (streetStatIndexEl) streetStatIndexEl.textContent = `street ${selectedStreetIdx}`;
+  streetStatsEl.classList.add('open');
+}
+
+function projectWorldToScreen(point, VP) {
+  const x = VP[0]*point[0] + VP[4]*point[1] + VP[8]*point[2]  + VP[12];
+  const y = VP[1]*point[0] + VP[5]*point[1] + VP[9]*point[2]  + VP[13];
+  const z = VP[2]*point[0] + VP[6]*point[1] + VP[10]*point[2] + VP[14];
+  const w = VP[3]*point[0] + VP[7]*point[1] + VP[11]*point[2] + VP[15];
+  if (Math.abs(w) < 1e-6 || z / w < -1 || z / w > 1) return null;
+  const nx = x / w;
+  const ny = y / w;
+  return [
+    (nx * 0.5 + 0.5) * window.innerWidth,
+    (-ny * 0.5 + 0.5) * window.innerHeight,
+  ];
+}
+
+function updateSelectionLink(VP) {
+  if (!selectionLinkEl || !selectionLinkPathEl) return;
+  if (!cubeDetailOpen || selectedMotifIdx === null || selectedMotifIdx === undefined || !cubeDetailEl) {
+    selectionLinkEl.classList.remove('active');
+    return;
+  }
+  const box = cubeAABBFor(selectedMotifIdx);
+  const start = projectWorldToScreen([
+    (box.mn[0] + box.mx[0]) * 0.5,
+    (box.mn[1] + box.mx[1]) * 0.5,
+    (box.mn[2] + box.mx[2]) * 0.5,
+  ], VP);
+  if (!start) {
+    selectionLinkEl.classList.remove('active');
+    return;
+  }
+  const rect = cubeDetailEl.getBoundingClientRect();
+  const end = [rect.left, rect.top + rect.height * 0.5];
+  const c1 = [start[0] + (end[0] - start[0]) * 0.42, start[1]];
+  const c2 = [end[0] - 38, end[1]];
+  selectionLinkPathEl.setAttribute('d', `M ${start[0].toFixed(1)} ${start[1].toFixed(1)} C ${c1[0].toFixed(1)} ${c1[1].toFixed(1)}, ${c2[0].toFixed(1)} ${c2[1].toFixed(1)}, ${end[0].toFixed(1)} ${end[1].toFixed(1)}`);
+  selectionLinkEl.classList.add('active');
+}
+
 function openMintSuccess(count) {
   if (mintSuccessTextEl) mintSuccessTextEl.textContent = `You have minted ${count} ${count === 1 ? 'cube' : 'cubes'}.`;
   if (mintSuccessEl) {
@@ -353,6 +520,8 @@ function openCubeDetail(motifIdx, { preserveStreet = false } = {}) {
   }
   recentreDetailOrbit();
   _updateNftLabel();
+  updateCubeDetailInfo();
+  updateStreetStats();
   rebuildScene();
 }
 
@@ -368,6 +537,7 @@ function closeCubeDetail() {
     cubeDetailEl.setAttribute('aria-hidden', 'true');
   }
   cubeDetailOpen = false;
+  updateStreetStats();
   rebuildScene();
 }
 
@@ -385,6 +555,7 @@ if (cubeDetailResizeEl && cubeDetailEl) {
     if (!cubeDetailResizeEl.hasPointerCapture(e.pointerId)) return;
     const right = window.innerWidth - 12;
     applyCubeDetailWidth(right - e.clientX);
+    updateStreetStats();
   });
   cubeDetailResizeEl.addEventListener('pointerup', (e) => {
     if (cubeDetailResizeEl.hasPointerCapture(e.pointerId)) cubeDetailResizeEl.releasePointerCapture(e.pointerId);
@@ -522,6 +693,11 @@ const meshes = {
   wireBox:  createMeshGL(gl, createWireframeBox(1, 1, 1)),
   solidBox: createMeshGL(gl, createBox(1, 1, 1)),
 };
+{
+  const wire = createWireframeBox(1, 1, 1);
+  wire.alphas = new Float32Array(wire.positions.length / 3).fill(1);
+  meshes.selectionWireBox = createMeshGL(gl, wire);
+}
 
 function clearGeneratedMeshes() {
   for (const key of Object.keys(meshes)) {
@@ -1042,6 +1218,32 @@ function bigModeDimForMotif(motifIdx) {
     : 1.0;
 }
 
+function buildSelectionOverlayItems() {
+  if (mode !== 'BIG' || selectedMotifIdx === null || selectedMotifIdx === undefined) return [];
+  let box;
+  let color;
+  let opacity;
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+    const start = selectedStreetIdx * 8;
+    const motifs = uniqueMotifs.filter(motifIdx => motifIdx >= start && motifIdx < start + 8);
+    if (!motifs.length) return [];
+    box = aabbForMotifs(motifs);
+    color = new Float32Array([1.0, 0.44, 0.15]);
+    opacity = 0.95;
+  } else {
+    box = cubeAABBFor(selectedMotifIdx);
+    color = new Float32Array([1.0, 0.18, 0.72]);
+    opacity = 0.9;
+  }
+  return [{
+    mesh: 'selectionWireBox',
+    material: 'lines',
+    transform: wireTransformForAABB(box, selectedStreetIdx !== null ? 0.035 : 0.12),
+    blend: 'additive',
+    uniforms: { uBaseCol: color, uLineOpacity: opacity },
+  }];
+}
+
 function rebuildScene() {
   sceneItems = [];
   detailSceneItems = [];
@@ -1134,6 +1336,8 @@ function rebuildScene() {
     }
   }
 
+  sceneItems.push(...buildSelectionOverlayItems());
+
   const cnt = {};
   for (const it of sceneItems) cnt[it.material] = (cnt[it.material] || 0) + 1;
   log(`scene: ${sceneItems.length} items | ${Object.entries(cnt).map(([m, n]) => `${m}=${n}`).join(', ')}`);
@@ -1143,8 +1347,8 @@ function rebuildScene() {
 // get built once their pixel data is available.
 setDataReadyCallback(() => rebuildScene());
 setBannerDataReadyCallback(() => rebuildScene());
-setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); rebuildScene(); });
-setMintDataReadyCallback(() => { _updateMintStatus(); rebuildScene(); });
+setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
+setMintDataReadyCallback(() => { _updateMintStatus(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
 
 loadMintSimulation()
   .then(cubes => {
@@ -1325,6 +1529,8 @@ function frame() {
   const invVP = mat4(); invert(invVP, VP);
   lastInvVP = invVP;
   lastCamPos = mainCam.pos;
+  updateSelectionLink(VP);
+  updateStreetStats();
 
   drawScene(sceneItems, mainCam, t);
 

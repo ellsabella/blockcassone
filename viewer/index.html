@@ -105,7 +105,8 @@
       pointer-events: none;
       border: 1px solid rgba(160, 160, 180, 0.28);
       background: rgba(4, 4, 7, 0.18);
-      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.58), 0 18px 60px rgba(0, 0, 0, 0.22);
+      box-shadow: inset 0 0 0 1px rgba(255, 58, 184, 0.24), 0 18px 60px rgba(0, 0, 0, 0.22);
+      border-color: rgba(255, 58, 184, 0.72);
     }
     #cube-detail.open { display: block; }
     #cube-detail-resize {
@@ -140,6 +141,63 @@
     }
     #cube-detail-title { color: #ddd; font-size: 11px; padding: 0 6px; }
     #cube-detail-close, #mint-success-close { min-width: 34px; }
+    #cube-detail-info {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      max-width: calc(100% - 20px);
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, auto));
+      gap: 4px 8px;
+      padding: 8px 9px;
+      pointer-events: none;
+      background: rgba(7, 3, 8, 0.74);
+      border: 1px solid rgba(255, 58, 184, 0.52);
+      color: #ff7dcc;
+      font-size: 10px;
+      line-height: 1.25;
+      text-shadow: 0 0 9px rgba(255, 58, 184, 0.38);
+    }
+    #cube-detail-info span:nth-child(odd) { color: rgba(255, 125, 204, 0.64); }
+    #selection-link {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      overflow: visible;
+    }
+    #selection-link path {
+      display: none;
+      fill: none;
+      stroke: rgba(255, 58, 184, 0.86);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+      filter: drop-shadow(0 0 5px rgba(255, 58, 184, 0.52));
+    }
+    #selection-link.active path { display: block; }
+    #street-stats {
+      position: fixed;
+      z-index: 3;
+      display: none;
+      pointer-events: none;
+      color: #ff9b47;
+      font-size: 10px;
+      line-height: 1.2;
+      text-shadow: 0 0 8px rgba(255, 120, 30, 0.42);
+    }
+    #street-stats.open { display: block; }
+    .street-stat {
+      position: absolute;
+      min-width: 88px;
+      padding: 6px 8px;
+      background: rgba(12, 6, 2, 0.76);
+      border: 1px solid rgba(255, 132, 45, 0.72);
+    }
+    #street-stat-occupied { left: 0; top: 0; transform: translate(-44%, -52%); }
+    #street-stat-type { right: 0; top: 0; transform: translate(44%, -52%); }
+    #street-stat-index { left: 0; bottom: 0; transform: translate(-44%, 52%); }
     body.resizing-cube-detail,
     body.resizing-cube-detail * {
       cursor: ew-resize !important;
@@ -200,6 +258,7 @@
 </head>
 <body>
   <canvas id="gl"></canvas>
+  <svg id="selection-link" aria-hidden="true"><path id="selection-link-path"></path></svg>
   <div id="nft-label">NFT: none</div>
   <div id="hud">
     <div id="wallet-controls">
@@ -242,6 +301,12 @@
       <span id="cube-detail-title">Cube</span>
       <button id="cube-detail-close" aria-label="Close cube detail">X</button>
     </div>
+    <div id="cube-detail-info" aria-hidden="true"></div>
+  </div>
+  <div id="street-stats" aria-hidden="true">
+    <div id="street-stat-occupied" class="street-stat"></div>
+    <div id="street-stat-type" class="street-stat"></div>
+    <div id="street-stat-index" class="street-stat"></div>
   </div>
   <div id="mint-success" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal-panel">
