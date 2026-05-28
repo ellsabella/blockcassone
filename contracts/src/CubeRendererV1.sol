@@ -24,31 +24,83 @@ contract CubeRendererV1 is ICubeRenderer {
 
     function metadataJSON(uint256 tokenId) public view returns (string memory) {
         CubeNFT.CubeData memory data = cubes.cubeData(tokenId);
-        string memory tokenIdString = tokenId.toString();
-        string memory slotString = uint256(data.slot).toString();
-        string memory regionString = regionForSlot(data.slot).toString();
-        string memory neighbourhoodString = neighbourhoodForSlot(data.slot).toString();
-        string memory sourceKind = sourceKindName(data.sourceKind);
 
         return string.concat(
             "{",
-            '"name":"Blockcassone Cube #', tokenIdString, '",',
-            '"description":"A fully onchain Blockcassone Hilbert cube. This renderer is an early metadata boundary; final visual chunks will replace the placeholder image and animation.",',
-            '"image":"', imageURI(tokenId), '",',
-            '"image_url":"', imageURI(tokenId), '",',
-            '"animation_url":"', animationURI(tokenId), '",',
+            _metadataHeader(tokenId),
+            _metadataMedia(tokenId),
             '"attributes":[',
-                _trait("Hilbert Slot", slotString), ",",
-                _trait("Region", regionString), ",",
-                _trait("Neighbourhood", neighbourhoodString), ",",
-                _trait("Source Kind", sourceKind), ",",
-                _trait("Source Chain ID", data.sourceChainId.toString()), ",",
-                _trait("Source Contract", _addressHex(data.sourceContract)), ",",
-                _trait("Source Token ID", data.sourceTokenId.toString()), ",",
-                _trait("Renderer Version", uint256(data.rendererVersion).toString()), ",",
-                _trait("Payload Version", uint256(data.payloadVersion).toString()),
+            _attributesJSON(data),
             "]",
             "}"
+        );
+    }
+
+    function _metadataHeader(uint256 tokenId) private pure returns (string memory) {
+        return string.concat(
+            '"name":"Blockcassone Cube #',
+            tokenId.toString(),
+            '",',
+            '"description":"A fully onchain Blockcassone Hilbert cube. This renderer is an early metadata boundary; final visual chunks will replace the placeholder image and animation.",'
+        );
+    }
+
+    function _metadataMedia(uint256 tokenId) private view returns (string memory) {
+        string memory image = imageURI(tokenId);
+        return string.concat(
+            '"image":"',
+            image,
+            '",',
+            '"image_url":"',
+            image,
+            '",',
+            '"animation_url":"',
+            animationURI(tokenId),
+            '",'
+        );
+    }
+
+    function _attributesJSON(CubeNFT.CubeData memory data) private pure returns (string memory) {
+        return string.concat(
+            _placementAttributes(data),
+            ",",
+            _sourceAttributes(data),
+            ",",
+            _versionAttributes(data)
+        );
+    }
+
+    function _placementAttributes(CubeNFT.CubeData memory data)
+        private
+        pure
+        returns (string memory)
+    {
+        return string.concat(
+            _trait("Hilbert Slot", uint256(data.slot).toString()),
+            ",",
+            _trait("Region", regionForSlot(data.slot).toString()),
+            ",",
+            _trait("Neighbourhood", neighbourhoodForSlot(data.slot).toString())
+        );
+    }
+
+    function _sourceAttributes(CubeNFT.CubeData memory data) private pure returns (string memory) {
+        return string.concat(
+            _trait("Source Kind", sourceKindName(data.sourceKind)),
+            ",",
+            _trait("Source Chain ID", data.sourceChainId.toString()),
+            ",",
+            _trait("Source Contract", _addressHex(data.sourceContract)),
+            ",",
+            _trait("Source Token ID", data.sourceTokenId.toString())
+        );
+    }
+
+    function _versionAttributes(CubeNFT.CubeData memory data) private pure returns (string memory) {
+        return string.concat(
+            _trait("Renderer Version", uint256(data.rendererVersion).toString()),
+            ",",
+            _trait("Payload Version", uint256(data.payloadVersion).toString())
         );
     }
 
