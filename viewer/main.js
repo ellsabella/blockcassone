@@ -76,6 +76,9 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+window.addEventListener('resize', () => {
+  if (cubeDetailWidthPx && window.innerWidth > 860) applyCubeDetailWidth(cubeDetailWidthPx);
+});
 
 // ---------- Blockcassone data layer ----------
 // These come from globals defined by the /public/*.js script tags.
@@ -205,9 +208,11 @@ const mintSuccessEl = document.getElementById('mint-success');
 const mintSuccessTextEl = document.getElementById('mint-success-text');
 const mintSuccessCloseBtn = document.getElementById('mint-success-close');
 const cubeDetailEl = document.getElementById('cube-detail');
+const cubeDetailResizeEl = document.getElementById('cube-detail-resize');
 const cubeDetailTitleEl = document.getElementById('cube-detail-title');
 const cubeDetailCloseBtn = document.getElementById('cube-detail-close');
 let cubeDetailOpen = false;
+let cubeDetailWidthPx = 0;
 
 window.__PIPELINE_MINT_SOURCE_FOR_SLOT__ = sourceNftForSlot;
 
@@ -311,6 +316,17 @@ function closeMintSuccess() {
   }
 }
 
+function clampCubeDetailWidth(width) {
+  const max = Math.max(280, window.innerWidth - 48);
+  return Math.max(300, Math.min(max, width));
+}
+
+function applyCubeDetailWidth(width) {
+  if (!cubeDetailEl) return;
+  cubeDetailWidthPx = clampCubeDetailWidth(width);
+  cubeDetailEl.style.width = `${cubeDetailWidthPx}px`;
+}
+
 function openCubeDetail(motifIdx) {
   const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === motifIdx);
   if (idx >= 0) currentPlaneIdx = idx;
@@ -318,6 +334,10 @@ function openCubeDetail(motifIdx) {
   cubeDetailOpen = true;
   if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube ${motifIdx}`;
   if (cubeDetailEl) {
+    if (!cubeDetailWidthPx && window.innerWidth > 860) {
+      const initial = Math.min(520, Math.max(360, window.innerWidth * 0.34));
+      applyCubeDetailWidth(initial);
+    }
     cubeDetailEl.classList.add('open');
     cubeDetailEl.setAttribute('aria-hidden', 'false');
   }
@@ -339,6 +359,27 @@ function closeCubeDetail() {
 if (mintSuccessCloseBtn) mintSuccessCloseBtn.addEventListener('click', closeMintSuccess);
 if (mintSuccessEl) mintSuccessEl.addEventListener('click', e => { if (e.target === mintSuccessEl) closeMintSuccess(); });
 if (cubeDetailCloseBtn) cubeDetailCloseBtn.addEventListener('click', closeCubeDetail);
+if (cubeDetailResizeEl && cubeDetailEl) {
+  cubeDetailResizeEl.addEventListener('pointerdown', (e) => {
+    if (window.innerWidth <= 860) return;
+    e.preventDefault();
+    cubeDetailResizeEl.setPointerCapture(e.pointerId);
+    document.body.classList.add('resizing-cube-detail');
+  });
+  cubeDetailResizeEl.addEventListener('pointermove', (e) => {
+    if (!cubeDetailResizeEl.hasPointerCapture(e.pointerId)) return;
+    const right = window.innerWidth - 12;
+    applyCubeDetailWidth(right - e.clientX);
+  });
+  cubeDetailResizeEl.addEventListener('pointerup', (e) => {
+    if (cubeDetailResizeEl.hasPointerCapture(e.pointerId)) cubeDetailResizeEl.releasePointerCapture(e.pointerId);
+    document.body.classList.remove('resizing-cube-detail');
+  });
+  cubeDetailResizeEl.addEventListener('pointercancel', (e) => {
+    if (cubeDetailResizeEl.hasPointerCapture(e.pointerId)) cubeDetailResizeEl.releasePointerCapture(e.pointerId);
+    document.body.classList.remove('resizing-cube-detail');
+  });
+}
 
 async function runMintSimulation() {
   if (mintRunBtn) mintRunBtn.disabled = true;
@@ -684,7 +725,7 @@ function recentreDetailOrbit() {
   if (selectedMotifIdx === null || selectedMotifIdx === undefined) return;
   const { mn, mx } = cubeAABBFor(selectedMotifIdx);
   detailOrbit.setTarget((mn[0]+mx[0])*0.5, (mn[1]+mx[1])*0.5, (mn[2]+mx[2])*0.5);
-  detailOrbit.setDistance(Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 2.7);
+  detailOrbit.setDistance(Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 2.25);
 }
 
 // Wrap navigate so target follows the active cube. The previously-installed
