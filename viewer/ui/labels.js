@@ -28,5 +28,5 @@ export function updateNftLabel(el, motifIdx) {
   const contract = nft.contract ? `${nft.contract.slice(0, 6)}...${nft.contract.slice(-4)}` : 'unknown';
   const prefix   = mintedCube ? `cube ${mintedCube.cubeId} @ slot ${motifIdx}` : `slot ${motifIdx}`;
   const agent = nft.agentic ? ` | Agent ${nft.agentId || '?'}` : '';
-  el.textContent = `${prefix} | ${kind}${agent} | ${name} | ${contract}:${nft.tokenId || '?'}`;
+  el.textContent = `${prefix} | ${nft.chain || '?'} | ${kind}${agent} | ${name} | ${contract}:${nft.tokenId || '?'}`;
 }

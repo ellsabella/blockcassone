@@ -8,7 +8,11 @@ export function updateWalletStatus(el) {
   const state = getWalletState();
   if (state.loading)       el.textContent = 'wallet: loading...';
   else if (state.error)    el.textContent = `wallet: ${state.error}`;
-  else if (state.loaded)   el.textContent = `wallet: ${state.nfts.length} NFTs | normies ${state.normies.length} | non ${state.nonNormies.length}`;
+  else if (state.loaded) {
+    const chains = state.chains?.join('+') || state.chain || 'unknown';
+    const failed = Object.keys(state.chainErrors || {});
+    el.textContent = `wallet: ${state.nfts.length} NFTs @ ${chains} | normies ${state.normies.length} | non ${state.nonNormies.length}${failed.length ? ` | failed ${failed.join(',')}` : ''}`;
+  }
   else                     el.textContent = 'wallet: not loaded';
 }
 

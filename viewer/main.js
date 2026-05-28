@@ -19,7 +19,7 @@ import { buildHilbertLines, buildFullHilbertPath } from './hilbert-lines.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
 import { buildStoneWalker }   from './materials/stone-walker.js';
 import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner } from './non-normie-art-plane.js';
-import { isAgenticNonNormieCube, loadWalletNfts, setWalletDataReadyCallback } from './wallet-nfts.js';
+import { isAgenticNonNormieCube, loadWalletNftsAcrossChains, setWalletDataReadyCallback } from './wallet-nfts.js';
 import { serializeAllPlaced } from '/core/serialize.js';
 import {
   clearMintSimulationSilent,
@@ -322,8 +322,10 @@ async function loadWalletFromInput() {
   if (!address) return;
   if (walletLoadBtn) walletLoadBtn.disabled = true;
   try {
-    const state = await loadWalletNfts(address, 'ethereum');
-    log(`wallet loaded ${state.nfts.length} NFTs | normies=${state.normies.length} non=${state.nonNormies.length}`);
+    const state = await loadWalletNftsAcrossChains(address);
+    const chainNote = state.chains?.join('+') || state.chain || 'unknown';
+    const failed = Object.keys(state.chainErrors || {});
+    log(`wallet loaded ${state.nfts.length} NFTs on ${chainNote} | normies=${state.normies.length} non=${state.nonNormies.length}${failed.length ? ` | failed ${failed.join(',')}` : ''}`);
     clearGeneratedMeshes();
     clearMintSimulationSilent();
     selectedMotifIdx = null;

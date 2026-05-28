@@ -1,6 +1,7 @@
 import { imageUrlToBinaryGrid } from './nft-art-grid.js';
 
 export const NORMIES_CONTRACT = '0x9eb6e2025b64f340691e424b7fe7022ffde12438';
+export const DEFAULT_WALLET_CHAINS = Object.freeze(['ethereum', 'base', 'shape']);
 
 let walletState = {
   loaded: false,
@@ -114,7 +115,7 @@ function normalizeNft(raw, chain) {
   };
   Object.assign(normal, extractAgentBinding(raw));
   normal.agentBindingLoaded = Boolean(normal.agentBinding);
-  normal.isNormie = normal.contract === NORMIES_CONTRACT;
+  normal.isNormie = chain === 'ethereum' && normal.contract === NORMIES_CONTRACT;
   normal.normieId = normal.isNormie ? Number(normal.tokenId) : null;
   normal.isSvgArt = !normal.isNormie && isLikelySvgArtUrl(normal.imageUrl);
   return normal;
@@ -210,6 +211,95 @@ export async function loadWalletNfts(address, chain = 'ethereum') {
     notify();
     throw err;
   }
+}
+
+export async function loadWalletNftsAcrossChains(address, chains = DEFAULT_WALLET_CHAINS) {
+  const cleanAddress = String(address || '').trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(cleanAddress))
+    throw new Error('Enter a valid Ethereum wallet address');
+
+  const uniqueChains = [...new Set((chains || []).map(c => String(c || '').trim()).filter(Boolean))];
+  if (!uniqueChains.length) throw new Error('No chains selected');
+
+  walletState = {
+    loaded: false,
+    loading: true,
+    address: cleanAddress,
+    chain: uniqueChains.join(','),
+    chains: uniqueChains,
+    nfts: [],
+    normies: [],
+    nonNormies: [],
+    chainErrors: {},
+    error: null,
+  };
+  notify();
+
+  const allNfts = [];
+  const chainErrors = {};
+
+  await Promise.all(uniqueChains.map(async chain => {
+    try {
+      const rawNfts = [];
+      let cursor = null;
+      do {
+        const page = await fetchWalletPage(cleanAddress, chain, cursor);
+        console.debug(`[wallet-nfts] OpenSea page`, {
+          chain,
+          count: (page.nfts || []).length,
+          next: page.next || null,
+        });
+        rawNfts.push(...(page.nfts || []));
+        cursor = page.next || null;
+      } while (cursor);
+      allNfts.push(...rawNfts.map(n => normalizeNft(n, chain)));
+    } catch (err) {
+      chainErrors[chain] = String(err?.message || err);
+      console.warn(`[wallet-nfts] ${chain} wallet fetch failed`, err);
+    }
+  }));
+
+  if (allNfts.length === 0 && Object.keys(chainErrors).length > 0) {
+    const first = Object.entries(chainErrors)[0];
+    throw new Error(`${first[0]}: ${first[1]}`);
+  }
+
+  allNfts.sort((a, b) =>
+    a.chain.localeCompare(b.chain) ||
+    a.contract.localeCompare(b.contract) ||
+    String(a.tokenId).localeCompare(String(b.tokenId), undefined, { numeric: true })
+  );
+
+  console.info(`[wallet-nfts] loaded ${allNfts.length} NFTs across chains`, {
+    chains: uniqueChains,
+    chainErrors,
+    normies: allNfts.filter(n => n.isNormie).length,
+    nonNormies: allNfts.filter(n => !n.isNormie).length,
+    sample: allNfts.slice(0, 8).map(n => ({
+      chain: n.chain,
+      contract: n.contract,
+      tokenId: n.tokenId,
+      isNormie: n.isNormie,
+      agentic: n.agentic,
+      agentId: n.agentId,
+      name: n.name,
+    })),
+  });
+
+  walletState = {
+    loaded: true,
+    loading: false,
+    address: cleanAddress,
+    chain: uniqueChains.join(','),
+    chains: uniqueChains,
+    nfts: allNfts,
+    normies: allNfts.filter(n => n.isNormie),
+    nonNormies: allNfts.filter(n => !n.isNormie),
+    chainErrors,
+    error: null,
+  };
+  notify();
+  return walletState;
 }
 
 export async function loadAgentBindingForNft(nft) {
