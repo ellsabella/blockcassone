@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import {IERC721} from "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
+import {ICubeRenderer} from "./interfaces/ICubeRenderer.sol";
 
 contract CubeNFT is ERC721, Ownable {
     uint8 public constant SOURCE_KIND_NORMIE = 1;
@@ -30,6 +31,7 @@ contract CubeNFT is ERC721, Ownable {
     error SourceAlreadyCubed(bytes32 sourceKey, uint256 cubeId);
     error ExternalSourceIsNormie();
     error NonexistentCube(uint256 cubeId);
+    error RendererNotSet();
 
     event CubeMinted(
         uint256 indexed cubeId,
@@ -40,9 +42,11 @@ contract CubeNFT is ERC721, Ownable {
         uint256 sourceTokenId,
         bytes32 seed
     );
+    event RendererUpdated(address indexed oldRenderer, address indexed newRenderer);
 
     address public immutable normieContract;
     uint32 public immutable totalSlots;
+    address public renderer;
 
     uint256 private _nextCubeId = 1;
 
@@ -158,6 +162,18 @@ contract CubeNFT is ERC721, Ownable {
     function cubeData(uint256 cubeId) external view returns (CubeData memory data) {
         if (_ownerOf(cubeId) == address(0)) revert NonexistentCube(cubeId);
         return _cubeData[cubeId];
+    }
+
+    function setRenderer(address newRenderer) external onlyOwner {
+        address oldRenderer = renderer;
+        renderer = newRenderer;
+        emit RendererUpdated(oldRenderer, newRenderer);
+    }
+
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        if (_ownerOf(tokenId) == address(0)) revert NonexistentCube(tokenId);
+        if (renderer == address(0)) revert RendererNotSet();
+        return ICubeRenderer(renderer).tokenURI(tokenId);
     }
 
     function nextCubeId() external view returns (uint256) {

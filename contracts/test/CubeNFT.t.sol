@@ -14,6 +14,18 @@ contract MockERC721 is ERC721 {
     }
 }
 
+contract MockCubeRenderer {
+    string public uri = "data:application/json;base64,test";
+
+    function setURI(string calldata uri_) external {
+        uri = uri_;
+    }
+
+    function tokenURI(uint256) external view returns (string memory) {
+        return uri;
+    }
+}
+
 contract CubeNFTTest is Test {
     address private constant OWNER = address(0xA11CE);
     address private constant MINTER = address(0xB0B);
@@ -21,11 +33,13 @@ contract CubeNFTTest is Test {
 
     MockERC721 private normies;
     MockERC721 private externalNft;
+    MockCubeRenderer private renderer;
     CubeNFT private cubes;
 
     function setUp() public {
         normies = new MockERC721("Normies", "NORM");
         externalNft = new MockERC721("External", "EXT");
+        renderer = new MockCubeRenderer();
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 64, OWNER);
 
         normies.mint(MINTER, 101);
@@ -168,5 +182,45 @@ contract CubeNFTTest is Test {
     function testCubeDataRevertsForMissingCube() public {
         vm.expectRevert(abi.encodeWithSelector(CubeNFT.NonexistentCube.selector, 999));
         cubes.cubeData(999);
+    }
+
+    function testOwnerCanSetRendererAndTokenURIDelegates() public {
+        vm.prank(OWNER);
+        cubes.setRenderer(address(renderer));
+
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(101, 7, bytes32("seed"));
+
+        assertEq(cubes.renderer(), address(renderer));
+        assertEq(cubes.tokenURI(cubeId), "data:application/json;base64,test");
+    }
+
+    function testSetRendererEmitsEvent() public {
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.RendererUpdated(address(0), address(renderer));
+
+        vm.prank(OWNER);
+        cubes.setRenderer(address(renderer));
+    }
+
+    function testNonOwnerCannotSetRenderer() public {
+        vm.prank(OTHER);
+        vm.expectRevert(
+            abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, OTHER)
+        );
+        cubes.setRenderer(address(renderer));
+    }
+
+    function testTokenURIRevertsWhenRendererMissing() public {
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(101, 7, bytes32("seed"));
+
+        vm.expectRevert(CubeNFT.RendererNotSet.selector);
+        cubes.tokenURI(cubeId);
+    }
+
+    function testTokenURIRevertsForMissingCube() public {
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.NonexistentCube.selector, 999));
+        cubes.tokenURI(999);
     }
 }
