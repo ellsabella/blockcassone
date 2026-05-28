@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data:; connect-src 'self' http: https:;">
-  <title>Blockcassone — viewer</title>
+  <title>Blockcassone</title>
   <style>
     @font-face {
       font-family: 'NormiesFont';
@@ -13,110 +13,78 @@
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
-      background: #000;
-      color: #bbb;
-      font-family: 'Courier New', monospace;
-      overflow: hidden;
       height: 100%;
+      overflow: hidden;
+      background: #030304;
+      color: #c8c8cc;
+      font-family: 'Courier New', monospace;
     }
     #gl { display: block; width: 100vw; height: 100vh; }
+    button, input {
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+    }
+    button {
+      background: rgba(24, 24, 28, 0.86);
+      border: 1px solid rgba(120, 120, 140, 0.38);
+      color: #d6d6dc;
+      padding: 7px 12px;
+      cursor: pointer;
+      min-height: 31px;
+    }
+    button:hover { background: rgba(46, 46, 54, 0.92); color: #fff; }
+    button.active { background: rgba(72, 72, 88, 0.95); border-color: #b5b5c8; color: #fff; }
+    input {
+      background: rgba(20, 20, 24, 0.88);
+      border: 1px solid rgba(120, 120, 140, 0.38);
+      color: #e8e8ee;
+      padding: 7px 9px;
+      min-height: 31px;
+    }
     #hud {
       position: fixed;
-      top: 12px;
-      left: 12px;
-      display: flex;
-      flex-direction: column;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 4;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto auto;
       gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, rgba(5, 5, 8, 0.94), rgba(5, 5, 8, 0.58));
+      border-bottom: 1px solid rgba(120, 120, 140, 0.28);
+      backdrop-filter: blur(10px);
       pointer-events: auto;
-      width: 360px;
     }
-    #log {
-      font-size: 11px;
-      color: #777;
-      white-space: pre;
-      line-height: 1.4;
-      pointer-events: none;
-    }
-    #controls, #category-controls, #cube-type-controls, #wallet-controls, #mint-controls {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-    #wallet-controls, #mint-controls {
-      background: rgba(14, 14, 18, 0.78);
-      border: 1px solid #303038;
-      padding: 8px;
-      flex-direction: column;
-    }
-    .panel-title {
-      font-size: 10px;
-      color: #777;
-      text-transform: uppercase;
-      letter-spacing: 0;
-    }
-    .panel-row {
+    #wallet-controls, #mint-controls, #controls, #category-controls, #cube-type-controls {
       display: flex;
       gap: 6px;
       align-items: center;
       flex-wrap: wrap;
     }
-    #wallet-controls input {
-      width: 100%;
-      background: rgba(20, 20, 22, 0.8);
-      border: 1px solid #333;
-      color: #bbb;
-      font-family: 'Courier New', monospace;
-      font-size: 11px;
-      padding: 6px 8px;
-    }
-    #wallet-status {
+    #wallet-address { width: min(42vw, 420px); }
+    #wallet-status, #mint-status, #log {
       font-size: 10px;
-      color: #888;
-      align-self: center;
-    }
-    #mint-count {
-      width: 46px;
-      text-align: center;
-      background: rgba(20, 20, 22, 0.8);
-      border: 1px solid #333;
-      color: #bbb;
-      font-family: 'Courier New', monospace;
-      font-size: 11px;
-      padding: 6px 4px;
-    }
-    #mint-status {
-      font-size: 10px;
-      color: #888;
+      color: #8d8d98;
       line-height: 1.35;
     }
-    button {
-      background: rgba(20, 20, 22, 0.8);
-      border: 1px solid #333;
-      color: #bbb;
-      font-family: 'Courier New', monospace;
+    #mint-count { width: 46px; text-align: center; }
+    #mint-price {
+      color: #f0f0f4;
       font-size: 11px;
-      padding: 6px 12px;
-      cursor: pointer;
+      white-space: nowrap;
     }
-    button:hover   { background: rgba(40, 40, 48, 0.9); color: #fff; }
-    button.active  { background: rgba(60, 60, 80, 0.9); color: #fff; border-color: #88a; }
-    #lights-panel {
-      position: fixed;
-      bottom: 12px;
-      left: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      pointer-events: auto;
-    }
+    #category-controls, #cube-type-controls, #log { display: none; }
     #nft-label {
       position: fixed;
       right: 12px;
       bottom: 12px;
-      max-width: min(460px, calc(100vw - 24px));
-      padding: 6px 8px;
-      background: rgba(14, 14, 18, 0.72);
-      border: 1px solid rgba(80, 80, 90, 0.55);
+      z-index: 3;
+      max-width: min(520px, calc(100vw - 24px));
+      padding: 7px 9px;
+      background: rgba(10, 10, 14, 0.72);
+      border: 1px solid rgba(100, 100, 118, 0.48);
       color: #aaa;
       font-size: 11px;
       line-height: 1.25;
@@ -125,39 +93,71 @@
       text-overflow: ellipsis;
       pointer-events: none;
     }
-    .light-group {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      background: rgba(14, 14, 18, 0.8);
-      border: 1px solid #333;
-      padding: 6px 8px;
+    #cube-detail {
+      position: fixed;
+      inset: 58px 12px 12px 12px;
+      z-index: 2;
+      display: none;
+      pointer-events: none;
+      border: 1px solid rgba(160, 160, 180, 0.28);
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.58), 0 18px 60px rgba(0, 0, 0, 0.22);
     }
-    .light-label {
-      font-size: 10px;
-      color: #888;
-      margin-bottom: 2px;
-    }
-    .light-row {
+    #cube-detail.open { display: block; }
+    #cube-detail-bar {
+      position: absolute;
+      top: 10px;
+      right: 10px;
       display: flex;
-      align-items: center;
       gap: 6px;
+      align-items: center;
+      pointer-events: auto;
+      background: rgba(12, 12, 16, 0.82);
+      border: 1px solid rgba(100, 100, 118, 0.52);
+      padding: 6px;
     }
-    .light-row span {
-      font-size: 10px;
-      color: #666;
-      width: 10px;
+    #cube-detail-title { color: #ddd; font-size: 11px; padding: 0 6px; }
+    #cube-detail-close, #mint-success-close { min-width: 34px; }
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 8;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.38);
+      pointer-events: auto;
     }
-    .light-row input[type=range] {
-      width: 120px;
-      accent-color: #88a;
-      cursor: pointer;
+    .modal.open { display: flex; }
+    .modal-panel {
+      width: min(420px, calc(100vw - 28px));
+      background: rgba(14, 14, 18, 0.88);
+      border: 1px solid rgba(160, 160, 180, 0.34);
+      padding: 18px;
+      box-shadow: 0 18px 54px rgba(0, 0, 0, 0.48);
     }
-    .light-row .val {
-      font-size: 10px;
+    .modal-panel h2 {
+      color: #f1f1f4;
+      font-size: 16px;
+      font-weight: normal;
+      margin-bottom: 8px;
+    }
+    .modal-panel p {
       color: #aaa;
-      width: 36px;
-      text-align: right;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .panel-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    @media (max-width: 860px) {
+      #hud {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        align-items: stretch;
+      }
+      #wallet-controls, #mint-controls { justify-content: space-between; }
+      #wallet-address { width: 100%; }
+      #controls { display: none; }
+      #cube-detail { inset: 126px 8px 46px 8px; }
+      #nft-label { left: 8px; right: 8px; bottom: 8px; max-width: none; }
     }
   </style>
 </head>
@@ -165,6 +165,20 @@
   <canvas id="gl"></canvas>
   <div id="nft-label">NFT: none</div>
   <div id="hud">
+    <div id="wallet-controls">
+      <input id="wallet-address" spellcheck="false" value="0x15F89dC0088F13FFABBC75FF3F279c9570a69c33" aria-label="Wallet address">
+      <button id="wallet-load">Load</button>
+      <span id="wallet-status">wallet: not loaded</span>
+    </div>
+    <div id="mint-controls">
+      <span id="mint-price">0.03 ETH</span>
+      <button id="mint-minus" aria-label="Decrease mint count">-</button>
+      <input id="mint-count" value="1" inputmode="numeric" aria-label="Mint count">
+      <button id="mint-plus" aria-label="Increase mint count">+</button>
+      <button id="mint-run">Mint</button>
+      <button id="mint-reset">Reset</button>
+      <span id="mint-status">minted: 0 | empty slots: 64</span>
+    </div>
     <div id="controls">
       <button id="mode-2d">2D</button>
       <button id="mode-3d">3D</button>
@@ -183,29 +197,24 @@
       <button data-cube-type="normie">Normie</button>
       <button data-cube-type="non">Non-normie</button>
     </div>
-    <div id="wallet-controls">
-      <div class="panel-title">Wallet</div>
-      <input id="wallet-address" spellcheck="false" value="0x15F89dC0088F13FFABBC75FF3F279c9570a69c33" aria-label="Wallet address">
-      <div class="panel-row">
-        <button id="wallet-load">Load Wallet NFTs</button>
-        <span id="wallet-status">wallet: not loaded</span>
-      </div>
-    </div>
-    <div id="mint-controls">
-      <div class="panel-title">Mint Simulation</div>
-      <div class="panel-row">
-        <button id="mint-minus" aria-label="Decrease mint count">-</button>
-        <input id="mint-count" value="1" inputmode="numeric" aria-label="Mint count">
-        <button id="mint-plus" aria-label="Increase mint count">+</button>
-        <button id="mint-run">Mint</button>
-        <button id="mint-reset">Reset</button>
-      </div>
-      <div id="mint-status">minted: 0 | empty slots: 64</div>
-    </div>
     <div id="log"></div>
   </div>
+  <div id="cube-detail" aria-hidden="true">
+    <div id="cube-detail-bar">
+      <span id="cube-detail-title">Cube</span>
+      <button id="cube-detail-close" aria-label="Close cube detail">X</button>
+    </div>
+  </div>
+  <div id="mint-success" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-panel">
+      <h2>Mint successful</h2>
+      <p id="mint-success-text">You have minted 0 cubes.</p>
+      <div class="panel-row" style="margin-top:14px;justify-content:flex-end;">
+        <button id="mint-success-close">Close</button>
+      </div>
+    </div>
+  </div>
 
-  <!-- Blockcassone data layer (globals) -->
   <script src="/public/config.js"></script>
   <script src="/public/inputdata.js"></script>
   <script src="/public/random.js"></script>
@@ -214,28 +223,6 @@
   <script src="/public/planes.js"></script>
   <script src="/public/blocks.js"></script>
   <script src="/public/placement.js"></script>
-  <!-- Viewer (ES module) -->
   <script type="module" src="./main.js"></script>
-
-  <div id="lights-panel">
-    <div id="lights-selected" style="font-size:10px;color:#888;margin-bottom:4px;">Lights</div>
-    <div class="light-group" id="light-0">
-      <div class="light-label">Light 1 — red</div>
-      <div class="light-row"><span>X</span><input type="range" min="-3" max="3" step="0.05" value="0.7" data-light="0" data-axis="0"><span class="val">0.70</span></div>
-      <div class="light-row"><span>Y</span><input type="range" min="-3" max="3" step="0.05" value="0.5" data-light="0" data-axis="1"><span class="val">0.50</span></div>
-      <div class="light-row"><span>Z</span><input type="range" min="-3" max="3" step="0.05" value="0.7" data-light="0" data-axis="2"><span class="val">0.70</span></div>
-    </div>
-    <div class="light-group" id="light-1">
-      <div class="light-label">Light 2 — green</div>
-      <div class="light-row"><span>X</span><input type="range" min="-3" max="3" step="0.05" value="-0.7" data-light="1" data-axis="0"><span class="val">-0.70</span></div>
-      <div class="light-row"><span>Y</span><input type="range" min="-3" max="3" step="0.05" value="0.3" data-light="1" data-axis="1"><span class="val">0.30</span></div>
-      <div class="light-row"><span>Z</span><input type="range" min="-3" max="3" step="0.05" value="0.5" data-light="1" data-axis="2"><span class="val">0.50</span></div>
-    </div>
-    <div class="light-group" id="light-2">
-      <div class="light-label">Light 3 — blue</div>
-      <div class="light-row"><span>X</span><input type="range" min="-3" max="3" step="0.05" value="0.2" data-light="2" data-axis="0"><span class="val">0.20</span></div>
-      <div class="light-row"><span>Y</span><input type="range" min="-3" max="3" step="0.05" value="0.9" data-light="2" data-axis="1"><span class="val">0.90</span></div>
-      <div class="light-row"><span>Z</span><input type="range" min="-3" max="3" step="0.05" value="-0.7" data-light="2" data-axis="2"><span class="val">-0.70</span></div>
-    </div>
-  </div>
+</body>
 </html>

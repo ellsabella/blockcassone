@@ -22,9 +22,9 @@ import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner 
 import { isAgenticNonNormieCube, loadWalletNftsAcrossChains, setWalletDataReadyCallback } from './wallet-nfts.js';
 import { serializeAllPlaced } from '/core/serialize.js';
 import {
-  clearMintSimulationSilent,
-  getMintedCubes,
+  getMintedCubeForSlot,
   isMintedSlot,
+  loadMintSimulation,
   mintSimulationLoaded,
   resetMintSimulation,
   setMintDataReadyCallback,
@@ -202,6 +202,12 @@ const mintCountInput = document.getElementById('mint-count');
 const mintRunBtn = document.getElementById('mint-run');
 const mintResetBtn = document.getElementById('mint-reset');
 const mintStatusEl = document.getElementById('mint-status');
+const mintSuccessEl = document.getElementById('mint-success');
+const mintSuccessTextEl = document.getElementById('mint-success-text');
+const mintSuccessCloseBtn = document.getElementById('mint-success-close');
+const cubeDetailEl = document.getElementById('cube-detail');
+const cubeDetailTitleEl = document.getElementById('cube-detail-title');
+const cubeDetailCloseBtn = document.getElementById('cube-detail-close');
 
 window.__PIPELINE_MINT_SOURCE_FOR_SLOT__ = sourceNftForSlot;
 
@@ -274,9 +280,9 @@ const _updateMintStatus   = () => updateMintStatus(mintStatusEl, uniqueMotifs);
 const _mintCountValue     = () => mintCountValue(mintCountInput);
 const _setMintCountValue  = (v) => setMintCountValue(mintCountInput, v);
 
-function resetMintAndScene() {
+async function resetMintAndScene() {
   clearGeneratedMeshes();
-  resetMintSimulation();
+  await resetMintSimulation();
   selectedMotifIdx = null;
   currentPlaneIdx = 0;
   _updateMintStatus();
@@ -285,6 +291,55 @@ function resetMintAndScene() {
   rebuildScene();
 }
 
+function openMintSuccess(count) {
+  if (mintSuccessTextEl) mintSuccessTextEl.textContent = `You have minted ${count} ${count === 1 ? 'cube' : 'cubes'}.`;
+  if (mintSuccessEl) {
+    mintSuccessEl.classList.add('open');
+    mintSuccessEl.setAttribute('aria-hidden', 'false');
+  }
+}
+
+function closeMintSuccess() {
+  if (mintSuccessEl) {
+    mintSuccessEl.classList.remove('open');
+    mintSuccessEl.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function openCubeDetail(motifIdx) {
+  const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === motifIdx);
+  if (idx >= 0) currentPlaneIdx = idx;
+  selectedMotifIdx = motifIdx;
+  mode = '3D';
+  btn2D.classList.toggle('active', false);
+  btn3D.classList.toggle('active', true);
+  btnBig.classList.toggle('active', false);
+  if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube ${motifIdx}`;
+  if (cubeDetailEl) {
+    cubeDetailEl.classList.add('open');
+    cubeDetailEl.setAttribute('aria-hidden', 'false');
+  }
+  recentreOrbit();
+  _updateNftLabel();
+  rebuildScene();
+}
+
+function closeCubeDetail() {
+  if (cubeDetailEl) {
+    cubeDetailEl.classList.remove('open');
+    cubeDetailEl.setAttribute('aria-hidden', 'true');
+  }
+  mode = 'BIG';
+  btn2D.classList.toggle('active', false);
+  btn3D.classList.toggle('active', false);
+  btnBig.classList.toggle('active', true);
+  recentreOrbit();
+  rebuildScene();
+}
+
+if (mintSuccessCloseBtn) mintSuccessCloseBtn.addEventListener('click', closeMintSuccess);
+if (mintSuccessEl) mintSuccessEl.addEventListener('click', e => { if (e.target === mintSuccessEl) closeMintSuccess(); });
+if (cubeDetailCloseBtn) cubeDetailCloseBtn.addEventListener('click', closeCubeDetail);
 
 async function runMintSimulation() {
   if (mintRunBtn) mintRunBtn.disabled = true;
@@ -297,6 +352,7 @@ async function runMintSimulation() {
       if (idx >= 0) currentPlaneIdx = idx;
       if (mode === 'BIG') selectedMotifIdx = first;
       log(`minted ${minted.length}: ${minted.map(c => `${c.sourceKind}@slot${c.slot}`).join(', ')}`);
+      openMintSuccess(minted.length);
     } else {
       log('mint simulation: no eligible NFTs or no empty slots');
     }
@@ -315,7 +371,9 @@ if (mintMinusBtn) mintMinusBtn.addEventListener('click', () => _setMintCountValu
 if (mintPlusBtn) mintPlusBtn.addEventListener('click', () => _setMintCountValue(_mintCountValue() + 1));
 if (mintCountInput) mintCountInput.addEventListener('change', () => _setMintCountValue(_mintCountValue()));
 if (mintRunBtn) mintRunBtn.addEventListener('click', runMintSimulation);
-if (mintResetBtn) mintResetBtn.addEventListener('click', resetMintAndScene);
+if (mintResetBtn) mintResetBtn.addEventListener('click', () => {
+  resetMintAndScene().catch(err => log(`reset failed: ${String(err?.message || err)}`));
+});
 
 async function loadWalletFromInput() {
   const address = walletAddressInput?.value?.trim();
@@ -327,7 +385,6 @@ async function loadWalletFromInput() {
     const failed = Object.keys(state.chainErrors || {});
     log(`wallet loaded ${state.nfts.length} NFTs on ${chainNote} | normies=${state.normies.length} non=${state.nonNormies.length}${failed.length ? ` | failed ${failed.join(',')}` : ''}`);
     clearGeneratedMeshes();
-    clearMintSimulationSilent();
     selectedMotifIdx = null;
     currentPlaneIdx = 0;
     _updateMintStatus();
@@ -387,7 +444,7 @@ btnNext.addEventListener('click', () => navigate(+1));
 // Debug toggles.
 let showCubeGlass = false;
 let showLightMarkers = false;
-let showEdgePoints = true;
+let showEdgePoints = false;
 window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft')  navigate(-1);
   if (e.key === 'ArrowRight') navigate(+1);
@@ -579,6 +636,12 @@ const lights = createLights();
 // after every navigate() (see hook below).
 function recentreOrbit() {
   if (mode === 'BIG') {
+    if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
+      const { mn, mx } = cubeAABBFor(selectedMotifIdx);
+      orbit.setTarget((mn[0]+mx[0])*0.5, (mn[1]+mx[1])*0.5, (mn[2]+mx[2])*0.5);
+      orbit.setDistance(Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 5.8);
+      return;
+    }
     let mnX=Infinity, mnY=Infinity, mnZ=Infinity, mxX=-Infinity, mxY=-Infinity, mxZ=-Infinity;
     for (const v of hilbert.rawVertices) {
       if (v.x < mnX) mnX=v.x; if (v.x > mxX) mxX=v.x;
@@ -649,7 +712,8 @@ btnNext.addEventListener('click', recentreOrbit);
     }
 
     if (hitMotif !== null && bestT < Infinity) {
-      selectedMotifIdx = (selectedMotifIdx === hitMotif) ? null : hitMotif;
+      openCubeDetail(hitMotif);
+      return;
     } else {
       selectedMotifIdx = null;
     }
@@ -799,8 +863,11 @@ function rebuildScene() {
   for (const motifIdx of motifsToRender) {
     const cat = ensureMotifCategory(motifIdx);
     const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
-    const dim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
+    const mintedCube = getMintedCubeForSlot(motifIdx);
+    const shadowDim = mintedCube?.shadow ? 0.22 : 1.0;
+    const focusDim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
       ? 0.15 : 1.0;
+    const dim = shadowDim * focusDim;
 
     if (showCubeGlass && mode === '3D') {
       const items = buildCubeGlass(motifIdx, hilbert, gl, meshes, mode);
@@ -879,8 +946,11 @@ function rebuildScene() {
     const motifIdx = plane.hierarchy.motifIndex;
     const cat      = ensureMotifCategory(motifIdx);
     const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
-    const dim      = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
+    const mintedCube = getMintedCubeForSlot(motifIdx);
+    const shadowDim = mintedCube?.shadow ? 0.22 : 1.0;
+    const focusDim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
       ? 0.15 : 1.0;
+    const dim = shadowDim * focusDim;
     const cubeCtx = cubeCtxMap[motifIdx];
 
     if (isNormieCube(motifIdx)) {
@@ -962,6 +1032,25 @@ setDataReadyCallback(() => rebuildScene());
 setBannerDataReadyCallback(() => rebuildScene());
 setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); rebuildScene(); });
 setMintDataReadyCallback(() => { _updateMintStatus(); rebuildScene(); });
+
+loadMintSimulation()
+  .then(cubes => {
+    if (cubes.length > 0) {
+      const first = cubes[0].slot;
+      selectedMotifIdx = first;
+      const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === first);
+      if (idx >= 0) currentPlaneIdx = idx;
+      recentreOrbit();
+      log(`loaded ${cubes.length} saved mints`);
+    } else {
+      selectedMotifIdx = uniqueMotifs[Math.floor(Math.random() * uniqueMotifs.length)] ?? null;
+      recentreOrbit();
+    }
+    _updateMintStatus();
+    _updateNftLabel();
+    rebuildScene();
+  })
+  .catch(err => log(`saved mints unavailable: ${String(err?.message || err)}`));
 
 // ---------- SSE hot-reload ----------
 const sse = new EventSource('/shader-changes');

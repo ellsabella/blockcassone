@@ -1,4 +1,4 @@
-// UI — NFT info label and lights-panel label updates.
+// UI: NFT info label and optional debug label updates.
 
 import { getMintedCubeForSlot } from '../mint-simulator.js';
 import { getWalletAssignmentForCube } from '../wallet-nfts.js';

@@ -26,6 +26,7 @@ function loadDotEnv(filePath, { override = false } = {}) {
 }
 
 const ENV_PATH = path.join(REPO_ROOT, '.env');
+const DEV_MINTS_PATH = path.join(REPO_ROOT, 'viewer', 'data', 'dev-mints.json');
 loadDotEnv(ENV_PATH);
 
 // Route prefixes that should resolve from the repo root (outside renderer/).
@@ -66,6 +67,96 @@ function sendJson(res, code, payload) {
     'Cache-Control': 'no-store',
   });
   res.end(JSON.stringify(payload));
+}
+
+function readRequestBody(req, maxBytes = 1_000_000) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > maxBytes) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
+  });
+}
+
+function defaultDevMints() {
+  return { nextCubeId: 1, mints: [] };
+}
+
+function readDevMints() {
+  try {
+    if (!fs.existsSync(DEV_MINTS_PATH)) return defaultDevMints();
+    const parsed = JSON.parse(fs.readFileSync(DEV_MINTS_PATH, 'utf8'));
+    return {
+      nextCubeId: Math.max(1, Number(parsed.nextCubeId) || 1),
+      mints: Array.isArray(parsed.mints) ? parsed.mints : [],
+    };
+  } catch (_) {
+    return defaultDevMints();
+  }
+}
+
+function writeDevMints(state) {
+  fs.mkdirSync(path.dirname(DEV_MINTS_PATH), { recursive: true });
+  fs.writeFileSync(DEV_MINTS_PATH, JSON.stringify(state, null, 2) + '\n');
+}
+
+function sanitizeMintRecord(record, cubeId) {
+  const slot = Number(record?.slot);
+  const source = record?.source || {};
+  return {
+    cubeId,
+    slot,
+    wallet: String(record?.wallet || '').toLowerCase(),
+    sourceKind: record?.sourceKind === 'normie' ? 'normie' : 'external',
+    source: {
+      chain: String(source.chain || ''),
+      contract: String(source.contract || '').toLowerCase(),
+      tokenId: String(source.tokenId || ''),
+    },
+    agentic: Boolean(record?.agentic),
+    agentId: record?.agentId ? String(record.agentId) : '',
+  };
+}
+
+async function handleDevMints(req, res) {
+  if (req.method === 'GET') {
+    sendJson(res, 200, readDevMints());
+    return;
+  }
+
+  if (req.method === 'DELETE') {
+    const state = defaultDevMints();
+    writeDevMints(state);
+    sendJson(res, 200, state);
+    return;
+  }
+
+  if (req.method === 'POST') {
+    try {
+      const payload = JSON.parse(await readRequestBody(req));
+      const incoming = Array.isArray(payload?.mints) ? payload.mints : [];
+      const state = readDevMints();
+      for (const mint of incoming) {
+        const record = sanitizeMintRecord(mint, state.nextCubeId++);
+        if (!Number.isInteger(record.slot) || record.slot < 0) continue;
+        if (!record.source.chain || !record.source.contract || !record.source.tokenId) continue;
+        state.mints.push(record);
+      }
+      writeDevMints(state);
+      sendJson(res, 200, state);
+    } catch (err) {
+      sendJson(res, 400, { error: 'Invalid dev mint payload', detail: String(err?.message || err) });
+    }
+    return;
+  }
+
+  sendJson(res, 405, { error: 'Method not allowed' });
 }
 
 async function proxyOpenSea(req, res) {
@@ -185,6 +276,11 @@ const server = http.createServer((req, res) => {
 
   if (req.url.startsWith('/api/image')) {
     proxyImage(req, res);
+    return;
+  }
+
+  if (req.url === '/api/dev-mints') {
+    handleDevMints(req, res);
     return;
   }
 
