@@ -44,13 +44,14 @@ contract DeployCore is Script {
             initialOwner
         );
         deployment.artStore = new NonNormieArtStore(initialOwner);
-        deployment.attestation = new FlatteningAttestation(initialOwner, attestationSigner);
+        deployment.attestation = new FlatteningAttestation(address(this), attestationSigner);
         deployment.controller =
             new CubeMintController(deployment.cubes, deployment.artStore, deployment.attestation);
 
         deployment.cubes.transferOwnership(address(deployment.controller));
         deployment.artStore.transferOwnership(address(deployment.controller));
         deployment.attestation.setAuthorizedConsumer(address(deployment.controller));
+        deployment.attestation.transferOwnership(initialOwner);
     }
 
     function _logDeployment(Deployment memory deployment) internal view {
