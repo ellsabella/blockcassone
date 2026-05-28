@@ -106,6 +106,19 @@ contract FlatteningAttestationTest is Test {
         verifier.consumeAttestation(attestation, signature);
     }
 
+    function testAuthorizedConsumerCanConsumeForMinter() public {
+        FlatteningAttestation.Attestation memory attestation = _attestation(1, block.timestamp + 1 days);
+        bytes memory signature = _sign(attestation, SIGNER_KEY);
+
+        vm.prank(OWNER);
+        verifier.setAuthorizedConsumer(OTHER);
+
+        vm.prank(OTHER);
+        verifier.consumeAttestation(attestation, signature);
+
+        assertTrue(verifier.nonceUsed(MINTER, 1));
+    }
+
     function testOwnerCanRotateSigner() public {
         FlatteningAttestation.Attestation memory attestation = _attestation(1, block.timestamp + 1 days);
         bytes memory oldSignature = _sign(attestation, SIGNER_KEY);

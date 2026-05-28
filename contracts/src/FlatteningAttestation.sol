@@ -27,6 +27,7 @@ contract FlatteningAttestation is EIP712, Ownable {
     error NonceAlreadyUsed(address minter, uint256 nonce);
 
     event AttestationSignerUpdated(address indexed oldSigner, address indexed newSigner);
+    event AuthorizedConsumerUpdated(address indexed oldConsumer, address indexed newConsumer);
     event AttestationConsumed(
         address indexed minter,
         address indexed sourceContract,
@@ -36,6 +37,7 @@ contract FlatteningAttestation is EIP712, Ownable {
     );
 
     address public attestationSigner;
+    address public authorizedConsumer;
     mapping(address minter => mapping(uint256 nonce => bool used)) public nonceUsed;
 
     constructor(address initialOwner_, address attestationSigner_)
@@ -44,6 +46,12 @@ contract FlatteningAttestation is EIP712, Ownable {
     {
         attestationSigner = attestationSigner_;
         emit AttestationSignerUpdated(address(0), attestationSigner_);
+    }
+
+    function setAuthorizedConsumer(address newConsumer) external onlyOwner {
+        address oldConsumer = authorizedConsumer;
+        authorizedConsumer = newConsumer;
+        emit AuthorizedConsumerUpdated(oldConsumer, newConsumer);
     }
 
     function setAttestationSigner(address newSigner) external onlyOwner {
@@ -84,7 +92,10 @@ contract FlatteningAttestation is EIP712, Ownable {
         bool requireCallerIsMinter
     ) private view {
         if (attestation.deadline < block.timestamp) revert ExpiredAttestation(attestation.deadline);
-        if (requireCallerIsMinter && attestation.minter != msg.sender) {
+        if (
+            requireCallerIsMinter && attestation.minter != msg.sender
+                && authorizedConsumer != msg.sender
+        ) {
             revert InvalidMinter(attestation.minter, msg.sender);
         }
         if (nonceUsed[attestation.minter][attestation.nonce]) {

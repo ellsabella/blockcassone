@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
+import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import {CubeNFT} from "../src/CubeNFT.sol";
 
@@ -76,6 +77,36 @@ contract CubeNFTTest is Test {
         assertEq(data.sourceContract, address(externalNft));
         assertEq(data.sourceTokenId, 1);
         assertEq(data.seed, seed);
+    }
+
+    function testOwnerCanMintNormieCubeForMinter() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintNormieCubeFor(MINTER, 101, 11, bytes32("seed"));
+
+        assertEq(cubes.ownerOf(cubeId), MINTER);
+        assertEq(cubes.cubeForNormieId(101), cubeId);
+    }
+
+    function testOwnerCanMintExternalCubeForMinter() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintExternalERC721CubeFor(
+            MINTER,
+            address(externalNft),
+            1,
+            12,
+            bytes32("seed")
+        );
+
+        assertEq(cubes.ownerOf(cubeId), MINTER);
+        assertEq(cubes.cubeForSlot(12), cubeId);
+    }
+
+    function testNonOwnerCannotMintCubeForMinter() public {
+        vm.prank(OTHER);
+        vm.expectRevert(
+            abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, OTHER)
+        );
+        cubes.mintExternalERC721CubeFor(MINTER, address(externalNft), 1, 12, bytes32("seed"));
     }
 
     function testCannotMintNormieNotOwnedByMinter() public {
