@@ -73,12 +73,35 @@ contract CubeMintControllerTest is Test {
         assertEq(cubes.cubeForSlot(7), cubeId);
         CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
         assertEq(data.payloadVersion, NonNormieArt.PAYLOAD_VERSION_TONAL_BANDS_2BIT);
+        assertFalse(data.agentic);
         assertEq(artStore.payloadForCube(cubeId), payload);
         assertTrue(attestationVerifier.nonceUsed(MINTER, 1));
 
         (uint8 version, bytes32 payloadHash) = artStore.payloadRecordForCube(cubeId);
         assertEq(version, NonNormieArt.PAYLOAD_VERSION_TONAL_BANDS_2BIT);
         assertEq(payloadHash, NonNormieArt.hashTonalBands2Bit(payload));
+    }
+
+    function testMintExternalCubeWithAgenticPayload() public {
+        bytes memory payload = _samplePayload();
+        FlatteningAttestation.Attestation memory attestation =
+            _attestation(MINTER, address(externalNft), 1, 1, payload, block.timestamp + 1 days);
+        attestation.agentic = true;
+        bytes memory signature = _sign(attestation);
+
+        vm.prank(MINTER);
+        uint256 cubeId = controller.mintExternalERC721CubeWithPayload(
+            address(externalNft),
+            1,
+            7,
+            bytes32("seed"),
+            payload,
+            attestation,
+            signature
+        );
+
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
+        assertTrue(data.agentic);
     }
 
     function testRejectsAttestationForDifferentMinter() public {
@@ -204,6 +227,7 @@ contract CubeMintControllerTest is Test {
             sourceContract: sourceContract,
             sourceTokenId: sourceTokenId,
             payloadVersion: payloadVersion,
+            agentic: false,
             flatteningVersion: 1,
             payloadHash: NonNormieArt.hashTonalBands2Bit(payload),
             nonce: 1,

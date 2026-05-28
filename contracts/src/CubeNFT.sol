@@ -15,6 +15,7 @@ contract CubeNFT is ERC721, Ownable {
         uint8 sourceKind;
         uint8 rendererVersion;
         uint8 payloadVersion;
+        bool agentic;
         uint64 mintedAt;
         uint256 sourceChainId;
         address sourceContract;
@@ -40,6 +41,7 @@ contract CubeNFT is ERC721, Ownable {
         uint8 sourceKind,
         address sourceContract,
         uint256 sourceTokenId,
+        bool agentic,
         bytes32 seed
     );
     event RendererUpdated(address indexed oldRenderer, address indexed newRenderer);
@@ -92,7 +94,17 @@ contract CubeNFT is ERC721, Ownable {
         _requireSourceOwner(normieContract, normieId, minter);
 
         bytes32 key = sourceKey(block.chainid, normieContract, normieId);
-        cubeId = _mintCube(minter, slot, SOURCE_KIND_NORMIE, normieContract, normieId, key, seed, 0);
+        cubeId = _mintCube(
+            minter,
+            slot,
+            SOURCE_KIND_NORMIE,
+            normieContract,
+            normieId,
+            key,
+            seed,
+            0,
+            false
+        );
         cubeForNormieId[normieId] = cubeId;
     }
 
@@ -102,7 +114,15 @@ contract CubeNFT is ERC721, Ownable {
         uint32 slot,
         bytes32 seed
     ) external returns (uint256 cubeId) {
-        cubeId = _mintExternalERC721CubeFor(msg.sender, sourceContract, sourceTokenId, slot, seed, 0);
+        cubeId = _mintExternalERC721CubeFor(
+            msg.sender,
+            sourceContract,
+            sourceTokenId,
+            slot,
+            seed,
+            0,
+            false
+        );
     }
 
     function mintExternalERC721CubeFor(
@@ -112,7 +132,15 @@ contract CubeNFT is ERC721, Ownable {
         uint32 slot,
         bytes32 seed
     ) external onlyOwner returns (uint256 cubeId) {
-        cubeId = _mintExternalERC721CubeFor(minter, sourceContract, sourceTokenId, slot, seed, 0);
+        cubeId = _mintExternalERC721CubeFor(
+            minter,
+            sourceContract,
+            sourceTokenId,
+            slot,
+            seed,
+            0,
+            false
+        );
     }
 
     function mintExternalERC721CubeForWithPayloadVersion(
@@ -129,7 +157,28 @@ contract CubeNFT is ERC721, Ownable {
             sourceTokenId,
             slot,
             seed,
-            payloadVersion
+            payloadVersion,
+            false
+        );
+    }
+
+    function mintExternalERC721CubeForWithPayloadVersionAndAgentic(
+        address minter,
+        address sourceContract,
+        uint256 sourceTokenId,
+        uint32 slot,
+        bytes32 seed,
+        uint8 payloadVersion,
+        bool agentic
+    ) external onlyOwner returns (uint256 cubeId) {
+        cubeId = _mintExternalERC721CubeFor(
+            minter,
+            sourceContract,
+            sourceTokenId,
+            slot,
+            seed,
+            payloadVersion,
+            agentic
         );
     }
 
@@ -139,7 +188,8 @@ contract CubeNFT is ERC721, Ownable {
         uint256 sourceTokenId,
         uint32 slot,
         bytes32 seed,
-        uint8 payloadVersion
+        uint8 payloadVersion,
+        bool agentic
     ) private returns (uint256 cubeId) {
         if (sourceContract == normieContract) revert ExternalSourceIsNormie();
         if (sourceContract.code.length == 0) revert InvalidSourceContract();
@@ -155,7 +205,8 @@ contract CubeNFT is ERC721, Ownable {
             sourceTokenId,
             key,
             seed,
-            payloadVersion
+            payloadVersion,
+            agentic
         );
     }
 
@@ -196,7 +247,8 @@ contract CubeNFT is ERC721, Ownable {
         uint256 sourceTokenId,
         bytes32 key,
         bytes32 seed,
-        uint8 payloadVersion
+        uint8 payloadVersion,
+        bool agentic
     ) private returns (uint256 cubeId) {
         if (slot >= totalSlots) revert InvalidSlot(slot);
 
@@ -214,6 +266,7 @@ contract CubeNFT is ERC721, Ownable {
             sourceKind: sourceKind,
             rendererVersion: 1,
             payloadVersion: payloadVersion,
+            agentic: agentic,
             mintedAt: uint64(block.timestamp),
             sourceChainId: block.chainid,
             sourceContract: sourceContract,
@@ -223,7 +276,7 @@ contract CubeNFT is ERC721, Ownable {
 
         _safeMint(to, cubeId);
 
-        emit CubeMinted(cubeId, to, slot, sourceKind, sourceContract, sourceTokenId, seed);
+        emit CubeMinted(cubeId, to, slot, sourceKind, sourceContract, sourceTokenId, agentic, seed);
     }
 
     function _requireSourceOwner(address sourceContract, uint256 sourceTokenId, address expectedOwner)

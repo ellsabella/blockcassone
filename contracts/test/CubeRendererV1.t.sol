@@ -46,6 +46,7 @@ contract CubeRendererV1Test is Test {
         assertTrue(_contains(json, '"trait_type":"region","value":"216"'));
         assertTrue(_contains(json, '"trait_type":"neighbourhood","value":"27"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"Normie"'));
+        assertTrue(_contains(json, '"trait_type":"Agentic","value":"N"'));
         assertTrue(_contains(json, '"image":"data:image/svg+xml;base64,'));
         assertTrue(_contains(json, '"animation_url":"data:text/html;base64,'));
     }
@@ -60,6 +61,23 @@ contract CubeRendererV1Test is Test {
         assertTrue(_contains(json, '"trait_type":"neighbourhood","value":"1"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"External ERC-721"'));
         assertTrue(_contains(json, '"trait_type":"Payload Version","value":"0"'));
+        assertTrue(_contains(json, '"trait_type":"Agentic","value":"N"'));
+    }
+
+    function testMetadataJSONIncludesAgenticTrait() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintExternalERC721CubeForWithPayloadVersionAndAgentic(
+            MINTER,
+            address(externalNft),
+            1,
+            128,
+            bytes32("seed"),
+            1,
+            true
+        );
+
+        string memory json = renderer.metadataJSON(cubeId);
+        assertTrue(_contains(json, '"trait_type":"Agentic","value":"Y"'));
     }
 
     function testCubeNFTTokenURIDelegatesToRenderer() public {

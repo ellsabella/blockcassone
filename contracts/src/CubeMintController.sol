@@ -18,6 +18,7 @@ contract CubeMintController {
         address indexed sourceContract,
         uint256 sourceTokenId,
         uint32 slot,
+        bool agentic,
         bytes32 payloadHash
     );
 
@@ -61,13 +62,14 @@ contract CubeMintController {
         }
 
         attestationVerifier.consumeAttestation(attestation, signature);
-        cubeId = cubes.mintExternalERC721CubeForWithPayloadVersion(
+        cubeId = cubes.mintExternalERC721CubeForWithPayloadVersionAndAgentic(
             msg.sender,
             sourceContract,
             sourceTokenId,
             slot,
             seed,
-            NonNormieArt.PAYLOAD_VERSION_TONAL_BANDS_2BIT
+            NonNormieArt.PAYLOAD_VERSION_TONAL_BANDS_2BIT,
+            attestation.agentic
         );
         artStore.recordTonalBands2Bit(cubeId, tonalBands2Bit);
 
@@ -77,6 +79,7 @@ contract CubeMintController {
             sourceContract,
             sourceTokenId,
             slot,
+            attestation.agentic,
             payloadHash
         );
     }

@@ -11,6 +11,7 @@ contract FlatteningAttestation is EIP712, Ownable {
         address sourceContract;
         uint256 sourceTokenId;
         uint8 payloadVersion;
+        bool agentic;
         uint16 flatteningVersion;
         bytes32 payloadHash;
         uint256 nonce;
@@ -18,7 +19,7 @@ contract FlatteningAttestation is EIP712, Ownable {
     }
 
     bytes32 public constant ATTESTATION_TYPEHASH = keccak256(
-        "Attestation(address minter,address sourceContract,uint256 sourceTokenId,uint8 payloadVersion,uint16 flatteningVersion,bytes32 payloadHash,uint256 nonce,uint256 deadline)"
+        "Attestation(address minter,address sourceContract,uint256 sourceTokenId,uint8 payloadVersion,bool agentic,uint16 flatteningVersion,bytes32 payloadHash,uint256 nonce,uint256 deadline)"
     );
 
     error InvalidAttestationSigner(address signer);
@@ -114,6 +115,7 @@ contract FlatteningAttestation is EIP712, Ownable {
                 attestation.sourceContract,
                 attestation.sourceTokenId,
                 attestation.payloadVersion,
+                attestation.agentic,
                 attestation.flatteningVersion,
                 attestation.payloadHash,
                 attestation.nonce,

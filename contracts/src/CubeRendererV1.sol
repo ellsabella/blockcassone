@@ -92,7 +92,9 @@ contract CubeRendererV1 is ICubeRenderer {
             ",",
             _trait("Source Contract", _addressHex(data.sourceContract)),
             ",",
-            _trait("Source Token ID", data.sourceTokenId.toString())
+            _trait("Source Token ID", data.sourceTokenId.toString()),
+            ",",
+            _trait("Agentic", data.agentic ? "Y" : "N")
         );
     }
 

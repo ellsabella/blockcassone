@@ -308,6 +308,8 @@ Agentic metadata requirements:
 
 OpenSea API data may be used by the mint UI to discover agentic details, but the token must not depend on OpenSea after mint. Any OpenSea-derived agent fields used by the final NFT must be included in the signed mint payload and stored onchain, or be independently recoverable from source contracts.
 
+The current contract boundary stores the stable `agentic` boolean in `CubeNFT.CubeData`, binds it into the non-Normie flattening attestation, and renders it as the `Agentic` metadata trait. `Agent ID` remains intentionally deferred until a non-null `agent_binding` sample confirms the identifier format.
+
 Initial OpenSea API probing shows that the account NFT list response does not currently include agent data, while the single-NFT detail response includes an `agent_binding` field. In the first sampled wallet responses this field was present but `null`. The mint UI should therefore fetch per-token details for the selected source NFT before minting, preserve the raw `agent_binding` payload for inspection, and only then derive the permanent `Agentic` and `Agent ID` values.
 
 Do not finalize the Solidity type for `Agent ID` until we have a positive `agent_binding` sample. If it is numeric, store `uint256 agentId`. If it is an opaque identifier, store a compact string or canonical `bytes32` plus enough renderer logic to expose the marketplace-readable value.
