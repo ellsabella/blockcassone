@@ -8,22 +8,32 @@ Hilbert curve. The current dev viewer is now modelling the eventual mint flow:
 load a wallet, simulate minting source NFTs into Hilbert slots, and render each
 minted cube according to whether its source is a Normie or a non-Normie NFT.
 
-The production goal is one ERC721 cube per minted source, with immutable source
-identity and Hilbert placement, plus a separate world viewer that can show the
-larger Hilbert structure. Contract architecture notes live in:
+The production goal is one ERC721 cube per minted source, with permanent source
+identity and a fully onchain token renderer. Hilbert placement is currently
+stored in the early contracts, but the current product direction expects plot
+placement to become mutable world state so owners can move to vacant slots and
+neighbourhoods can later consolidate.
 
-- `dev/pipeline-viewer/ONCHAIN_IMPLEMENTATION_PLAN.md`
+The dev viewer is becoming the project home and canonical mint source. It should
+prototype the world model, aesthetic changes, placement rules, movement, and
+consolidation before those mechanics are finalized in Solidity.
+
+Contract and requirements notes live in:
+
+- `FULLY_ONCHAIN_IMPLEMENTATION_PLAN.md`
+- `WORLD_AND_MINT_REQUIREMENTS.md`
+- `viewer/ONCHAIN_IMPLEMENTATION_PLAN.md`
 
 ## Repository Map
 
 ```text
 blockcassone/
   Overview.md
-  pipeline/
+  renderer/
     server.js                         local dev server, .env, OpenSea/image proxy
     src/                              shared WebGL helpers
     shaders/                          shared GLSL materials
-  dev/pipeline-viewer/
+  viewer/
     index.html                        dev UI shell
     main.js                           viewer entry, scene rebuild, render loop
     mint-simulator.js                 simulated source selection + slot placement
@@ -45,13 +55,13 @@ The viewer expects the local server because it uses `.env`, the OpenSea proxy,
 and the image proxy:
 
 ```powershell
-$env:PORT='3001'; node pipeline/server.js
+$env:PORT='3001'; node renderer/server.js
 ```
 
 Open:
 
 ```text
-http://localhost:3001/dev/pipeline-viewer/
+http://localhost:3001/viewer/
 ```
 
 Required environment:
@@ -133,6 +143,9 @@ Normalized NFT fields:
 - `isNormie`
 - `normieId`
 - `isSvgArt`
+- `agentic`
+- `agentId`
+- `agentBinding`
 
 Normies use the Normies API path. Non-Normies use the image parser path.
 
@@ -201,6 +214,10 @@ Current visual treatments:
 - Awake random walks: fewer, thin, right-angle/straight paths with restrained
   glow.
 - Per-voxel variation/glitching reduces large monolithic voxel blocks.
+
+Agentic non-Normie NFTs should gain some awakened Normie behavior during the
+next visual iteration: moving lights, stronger motion, possible forest strands,
+and possible particles.
 
 ## Non-Normie Art Path
 
@@ -323,6 +340,12 @@ Related legacy/disabled exploration files remain:
 The empty Big Cube view uses the full path so it shows the proper continuous
 Hilbert structure rather than only partial connector fragments.
 
+The next Big Cube direction is a world to be conquered rather than an empty
+scaffold. Vacant neighbourhoods should have simple natural environment shaders
+such as desert, water, grass, forest, stone, ice, or void. The viewer should
+also show neighbourhood/region population and agent counts as the simulated
+world fills.
+
 ## Scene Item System
 
 All rendered objects are scene items:
@@ -422,6 +445,10 @@ The current contract direction is:
   mint callback
 - the core onchain invariant remains: one Normie token id can produce at most
   one cube
+- source identity remains permanent, but plot placement is expected to become
+  mutable through a future world-state contract
+- neighbourhood environments, population counters, movement, and consolidation
+  should be prototyped in the dev viewer first
 
 The dev mint simulator mirrors this direction so the art pipeline can continue
 evolving before contracts are finalized.

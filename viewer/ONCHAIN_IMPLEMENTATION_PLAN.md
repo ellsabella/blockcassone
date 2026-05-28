@@ -14,13 +14,21 @@ but detailed enough to guide the first contract templates.
   small onchain behavior state.
 - A separate full-world viewer can show the complete Hilbert curve and all
   minted cubes. This can be hosted as a web app and optionally minted as a 1/1.
+- The dev viewer should evolve into the project home and canonical mint source.
+- The Big Cube is a world with natural neighbourhood environments, population,
+  movement, and consolidation, not only a blank Hilbert scaffold.
+
+Note: the original plan treated Hilbert slot as immutable. The current product
+direction expects source identity to stay permanent while plot placement becomes
+mutable world state after mint.
 
 ## Size Constraints
 
 Current dev code is far too large to store as one contract or per token:
 
-- `dev/pipeline-viewer + pipeline/shaders + pipeline/src`: about 403 KB
-- `dev/pipeline-viewer/main.js`: about 50 KB
+- `viewer + renderer/shaders + renderer/src`: larger than can fit in one
+  production renderer contract
+- `viewer/main.js`: too large to ship directly onchain
 - several individual files exceed 20 KB
 
 Ethereum contract runtime size is about 24 KB, so the production renderer must be
@@ -232,19 +240,30 @@ pending tickets that must later be source-assigned through our custom contract.
 
 ### Placement Module
 
-Can be a library/internal module initially.
+Can be a library/internal module initially, but the final project likely needs a
+dedicated `CubeWorld` or `WorldState` contract.
 
 Responsibilities:
 
 - track occupied Hilbert slots
 - assign one random available slot per minted cube
 - expose occupancy for the world viewer
+- derive neighbourhood and region indices
+- store neighbourhood environment type
+- track neighbourhood and region population
+- track neighbourhood and region agentic population
+- support owner movement to vacant plots
+- support consolidation checks for full-neighbourhood ownership
 
 Randomness options:
 
 - production: Chainlink VRF or another credible randomness source
 - simpler early testnet: commit/reveal
 - avoid relying only on block data if placement has market value
+
+Placement policy should be developed first in the dev simulator. Candidate
+rules include maximum agentic cubes per neighbourhood, maximum agentic cubes per
+region, and environment-specific restrictions.
 
 ### Renderer Registry
 
@@ -382,6 +401,11 @@ Purpose:
 - show all minted slots
 - navigate/filter by source type, wallet, category, slot, etc.
 - evolve as a richer web app
+- serve as the project home and canonical mint UI
+- render natural neighbourhood environments before they are occupied
+- preview movement to vacant plots
+- show neighbourhood and region population
+- show consolidation eligibility
 
 Deployment:
 
@@ -397,6 +421,16 @@ The world viewer can query:
 - source token contracts
 - event logs/indexer
 
+The current dev viewer should prototype:
+
+- agentic non-Normies with awakened Normie-style lights, motion, forest strands,
+  and particles
+- natural environments such as desert, water, grass, forest, stone, ice, and
+  void
+- dynamic population traits
+- movement UX
+- consolidation UX
+
 ## Evolution Model
 
 Immutable:
@@ -404,12 +438,12 @@ Immutable:
 - cube id
 - source NFT reference
 - Normie uniqueness link
-- Hilbert slot
 - seed/randomness
 - mint timestamp/block
 
 Evolvable:
 
+- Hilbert plot / neighbourhood / region after movement
 - renderer version
 - global collection epoch
 - cube behavior params

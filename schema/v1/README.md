@@ -1,26 +1,30 @@
 # Blockcassone Canonical Schema v1
 
-This directory defines the **canonical data model** — what a Blockcassone artwork *is*, independent of how it looks or where it runs.
+This directory defines the canonical data model: what a Blockcassone artwork is,
+independent of how it looks or where it runs.
 
-## Two-layer model
+## Two-Layer Model
 
-```
-┌─────────────────────────────────────────┐
-│  CANONICAL DATA  (this schema)          │
-│  — lives onchain or derived from it     │
-│  — deterministic, permanent, versioned  │
-│  — composition.json / plane.json / etc. │
-└────────────────────┬────────────────────┘
-                     │ renderer reads
-┌────────────────────▼────────────────────┐
-│  RENDERER CONFIG   (not in schema)      │
-│  — colours, glow, animation params      │
-│  — can be swapped, upgraded, minified   │
-│  — lives in core/config.js + shaders    │
-└─────────────────────────────────────────┘
+```text
+CANONICAL DATA
+- lives onchain or is derived from onchain state
+- deterministic, versioned, and recoverable
+- includes composition, token, payload, source, and world-state facts
+
+RENDERER CONFIG
+- colours, glow, animation params, shaders, and UI
+- may evolve while canonical token data remains recoverable
+- lives in viewer/core code during development and renderer contracts later
 ```
 
-The key principle: **the canonical data never changes once minted. Renderers can evolve.**
+The earlier schema assumed canonical data never changes once minted. The current
+project direction is more precise:
+
+- source identity should be permanent
+- art payloads and agent provenance should be permanent
+- plot placement may become mutable onchain world state
+- population traits may be dynamic
+- renderers may evolve through versioned contracts
 
 ## Files
 
@@ -28,31 +32,36 @@ The key principle: **the canonical data never changes once minted. Renderers can
 |---|---|
 | `composition.json` | Top-level artwork: seed hash, Hilbert order, placement strategy, placed tokens |
 | `plane.json` | One plane: 4 vertex positions, axis, material tag, edge activity patterns, hierarchy path |
-| `token.json` | One placed NFT: contract address, token ID, normie pixels/traits/category |
-| `hierarchy.json` | Reference: how planes group into cubes and super-cubes (derivable from order, not stored) |
+| `token.json` | One placed NFT: contract address, token ID, Normie pixels/traits/category |
+| `hierarchy.json` | Reference: how planes group into cubes and super-cubes |
 | `renderer-contract.md` | What any conformant renderer must accept and produce |
 
-## What belongs in the schema
+## What Belongs In The Schema
 
-- Vertex positions (integer lattice coordinates)
-- Material assignments (`water` / `stone` / `forest` — semantic tags, not colours)
-- Edge activity patterns (binary arrays seeded from the hash)
-- Token placements (which NFT occupies which cube slot)
-- Normie pixel grids and trait hashes (onchain data)
-- Normie category (burned / base / edited / awakened)
+- Vertex positions.
+- Material assignments such as `water`, `stone`, and `forest`.
+- Edge activity patterns.
+- Token source identity.
+- Token placement/world context.
+- Normie pixel grids and trait hashes.
+- Normie category.
+- Agentic state and numeric agent ID.
+- Neighbourhood environment type.
+- Population counters when rendering the Big Cube.
 
-## What does NOT belong in the schema
+## What Does Not Belong In The Schema
 
-- Colours, palettes, glow widths, opacity values
-- Shader parameters (noise scale, animation speed, etc.)
-- Pattern rendering details (density, reach, amplitude, fade curves)
-- WebGL / canvas specifics
-- UI layout
+- Colours, palettes, glow widths, opacity values.
+- Shader parameters.
+- Pattern rendering details.
+- WebGL or canvas specifics.
+- UI layout.
 
-These live in `core/config.js` and the viewer's material definitions.
+These live in viewer material definitions during development and in renderer
+asset contracts for production.
 
 ## Versioning
 
-Increment `schemaVersion` in `composition.json` only on breaking structural changes
-(e.g. changing vertex coordinate encoding, renaming required fields). Visual changes
-to the renderer never require a schema bump.
+Increment `schemaVersion` only on breaking structural changes, such as changing
+coordinate encoding, renaming required fields, or changing the shape of token
+world context. Visual changes to the renderer do not require a schema bump.

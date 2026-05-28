@@ -6,6 +6,8 @@ Blockcassone will mint one ERC-721 cube per accepted source NFT. After mint, eac
 
 The mint UI and the big-cube exploration website may be offchain. They can use indexers, OpenSea, image proxies, browser canvas extraction, and richer hosted tools. The individual minted cube must not require any of those systems after mint.
 
+Current product requirements for the project home, Big Cube world, movement, consolidation, agentic visuals, and neighbourhood environments live in `WORLD_AND_MINT_REQUIREMENTS.md`.
+
 ## Current State
 
 The current repository is a JavaScript/WebGL prototype. It has:
@@ -80,7 +82,8 @@ Recommended modules:
 
 - `CubeNFT.sol`: ERC-721 token and canonical cube storage.
 - `MintController.sol`: source-aware minting and payment logic, or merged into `CubeNFT` for v1.
-- `Placement.sol`: Hilbert slot assignment and occupancy helpers.
+- `CubeWorld.sol` or `WorldState.sol`: mutable plot occupancy, movement, environment, population, and consolidation state.
+- `Placement.sol`: Hilbert slot assignment and occupancy helpers, if not folded into `CubeWorld`.
 - `CubeRendererV1.sol`: metadata and HTML assembly.
 - `RendererAssetStore.sol`: shared renderer chunks and assets.
 - `NonNormieArt.sol`: flattened payload storage and decoding helpers.
@@ -105,10 +108,12 @@ Suggested canonical data:
 
 ```solidity
 struct CubeData {
-    uint32 slot;
+    uint32 slot; // early v1 stores this directly; final world state may move it to CubeWorld
     uint8 sourceKind;
     uint8 rendererVersion;
     uint8 payloadVersion;
+    bool agentic;
+    uint256 agentId;
     uint64 mintedAt;
     uint256 sourceChainId;
     address sourceContract;
@@ -254,7 +259,7 @@ Metadata should use `image` as the canonical static thumbnail field. `image_url`
 
 ## Placement And Randomness
 
-Slot assignment should be onchain and collision-free.
+Initial slot assignment should be onchain and collision-free. The final project direction also expects post-mint movement, so placement should be treated as mutable world state rather than only immutable mint data.
 
 Options:
 
@@ -264,15 +269,26 @@ Options:
 
 Avoid relying only on block variables if slot placement has meaningful market value.
 
+Future placement policy may include:
+
+- maximum agentic cubes per neighbourhood.
+- maximum agentic cubes per region.
+- environment-specific placement rules.
+- owner-initiated movement to vacant plots.
+- neighbourhood consolidation eligibility.
+
 ## Big Cube Website
 
-The big-cube viewer remains offchain. It may:
+The big-cube viewer remains offchain and should evolve into the project home and canonical mint source. It may:
 
 - Query contract events and state.
 - Use an indexer.
 - Use richer assets and UI.
 - Explore all minted cubes and empty Hilbert slots.
 - Offer filters, wallet views, and high-performance rendering.
+- Prototype neighbourhood environments and population rules.
+- Let users preview movement to vacant slots.
+- Let users inspect consolidation eligibility.
 
 The website is not part of the individual token's fully onchain guarantee.
 
@@ -295,7 +311,18 @@ region(order 4)        = floor(slot / 8)
 neighbourhood(order 3) = floor(slot / 64)
 ```
 
-These traits should be emitted in token metadata and used by the offchain big-cube viewer for filtering, navigation, local context, and possible neighbourhood/region-level visual systems.
+These traits should be emitted in token metadata and used by the offchain big-cube viewer for filtering, navigation, local context, and possible neighbourhood/region-level visual systems. In the final movement-enabled architecture, `plot`, `neighbourhood`, and `region` may be read from `CubeWorld` rather than immutable `CubeNFT` storage.
+
+Neighbourhoods should also have a natural environment type before they are occupied or transformed. Candidate environment types include desert, water, grass, forest, stone, ice, and void. The environment should first be prototyped in the dev viewer, then stored onchain as compact world metadata once the set feels right.
+
+Population traits under consideration:
+
+- `Neighbourhood Population`.
+- `Region Population`.
+- `Neighbourhood Agents`.
+- `Region Agents`.
+
+These traits are dynamic and may change when cubes mint, move, or consolidate.
 
 The conceptual model is a city-like big block inhabited by the NFT entities that compose it. Source NFTs are not only visual inputs; they may represent agents, characters, tools, identities, or other entity-like contracts. At mint time, the offchain mint pipeline should capture any source-agent binding data exposed by OpenSea or source contracts and commit the relevant stable fields onchain.
 
@@ -305,6 +332,7 @@ Agentic metadata requirements:
 - `Agent ID`: stable agent binding identifier when available.
 - Agent data must be captured at mint time and stored or attested onchain if it affects permanent token traits or art.
 - Agentic status may affect the token renderer visually, especially in the city/big-block viewer.
+- Agentic non-Normies may inherit awakened Normie-style visual behavior: moving lights, higher motion, forest strands, and particles.
 
 OpenSea API data may be used by the mint UI to discover agentic details, but the token must not depend on OpenSea after mint. Any OpenSea-derived agent fields used by the final NFT must be included in the signed mint payload and stored onchain, or be independently recoverable from source contracts.
 
@@ -376,12 +404,32 @@ If future non-Normies use a non-numeric binding ID, add a second versioned sourc
 - Replace mint simulator with contract event/state integration.
 - Keep dev-only OpenSea/image parsing for mint preparation and previews.
 
+### Phase 9: Dev World Model
+
+- Prototype neighbourhood environment shaders in the dev viewer.
+- Add placement-policy simulation for agentic caps by neighbourhood and region.
+- Add population counters and UI labels.
+- Add movement preview to vacant plots.
+- Add consolidation preview for full-neighbourhood ownership.
+
+### Phase 10: World-State Contracts
+
+- Add `CubeWorld` or equivalent mutable world-state contract.
+- Move plot occupancy and population counters into world state.
+- Add owner movement to vacant plots.
+- Add environment metadata.
+- Add placement-policy checks.
+- Add consolidation eligibility and burn/merge mechanics.
+
 ## Open Decisions
 
-- Exact Hilbert order and total cube supply.
 - Whether external source uniqueness is mandatory for all non-Normie NFTs.
 - Whether non-Normie v1 stores 2-bit bands only or allows grayscale payloads.
 - Whether to also store agent contract, binding contract, and registering wallet from OpenSea `agent_binding`.
+- Final neighbourhood environment taxonomy.
+- Exact placement-policy caps for agentic cubes by neighbourhood and region.
+- Whether movement has a fee, cooldown, or governance constraints.
+- Whether consolidation keeps one survivor token or mints a new super-rare token.
 - Attestation signer model: project signer, threshold signers, or owner-controlled signer.
 - Randomness provider.
 - Renderer governance and owner renderer pinning.
