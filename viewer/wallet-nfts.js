@@ -17,7 +17,9 @@ let walletState = {
 let onDataReady = null;
 const gridCache = new Map();
 const gridFetchCache = new Map();
+const detailFetchCache = new Map();
 const assignmentLogCache = new Set();
+const missingImageLogCache = new Set();
 
 export function setWalletDataReadyCallback(cb) {
   onDataReady = cb;
@@ -119,6 +121,19 @@ function normalizeNft(raw, chain) {
   normal.normieId = normal.isNormie ? Number(normal.tokenId) : null;
   normal.isSvgArt = !normal.isNormie && isLikelySvgArtUrl(normal.imageUrl);
   return normal;
+}
+
+function applyNftDetail(target, raw) {
+  const detail = normalizeNft(raw?.nft || raw || {}, target.chain);
+  if (detail.imageUrl) target.imageUrl = detail.imageUrl;
+  if (detail.name && !/^NFT #?$/.test(detail.name)) target.name = detail.name;
+  if (detail.collection) target.collection = detail.collection;
+  target.isSvgArt = !target.isNormie && isLikelySvgArtUrl(target.imageUrl);
+
+  const agent = extractAgentBinding(raw?.nft || raw || {});
+  if (agent.agentic) Object.assign(target, agent);
+  Object.assign(target, { agentBindingLoaded: true, detailLoaded: true });
+  return target;
 }
 
 async function fetchWalletPage(address, chain, cursor) {
@@ -307,16 +322,40 @@ export async function loadAgentBindingForNft(nft) {
   if (nft.agentBindingLoaded) return nft;
 
   const detail = await fetchNftDetail(nft);
-  const agent = extractAgentBinding(detail.nft || detail);
-  Object.assign(nft, agent, { agentBindingLoaded: true });
+  applyNftDetail(nft, detail);
 
   const key = nftKey(nft);
   for (const item of walletState.nfts) {
-    if (nftKey(item) === key) Object.assign(item, agent, { agentBindingLoaded: true });
+    if (nftKey(item) === key) applyNftDetail(item, detail);
   }
 
   notify();
   return nft;
+}
+
+export async function hydrateNftDetailForNft(nft) {
+  if (!nft || !nft.contract || !nft.tokenId) return null;
+  if (nft.detailLoaded || nft.imageUrl) return nft;
+
+  const key = nftKey(nft);
+  if (!detailFetchCache.has(key)) {
+    detailFetchCache.set(key, fetchNftDetail(nft)
+      .then(detail => {
+        applyNftDetail(nft, detail);
+        for (const item of walletState.nfts) {
+          if (nftKey(item) === key) applyNftDetail(item, detail);
+        }
+        notify();
+        return nft;
+      })
+      .catch(err => {
+        nft.detailLoaded = true;
+        console.warn(`[wallet-nfts] NFT detail hydration failed for ${key}:`, err);
+        notify();
+        return nft;
+      }));
+  }
+  return detailFetchCache.get(key);
 }
 
 export function getWalletState() {
@@ -374,7 +413,19 @@ export function ensureNonNormieGridFetched(motifIdx) {
   const nft = getWalletAssignmentForCube(motifIdx);
   if (!nft || nft.isNormie) return;
   if (!nft.imageUrl) {
-    console.warn(`[wallet-nfts] cube ${motifIdx} non-Normie has no image URL`, nft);
+    const key = nftKey(nft);
+    if (!nft.detailLoaded) {
+      hydrateNftDetailForNft(nft);
+      if (!missingImageLogCache.has(key)) {
+        missingImageLogCache.add(key);
+        console.info(`[wallet-nfts] cube ${motifIdx} hydrating saved non-Normie media`, nft);
+      }
+      return;
+    }
+    if (!missingImageLogCache.has(key)) {
+      missingImageLogCache.add(key);
+      console.warn(`[wallet-nfts] cube ${motifIdx} non-Normie has no image URL`, nft);
+    }
     return;
   }
   const key = nftKey(nft);
