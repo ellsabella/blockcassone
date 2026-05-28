@@ -22,7 +22,6 @@ import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner 
 import { isAgenticNonNormieCube, loadWalletNftsAcrossChains, setWalletDataReadyCallback } from './wallet-nfts.js';
 import { serializeAllPlaced } from '/core/serialize.js';
 import {
-  getMintedCubeForSlot,
   isMintedSlot,
   loadMintSimulation,
   mintSimulationLoaded,
@@ -863,11 +862,9 @@ function rebuildScene() {
   for (const motifIdx of motifsToRender) {
     const cat = ensureMotifCategory(motifIdx);
     const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
-    const mintedCube = getMintedCubeForSlot(motifIdx);
-    const shadowDim = mintedCube?.shadow ? 0.22 : 1.0;
     const focusDim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
       ? 0.15 : 1.0;
-    const dim = shadowDim * focusDim;
+    const dim = focusDim;
 
     if (showCubeGlass && mode === '3D') {
       const items = buildCubeGlass(motifIdx, hilbert, gl, meshes, mode);
@@ -946,11 +943,9 @@ function rebuildScene() {
     const motifIdx = plane.hierarchy.motifIndex;
     const cat      = ensureMotifCategory(motifIdx);
     const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
-    const mintedCube = getMintedCubeForSlot(motifIdx);
-    const shadowDim = mintedCube?.shadow ? 0.22 : 1.0;
     const focusDim = (mode === 'BIG' && selectedMotifIdx !== null && motifIdx !== selectedMotifIdx)
       ? 0.15 : 1.0;
-    const dim = shadowDim * focusDim;
+    const dim = focusDim;
     const cubeCtx = cubeCtxMap[motifIdx];
 
     if (isNormieCube(motifIdx)) {

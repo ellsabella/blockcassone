@@ -37,7 +37,6 @@ function cubeFromRecord(record) {
     agentId: record.agentId ? String(record.agentId) : '',
     agentBinding: null,
     agentBindingLoaded: Boolean(record.agentic),
-    shadow: true,
   };
 
   return {
@@ -47,7 +46,6 @@ function cubeFromRecord(record) {
     nft,
     sourceKey: sourceKeyFromRecord(record),
     sourceKind,
-    shadow: true,
   };
 }
 
@@ -224,7 +222,6 @@ export async function simulateMintBatch(count, allSlots) {
     const nft = sourceByKey.get(cube.sourceKey);
     if (nft) {
       cube.nft = nft;
-      cube.shadow = false;
     }
   }
   notify();
