@@ -8,6 +8,7 @@ contract NormieGenesisMinter is Ownable {
     uint32 public constant DEFAULT_TOTAL_SLOTS = 4096;
 
     enum Phase {
+        Closed,
         Allowlist,
         Public
     }
@@ -15,15 +16,19 @@ contract NormieGenesisMinter is Ownable {
     error EmptySnapshot();
     error DuplicateNormie(uint256 normieId);
     error InvalidQuantity();
+    error InvalidSeaDrop(address seaDrop);
     error InvalidSlot(uint32 slot);
     error MintClosed();
     error NoAllowlistNormies(address minter);
     error NoPublicNormies();
     error SnapshotAlreadyFinalized();
     error SnapshotNotFinalized();
+    error UnauthorizedSeaDrop(address caller);
 
     event SnapshotNormiesAdded(address indexed wallet, uint256 count);
     event SnapshotFinalized(uint256 normieCount, uint32 totalSlots, bytes32 publicSeed);
+    event PhaseUpdated(Phase oldPhase, Phase newPhase);
+    event SeaDropUpdated(address indexed oldSeaDrop, address indexed newSeaDrop);
     event GenesisCubeMinted(
         uint256 indexed cubeId,
         address indexed minter,
@@ -36,6 +41,8 @@ contract NormieGenesisMinter is Ownable {
     uint32 public immutable totalSlots;
     bytes32 public immutable publicSeed;
 
+    Phase public phase;
+    address public seaDrop;
     bool public finalized;
     uint256 public mintedCount;
 
@@ -78,6 +85,29 @@ contract NormieGenesisMinter is Ownable {
         if (_publicNormies.length == 0) revert EmptySnapshot();
         finalized = true;
         emit SnapshotFinalized(_publicNormies.length, totalSlots, publicSeed);
+    }
+
+    function setPhase(Phase newPhase) external onlyOwner {
+        Phase oldPhase = phase;
+        phase = newPhase;
+        emit PhaseUpdated(oldPhase, newPhase);
+    }
+
+    function setSeaDrop(address newSeaDrop) external onlyOwner {
+        if (newSeaDrop == address(0)) revert InvalidSeaDrop(newSeaDrop);
+        address oldSeaDrop = seaDrop;
+        seaDrop = newSeaDrop;
+        emit SeaDropUpdated(oldSeaDrop, newSeaDrop);
+    }
+
+    function mintSeaDrop(address minter, uint256 quantity)
+        external
+        returns (uint256[] memory cubeIds)
+    {
+        if (msg.sender != seaDrop) revert UnauthorizedSeaDrop(msg.sender);
+        if (phase == Phase.Allowlist) return _mintAllowlist(minter, quantity);
+        if (phase == Phase.Public) return _mintPublic(minter, quantity);
+        revert MintClosed();
     }
 
     function mintAllowlist(uint256 quantity) external returns (uint256[] memory cubeIds) {

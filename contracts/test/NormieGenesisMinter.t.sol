@@ -19,6 +19,7 @@ contract NormieGenesisMinterTest is Test {
     address private constant ALICE = address(0xA11CA);
     address private constant BOB = address(0xB0B);
     address private constant PUBLIC_MINTER = address(0xCAFE);
+    address private constant SEA_DROP = address(0x5EA);
 
     GenesisMockERC721 private normies;
     CubeNFT private cubes;
@@ -37,6 +38,8 @@ contract NormieGenesisMinterTest is Test {
 
         vm.prank(OWNER);
         genesis.finalizeSnapshot();
+        vm.prank(OWNER);
+        genesis.setSeaDrop(SEA_DROP);
     }
 
     function testAllowlistMintsOnlyWalletSnapshotNormies() public {
@@ -138,6 +141,70 @@ contract NormieGenesisMinterTest is Test {
         vm.prank(PUBLIC_MINTER);
         vm.expectRevert(NormieGenesisMinter.MintClosed.selector);
         localGenesis.mintPublic(1);
+    }
+
+    function testSeaDropMintsAllowlistPhase() public {
+        vm.prank(OWNER);
+        genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+
+        vm.prank(SEA_DROP);
+        uint256[] memory cubeIds = genesis.mintSeaDrop(ALICE, 2);
+
+        assertEq(cubeIds.length, 2);
+        assertEq(cubes.ownerOf(cubeIds[0]), ALICE);
+        assertEq(_sourceToken(cubeIds[0]), 101);
+        assertEq(_sourceToken(cubeIds[1]), 102);
+    }
+
+    function testSeaDropMintsPublicPhase() public {
+        vm.prank(OWNER);
+        genesis.setPhase(NormieGenesisMinter.Phase.Public);
+
+        uint256 expected = _expectedPublicPick(PUBLIC_MINTER, 0, 0, 5);
+
+        vm.prank(SEA_DROP);
+        uint256[] memory cubeIds = genesis.mintSeaDrop(PUBLIC_MINTER, 1);
+
+        assertEq(cubeIds.length, 1);
+        assertEq(cubes.ownerOf(cubeIds[0]), PUBLIC_MINTER);
+        assertEq(_sourceToken(cubeIds[0]), expected);
+    }
+
+    function testSeaDropRejectsUnauthorizedCaller() public {
+        vm.prank(OWNER);
+        genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+
+        vm.prank(ALICE);
+        vm.expectRevert(abi.encodeWithSelector(
+            NormieGenesisMinter.UnauthorizedSeaDrop.selector,
+            ALICE
+        ));
+        genesis.mintSeaDrop(ALICE, 1);
+    }
+
+    function testSeaDropRejectsClosedPhase() public {
+        vm.prank(OWNER);
+        genesis.setPhase(NormieGenesisMinter.Phase.Closed);
+
+        vm.prank(SEA_DROP);
+        vm.expectRevert(NormieGenesisMinter.MintClosed.selector);
+        genesis.mintSeaDrop(ALICE, 1);
+    }
+
+    function testOwnerCanUpdateSeaDropCaller() public {
+        address newSeaDrop = address(0xBEEF);
+        vm.prank(OWNER);
+        genesis.setSeaDrop(newSeaDrop);
+        assertEq(genesis.seaDrop(), newSeaDrop);
+    }
+
+    function testCannotSetZeroSeaDrop() public {
+        vm.prank(OWNER);
+        vm.expectRevert(abi.encodeWithSelector(
+            NormieGenesisMinter.InvalidSeaDrop.selector,
+            address(0)
+        ));
+        genesis.setSeaDrop(address(0));
     }
 
     function _add(address wallet, uint256[] memory ids) private {

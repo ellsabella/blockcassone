@@ -123,6 +123,21 @@ SeaDrop can handle the primary mint rails:
 SeaDrop does not natively track which exact Normie token IDs are consumed. The
 NFT contract must own that logic.
 
+The production-shaped entrypoint should look like:
+
+```solidity
+mintSeaDrop(address minter, uint256 quantity)
+```
+
+Only the configured SeaDrop contract should be allowed to call it. The genesis
+minter should expose owner-controlled phase state:
+
+```text
+Closed
+Allowlist
+Public
+```
+
 If SeaDrop calls the token contract with only `minter` and `quantity`, source
 assignment must be derivable from committed onchain state:
 

@@ -38,6 +38,8 @@ Likely production mint contracts:
 - `NormieSnapshotRegistry`: committed wallet-to-Normie snapshot and consumption.
 - `SourceAssignment`: allowlist and public Normie-source assignment for
   quantity mints.
+- `NormieGenesisMinter`: SeaDrop-shaped `mintSeaDrop(minter, quantity)` adapter
+  with owner-controlled `Closed`, `Allowlist`, and `Public` phases.
 - `CubeWorld`: plot occupancy, placement, environments, movement, population,
   and consolidation.
 - Future update contracts may add an approved CC0/owned-art payload registry,
