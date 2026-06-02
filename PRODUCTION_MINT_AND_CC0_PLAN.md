@@ -50,10 +50,22 @@ Current dev snapshot artifact:
 data/normie-snapshot.json
 ```
 
+Current dev Merkle artifact:
+
+```text
+data/normie-merkle.json
+```
+
 Current snapshot command:
 
 ```bash
 ETH_RPC_URL=<mainnet-rpc> npm run snapshot:normies
+```
+
+Current Merkle build command:
+
+```bash
+npm run snapshot:merkle
 ```
 
 Optional environment variables:
@@ -67,6 +79,15 @@ Optional environment variables:
 The snapshot output is deterministic: holders are sorted by wallet and token IDs
 are sorted ascending. The script also reads `totalSupply` and fails if the
 number of discovered owners does not match that supply.
+
+The Merkle artifact uses:
+
+```text
+leaf = keccak256(abi.encode(wallet, keccak256(abi.encode(normieIds))))
+tree = sorted-pairs
+```
+
+This matches the Solidity verification path in `NormieGenesisMinter`.
 
 ## Mint Phases
 
