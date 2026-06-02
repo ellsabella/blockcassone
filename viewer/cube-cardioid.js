@@ -16,8 +16,8 @@
 import { createMeshGL }   from '/renderer/src/geometry.js';
 import { mat4, identity } from '/renderer/src/math.js';
 
-const CORE_WIDTH    = 0.003;
-const GLOW_WIDTH    = 0.025;
+const CORE_WIDTH    = 0.0045;
+const GLOW_WIDTH    = 0.0375;
 const LINE_OPACITY  = 0.80;
 const GLOW_OPACITY  = 0.45;
 const SAT_BOOST     = 2.4;
@@ -82,7 +82,6 @@ function buildFaceLineQuads(gl, flatSegs, flatNorms, width, includeUvs = false) 
     // geometry clears the opaque SDF-proxy depth that was written at face depth.
     const bx0 = p0x + nx*FACE_BIAS, by0 = p0y + ny*FACE_BIAS, bz0 = p0z + nz*FACE_BIAS;
     const bx1 = p1x + nx*FACE_BIAS, by1 = p1y + ny*FACE_BIAS, bz1 = p1z + nz*FACE_BIAS;
-    if (s === 0 && !includeUvs) console.log(`[cardioid-mesh] seg0 norm=(${nx},${ny},${nz}) pushed (${p0x},${p0y},${p0z})→(${bx0.toFixed(3)},${by0.toFixed(3)},${bz0.toFixed(3)}) perp=(${px.toFixed(3)},${py.toFixed(3)},${pz.toFixed(3)})`);
 
     if (includeUvs) {
       const L_hw = dl / hw;
@@ -122,9 +121,9 @@ export function buildCubeCardioid(motifIdx, hilbert, allPlanes, gl, meshes) {
   const glowKey = `cube-cardioid-glow-${motifIdx}`;
 
   if (meshes[lineKey] === undefined) {
-    const cubePlanes = allPlanes.filter(p =>
-      p.hierarchy && p.hierarchy.motifIndex === motifIdx
-    );
+    const cubePlanes = (allPlanes || []).every(p => p.hierarchy?.motifIndex === motifIdx)
+      ? allPlanes
+      : (allPlanes || []).filter(p => p.hierarchy && p.hierarchy.motifIndex === motifIdx);
 
     // Collect the 8 raw-integer cube corners from the motif's AABB.
     const base = motifIdx * 8;
@@ -191,19 +190,13 @@ export function buildCubeCardioid(motifIdx, hilbert, allPlanes, gl, meshes) {
     }
 
     if (segs.length === 0) {
-      console.warn(`[cardioid] motif ${motifIdx}: no active bits found. planes=${cubePlanes.length}, sample edgePatterns:`, cubePlanes[0]?.edgePatterns);
       meshes[lineKey] = null;
       meshes[glowKey] = null;
     } else {
-      console.log(`[cardioid] motif ${motifIdx}: ${segs.length/6} segs, aabb=[${mn}]..[${mx}]`);
-      console.log(`[cardioid] planes axes:`, cubePlanes.map(p=>p.axis));
-      console.log(`[cardioid] first seg:`, segs.slice(0,6), 'norm:', norms.slice(0,3));
       const flat  = new Float32Array(segs);
       const fNorm = new Float32Array(norms);
       meshes[lineKey] = buildFaceLineQuads(gl, flat, fNorm, CORE_WIDTH);
       meshes[glowKey] = buildFaceLineQuads(gl, flat, fNorm, GLOW_WIDTH, true);
-      console.log(`[cardioid] meshes built: line=${!!meshes[lineKey]}, glow=${!!meshes[glowKey]}`);
-      if (meshes[lineKey]) console.log(`[cardioid] line mesh indexCount=${meshes[lineKey].indexCount}`);
     }
   }
 

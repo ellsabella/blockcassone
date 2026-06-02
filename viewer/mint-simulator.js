@@ -1,10 +1,22 @@
-import { NORMIES_CONTRACT, getWalletState, loadAgentBindingForNft, nftKey } from './wallet-nfts.js';
+import {
+  NORMIES_CONTRACT,
+  getWalletState,
+  nftKey,
+} from './wallet-nfts.js';
+import { compactNormieArt } from './art-snapshot.js';
+import { snapshotAllNormieIds, snapshotHasEntries, snapshotNormieIdsForWallet } from './normie-snapshot.js';
+import {
+  fetchNormiePixels,
+  fetchNormieOriginalPixels,
+  fetchNormieCanvasPixels,
+  fetchNormieTraits,
+} from './normies-api.js';
+import { hydrateNormieArtSnapshot } from './normies-manager.js';
 import { hashInt as hash1 } from './tree-walker.js';
 
 let minted = [];
 let mintedNormieIds = new Set();
 let occupiedSlots = new Set();
-let mintedSourceKeys = new Set();
 let onMintReady = null;
 
 function notify() {
@@ -17,26 +29,36 @@ export function setMintDataReadyCallback(cb) {
 
 function sourceKeyFromRecord(record) {
   const source = record.source || {};
+  if (record.sourceKind === 'cc0') {
+    return `cc0:${Number(source.chainId || 0)}:${String(source.contract || '').toLowerCase()}:${source.tokenId}`;
+  }
   return `${source.chain}:${String(source.contract || '').toLowerCase()}:${source.tokenId}`;
 }
 
 function cubeFromRecord(record) {
   const source = record.source || {};
-  const sourceKind = record.sourceKind === 'normie' ? 'normie' : 'external';
+  const sourceKind = record.sourceKind === 'normie' ? 'normie' : (record.sourceKind === 'cc0' ? 'cc0' : 'external');
   const nft = {
     chain: source.chain,
+    chainId: Number(source.chainId || 0),
     contract: String(source.contract || '').toLowerCase(),
     tokenId: String(source.tokenId || ''),
-    name: `${sourceKind === 'normie' ? 'Normie' : 'Source'} #${source.tokenId || '?'}`,
-    collection: '',
+    name: record.cc0?.projectName ? `${record.cc0.projectName} Seed #${source.tokenId || '?'}` : `${sourceKind === 'normie' ? 'Normie' : 'Source'} #${source.tokenId || '?'}`,
+    collection: record.cc0?.projectName || '',
     imageUrl: '',
     isNormie: sourceKind === 'normie',
+    isCC0Seed: sourceKind === 'cc0',
     normieId: sourceKind === 'normie' ? Number(source.tokenId) : null,
+    cc0ProjectId: record.cc0?.projectId || '',
+    cc0ProjectName: record.cc0?.projectName || '',
+    cc0License: record.cc0?.license || '',
+    cc0Provenance: record.cc0?.provenance || '',
     isSvgArt: false,
     agentic: Boolean(record.agentic),
     agentId: record.agentId ? String(record.agentId) : '',
     agentBinding: null,
     agentBindingLoaded: Boolean(record.agentic),
+    art: record.art || null,
   };
 
   return {
@@ -52,10 +74,8 @@ function cubeFromRecord(record) {
 function rebuildIndexes() {
   mintedNormieIds = new Set();
   occupiedSlots = new Set();
-  mintedSourceKeys = new Set();
   for (const cube of minted) {
     occupiedSlots.add(cube.slot);
-    mintedSourceKeys.add(cube.sourceKey);
     if (cube.sourceKind === 'normie' && cube.nft.normieId !== null && cube.nft.normieId !== undefined) {
       mintedNormieIds.add(cube.nft.normieId);
     }
@@ -67,6 +87,9 @@ function setMintedFromRecords(records) {
     .map(cubeFromRecord)
     .filter(cube => Number.isInteger(cube.cubeId) && Number.isInteger(cube.slot))
     .sort((a, b) => a.cubeId - b.cubeId);
+  for (const cube of minted) {
+    if (cube.nft?.isNormie && cube.nft.art?.k === 'n') hydrateNormieArtSnapshot(cube.nft.art);
+  }
   rebuildIndexes();
 }
 
@@ -145,75 +168,106 @@ function pickSlot(allSlots, mintIndex, sourceKey) {
   return open[idx];
 }
 
-function normiePrioritySources(wallet) {
-  return wallet.normies
-    .filter(nft => nft.normieId !== null && nft.normieId !== undefined && !mintedNormieIds.has(nft.normieId))
-    .sort((a, b) => a.normieId - b.normieId);
-}
-
-function externalSources(wallet, count, startIndex) {
-  const candidates = wallet.nonNormies.filter(nft => !mintedSourceKeys.has(nftKey(nft)));
-  const picked = [];
-  const used = new Set();
-  for (let i = 0; i < count && picked.length < candidates.length; i++) {
-    let bestIdx = -1;
-    let bestScore = Infinity;
-    for (let j = 0; j < candidates.length; j++) {
-      if (used.has(j)) continue;
-      const score = hash1(j + 1, startIndex + i + 1, candidates.length + 11);
-      if (score < bestScore) {
-        bestScore = score;
-        bestIdx = j;
-      }
-    }
-    if (bestIdx < 0) break;
-    used.add(bestIdx);
-    picked.push(candidates[bestIdx]);
-  }
-  return picked;
-}
-
-function recordForMint(nft, slot, walletAddress) {
-  const sourceKind = nft.isNormie ? 'normie' : 'external';
+function normieSourceFromId(id) {
   return {
-    slot,
-    wallet: walletAddress,
-    sourceKind,
-    source: {
-      chain: nft.chain,
-      contract: nft.contract,
-      tokenId: String(nft.tokenId),
-    },
-    agentic: Boolean(nft.agentic),
-    agentId: nft.agentId ? String(nft.agentId) : '',
+    chain: 'ethereum',
+    chainId: 1,
+    contract: NORMIES_CONTRACT,
+    tokenId: String(id),
+    name: `Normie #${id}`,
+    collection: 'Normies',
+    imageUrl: '',
+    animationUrl: '',
+    unsupportedMedia: false,
+    isNormie: true,
+    normieId: id,
+    isSvgArt: false,
+    agentic: false,
+    agentId: '',
   };
 }
 
-export async function simulateMintBatch(count, allSlots) {
+async function allowlistNormieSources(wallet) {
+  const snapshotIds = await snapshotNormieIdsForWallet(wallet.address);
+  const ids = snapshotIds.length || snapshotHasEntries()
+    ? snapshotIds
+    : wallet.normies.map(nft => nft.normieId);
+  return ids
+    .filter(id => Number.isInteger(id) && !mintedNormieIds.has(id))
+    .sort((a, b) => a - b)
+    .map(normieSourceFromId);
+}
+
+async function publicNormieSources() {
+  const snapshotIds = await snapshotAllNormieIds();
+  return snapshotIds
+    .filter(id => Number.isInteger(id) && !mintedNormieIds.has(id))
+    .sort((a, b) => a - b)
+    .map(normieSourceFromId);
+}
+
+async function compactArtForMint(nft) {
+  if (nft.isNormie) {
+    const id = Number(nft.normieId);
+    const [current, original, canvas, traits] = await Promise.all([
+      fetchNormiePixels(id),
+      fetchNormieOriginalPixels(id),
+      fetchNormieCanvasPixels(id),
+      fetchNormieTraits(id).catch(() => null),
+    ]);
+    return compactNormieArt({
+      id,
+      current,
+      original,
+      canvas,
+      traits,
+      agentic: nft.agentic,
+      agentId: nft.agentId,
+    });
+  }
+  return nft.art || null;
+}
+
+async function recordForMint(nft, slot, walletAddress) {
+  return {
+    slot,
+    wallet: walletAddress,
+    sourceKind: 'normie',
+    source: {
+      chain: nft.chain,
+      chainId: nft.chainId || (nft.chain === 'ethereum' ? 1 : 0),
+      contract: nft.contract,
+      tokenId: String(nft.tokenId),
+    },
+    cc0: null,
+    agentic: Boolean(nft.agentic),
+    agentId: nft.agentId ? String(nft.agentId) : '',
+    art: await compactArtForMint(nft),
+  };
+}
+
+export async function simulateMintBatch(count, allSlots, options = {}) {
   const wallet = getWalletState();
   if (!wallet.loaded) throw new Error('Load wallet NFTs before minting');
   const requested = Math.max(0, Math.floor(Number(count) || 0));
   if (requested <= 0) return [];
 
-  const normies = normiePrioritySources(wallet);
-  const normieCount = Math.min(requested, normies.length);
-  const sources = normies.slice(0, normieCount);
-  if (sources.length < requested) {
-    sources.push(...externalSources(wallet, requested - sources.length, minted.length));
-  }
-
-  await Promise.all(sources.filter(nft => !nft.isNormie).map(nft => loadAgentBindingForNft(nft)));
+  const phase = options.phase === 'public' ? 'public' : 'allowlist';
+  const availableSources = phase === 'public'
+    ? await publicNormieSources()
+    : await allowlistNormieSources(wallet);
+  const sources = availableSources.slice(0, requested);
 
   const records = [];
   for (const nft of sources) {
-    const slot = pickSlot(allSlots, minted.length + records.length, nftKey(nft));
+    const slot = pickSlot(allSlots, minted.length + records.length, nft.sourceKey || nftKey(nft));
     if (slot === null || slot === undefined) break;
-    records.push(recordForMint(nft, slot, wallet.address));
+    records.push(await recordForMint(nft, slot, wallet.address));
     occupiedSlots.add(slot);
   }
 
   if (records.length === 0) return [];
-  const sourceByKey = new Map(sources.map(nft => [nftKey(nft), nft]));
+  const sourceByKey = new Map(sources.map(nft => [nft.sourceKey || nftKey(nft), nft]));
   const state = await appendMintRecords(records);
   const before = minted.length;
   setMintedFromRecords(state.mints || []);
@@ -221,7 +275,8 @@ export async function simulateMintBatch(count, allSlots) {
   for (const cube of mintedNow) {
     const nft = sourceByKey.get(cube.sourceKey);
     if (nft) {
-      cube.nft = nft;
+      cube.nft = { ...nft, art: cube.nft.art || nft.art || null };
+      if (cube.nft.isNormie && cube.nft.art?.k === 'n') hydrateNormieArtSnapshot(cube.nft.art);
     }
   }
   notify();
@@ -230,10 +285,12 @@ export async function simulateMintBatch(count, allSlots) {
 
 export function mintSimulationSummary() {
   const normies = minted.filter(c => c.sourceKind === 'normie').length;
-  const external = minted.length - normies;
+  const cc0 = minted.filter(c => c.sourceKind === 'cc0').length;
+  const external = minted.length - normies - cc0;
   return {
     total: minted.length,
     normies,
+    cc0,
     external,
     slots: occupiedSlots.size,
   };

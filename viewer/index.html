@@ -20,26 +20,27 @@
       font-family: 'Courier New', monospace;
     }
     #gl { display: block; width: 100vw; height: 100vh; }
-    button, input {
+    button, input, select {
       font-family: 'Courier New', monospace;
-      font-size: 11px;
+      font-size: 12px;
+      font-weight: 700;
     }
     button {
       background: rgba(24, 24, 28, 0.86);
       border: 1px solid rgba(120, 120, 140, 0.38);
       color: #d6d6dc;
-      padding: 7px 12px;
+      padding: 6px 10px;
       cursor: pointer;
-      min-height: 31px;
+      min-height: 29px;
     }
-    button:hover { background: rgba(46, 46, 54, 0.92); color: #fff; }
-    button.active { background: rgba(72, 72, 88, 0.95); border-color: #b5b5c8; color: #fff; }
-    input {
+    button:hover { background: rgba(46, 46, 54, 0.92); color: #fff; box-shadow: 0 0 12px rgba(255, 58, 184, 0.18); }
+    button.active { background: rgba(72, 72, 88, 0.95); border-color: #ff7dcc; color: #fff; box-shadow: 0 0 14px rgba(255, 58, 184, 0.32); }
+    input, select {
       background: rgba(20, 20, 24, 0.88);
       border: 1px solid rgba(120, 120, 140, 0.38);
       color: #e8e8ee;
-      padding: 7px 9px;
-      min-height: 31px;
+      padding: 6px 8px;
+      min-height: 29px;
     }
     #hud {
       position: fixed;
@@ -48,49 +49,118 @@
       right: 0;
       z-index: 4;
       display: grid;
-      grid-template-columns: minmax(260px, 1fr) auto auto;
-      gap: 10px;
+      grid-template-columns: minmax(260px, 1fr) auto minmax(272px, auto);
+      gap: 8px;
       align-items: center;
-      padding: 10px 12px;
-      background: linear-gradient(180deg, rgba(5, 5, 8, 0.94), rgba(5, 5, 8, 0.58));
-      border-bottom: 1px solid rgba(120, 120, 140, 0.28);
+      padding: 6px 10px;
+      background: linear-gradient(180deg, rgba(5, 5, 8, 0.94), rgba(5, 5, 8, 0.48));
+      border-bottom: 2px solid rgba(255, 58, 184, 0.22);
       backdrop-filter: blur(10px);
       pointer-events: auto;
+      max-height: 62px;
+      overflow: hidden;
     }
-    #wallet-controls, #mint-controls, #controls, #category-controls, #cube-type-controls {
+    #wallet-controls, #mint-controls, #controls, #nav-controls, #category-controls, #cube-type-controls {
       display: flex;
-      gap: 6px;
+      gap: 5px;
       align-items: center;
       flex-wrap: wrap;
     }
     #wallet-address { width: min(42vw, 420px); }
+    #wallet-controls, #mint-controls {
+      flex-wrap: nowrap;
+      overflow: hidden;
+      min-width: 0;
+    }
     #wallet-status, #mint-status, #log {
-      font-size: 10px;
-      color: #8d8d98;
+      font-size: 11px;
+      font-weight: 700;
+      color: #b6b6c2;
       line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     #mint-count { width: 46px; text-align: center; }
     #mint-price {
       color: #f0f0f4;
-      font-size: 11px;
+      font-size: 12px;
+      font-weight: 700;
       white-space: nowrap;
     }
     #category-controls, #cube-type-controls, #log { display: none; }
+    #nav-controls {
+      gap: 4px;
+      display: grid;
+      grid-template-columns: repeat(5, 32px);
+      grid-template-rows: repeat(2, 32px);
+      align-items: center;
+      justify-content: center;
+    }
+    #nav-controls button {
+      min-width: 32px;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      line-height: 1;
+      font-size: 15px;
+    }
+    #controls {
+      min-width: 272px;
+      min-height: 43px;
+      max-width: min(46vw, 560px);
+      max-height: 48px;
+      overflow: auto;
+      resize: horizontal;
+      padding: 4px;
+      border: 1px solid rgba(255, 58, 184, 0.22);
+      background: rgba(8, 6, 10, 0.34);
+      box-shadow: inset 0 0 16px rgba(255, 58, 184, 0.08);
+    }
+    #nav-up { grid-column: 2; grid-row: 1; }
+    #nav-left { grid-column: 1; grid-row: 2; }
+    #nav-down { grid-column: 2; grid-row: 2; }
+    #nav-right { grid-column: 3; grid-row: 2; }
+    #nav-z-neg { grid-column: 4; grid-row: 2; }
+    #nav-z-pos { grid-column: 5; grid-row: 2; }
     #nft-label {
       position: fixed;
       right: 12px;
       bottom: 12px;
       z-index: 3;
       max-width: min(520px, calc(100vw - 24px));
-      padding: 7px 9px;
-      background: rgba(10, 10, 14, 0.72);
-      border: 1px solid rgba(100, 100, 118, 0.48);
-      color: #aaa;
-      font-size: 11px;
+      padding: 9px 11px;
+      background: rgba(10, 10, 14, 0.80);
+      border: 2px solid rgba(255, 58, 184, 0.34);
+      color: #ddd;
+      font-size: 13px;
+      font-weight: 700;
       line-height: 1.25;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      pointer-events: none;
+    }
+    #owner-focus-label {
+      position: fixed;
+      top: 74px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 3;
+      max-width: min(560px, calc(100vw - 28px));
+      padding: 9px 13px;
+      background: rgba(7, 3, 8, 0.82);
+      border: 2px solid rgba(255, 58, 184, 0.58);
+      color: #ff98d9;
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1.2;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 0 0 12px rgba(255, 58, 184, 0.60);
+      box-shadow: 0 0 20px rgba(255, 58, 184, 0.22), inset 0 0 18px rgba(255, 58, 184, 0.11);
       pointer-events: none;
     }
     #cube-detail {
@@ -103,10 +173,13 @@
       z-index: 2;
       display: none;
       pointer-events: none;
-      border: 1px solid rgba(160, 160, 180, 0.28);
-      background: rgba(4, 4, 7, 0.18);
-      box-shadow: inset 0 0 0 1px rgba(255, 58, 184, 0.24), 0 18px 60px rgba(0, 0, 0, 0.22);
-      border-color: rgba(255, 58, 184, 0.72);
+      border: 3px solid rgba(255, 58, 184, 0.90);
+      background: rgba(4, 4, 7, 0.20);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 58, 184, 0.34),
+        inset 0 0 32px rgba(255, 58, 184, 0.10),
+        0 0 26px rgba(255, 58, 184, 0.36),
+        0 18px 60px rgba(0, 0, 0, 0.30);
     }
     #cube-detail.open { display: block; }
     #cube-detail-resize {
@@ -135,11 +208,12 @@
       gap: 6px;
       align-items: center;
       pointer-events: auto;
-      background: rgba(12, 12, 16, 0.82);
-      border: 1px solid rgba(100, 100, 118, 0.52);
+      background: rgba(12, 8, 16, 0.88);
+      border: 2px solid rgba(255, 58, 184, 0.40);
       padding: 6px;
+      box-shadow: 0 0 16px rgba(255, 58, 184, 0.18);
     }
-    #cube-detail-title { color: #ddd; font-size: 11px; padding: 0 6px; }
+    #cube-detail-title { color: #fff; font-size: 13px; font-weight: 800; padding: 0 7px; text-shadow: 0 0 10px rgba(255, 58, 184, 0.45); }
     #cube-detail-close, #mint-success-close { min-width: 34px; }
     #cube-detail-info {
       position: absolute;
@@ -149,16 +223,156 @@
       display: grid;
       grid-template-columns: repeat(2, minmax(0, auto));
       gap: 4px 8px;
-      padding: 8px 9px;
+      padding: 10px 11px;
       pointer-events: none;
-      background: rgba(7, 3, 8, 0.74);
-      border: 1px solid rgba(255, 58, 184, 0.52);
-      color: #ff7dcc;
-      font-size: 10px;
+      background: rgba(7, 3, 8, 0.84);
+      border: 2px solid rgba(255, 58, 184, 0.66);
+      color: #ff9adb;
+      font-size: 12px;
+      font-weight: 800;
       line-height: 1.25;
-      text-shadow: 0 0 9px rgba(255, 58, 184, 0.38);
+      text-shadow: 0 0 10px rgba(255, 58, 184, 0.58);
+      box-shadow: 0 0 18px rgba(255, 58, 184, 0.18);
     }
     #cube-detail-info span:nth-child(odd) { color: rgba(255, 125, 204, 0.64); }
+    .axis-gizmo {
+      position: fixed;
+      width: 88px;
+      height: 88px;
+      z-index: 3;
+      pointer-events: none;
+      color: #d8d8df;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1;
+      text-shadow: 0 0 8px rgba(0, 0, 0, 0.72);
+    }
+    .axis-gizmo svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+    .axis-gizmo path {
+      fill: none;
+      stroke-width: 2.5;
+      vector-effect: non-scaling-stroke;
+      filter: drop-shadow(0 0 5px currentColor);
+    }
+    .axis-gizmo text {
+      fill: currentColor;
+      font-size: 12px;
+      font-weight: 800;
+      dominant-baseline: middle;
+      text-anchor: middle;
+      font-family: inherit;
+    }
+    #main-axis {
+      left: 14px;
+      top: 96px;
+    }
+    #cube-detail-axis,
+    #world-map-axis {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      width: 76px;
+      height: 76px;
+      z-index: 1;
+    }
+    #world-map {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      width: min(320px, 32vw);
+      aspect-ratio: 1 / 1;
+      z-index: 2;
+      pointer-events: none;
+      border: 3px solid rgba(255, 132, 45, 0.90);
+      background: rgba(2, 4, 3, 0.18);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 132, 45, 0.28),
+        inset 0 0 30px rgba(255, 132, 45, 0.09),
+        0 0 24px rgba(255, 132, 45, 0.28),
+        0 18px 60px rgba(0, 0, 0, 0.24);
+    }
+    #world-map-bar {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      color: #ff9b47;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.15;
+      text-shadow: 0 0 8px rgba(255, 120, 30, 0.42);
+      pointer-events: none;
+    }
+    #world-map-label {
+      max-width: 100%;
+      color: rgba(255, 183, 96, 0.96);
+    }
+    #owner-inventory {
+      position: fixed;
+      left: 12px;
+      bottom: min(calc(32vw + 28px), 360px);
+      width: min(320px, 32vw);
+      max-height: min(270px, calc(100vh - 190px));
+      z-index: 3;
+      display: none;
+      overflow: auto;
+      padding: 10px;
+      background: rgba(7, 3, 8, 0.82);
+      border: 2px solid rgba(255, 58, 184, 0.58);
+      color: #ff98d9;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.25;
+      text-shadow: 0 0 10px rgba(255, 58, 184, 0.52);
+      box-shadow: 0 0 20px rgba(255, 58, 184, 0.20), inset 0 0 18px rgba(255, 58, 184, 0.10);
+      pointer-events: auto;
+    }
+    #owner-inventory.open { display: block; }
+    #owner-inventory-title {
+      margin-bottom: 8px;
+      color: #ffd0ed;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #owner-inventory-list {
+      display: grid;
+      gap: 4px;
+    }
+    .owner-inventory-item {
+      display: grid;
+      grid-template-columns: 54px 1fr;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
+      min-height: 28px;
+      padding: 5px 7px;
+      border: 1px solid rgba(255, 58, 184, 0.30);
+      background: rgba(15, 7, 17, 0.76);
+      color: #ff98d9;
+      text-align: left;
+    }
+    .owner-inventory-item:hover,
+    .owner-inventory-item.active {
+      border-color: rgba(255, 58, 184, 0.82);
+      background: rgba(48, 10, 38, 0.72);
+      box-shadow: 0 0 12px rgba(255, 58, 184, 0.24);
+    }
+    .owner-inventory-item span:last-child {
+      color: rgba(255, 208, 237, 0.82);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     #selection-link {
       position: fixed;
       inset: 0;
@@ -172,18 +386,20 @@
       display: none;
       fill: none;
       stroke: rgba(255, 58, 184, 0.86);
-      stroke-width: 1;
+      stroke-width: 2.4;
       vector-effect: non-scaling-stroke;
-      filter: drop-shadow(0 0 5px rgba(255, 58, 184, 0.52));
+      filter: drop-shadow(0 0 7px currentColor) drop-shadow(0 0 13px currentColor);
     }
-    #selection-link.active path { display: block; }
+    #selection-link.active #selection-link-path { display: block; }
+    #selection-link.map-active #map-link-path { display: block; }
     #street-stats {
       position: fixed;
       z-index: 3;
       display: none;
       pointer-events: none;
       color: #ff9b47;
-      font-size: 10px;
+      font-size: 12px;
+      font-weight: 800;
       line-height: 1.2;
       text-shadow: 0 0 8px rgba(255, 120, 30, 0.42);
     }
@@ -193,7 +409,8 @@
       min-width: 88px;
       padding: 6px 8px;
       background: rgba(12, 6, 2, 0.76);
-      border: 1px solid rgba(255, 132, 45, 0.72);
+      border: 2px solid rgba(255, 132, 45, 0.82);
+      box-shadow: 0 0 14px rgba(255, 132, 45, 0.24);
     }
     #street-stat-occupied { left: 0; top: 0; transform: translate(-44%, -52%); }
     #street-stat-type { right: 0; top: 0; transform: translate(44%, -52%); }
@@ -241,7 +458,7 @@
       }
       #wallet-controls, #mint-controls { justify-content: space-between; }
       #wallet-address { width: 100%; }
-      #controls { display: none; }
+      #controls { justify-content: space-between; }
       #cube-detail {
         top: auto;
         left: 8px;
@@ -251,14 +468,38 @@
         height: min(48vh, calc(100vw - 16px));
         aspect-ratio: auto;
       }
+      #world-map {
+        left: 8px;
+        width: min(38vw, 160px);
+        bottom: 42px;
+      }
+      #owner-inventory {
+        left: 8px;
+        width: min(46vw, 210px);
+        bottom: min(calc(38vw + 58px), 230px);
+        max-height: 180px;
+      }
       #cube-detail-resize { display: none; }
+      #owner-focus-label {
+        top: auto;
+        left: 8px;
+        right: 8px;
+        bottom: 86px;
+        transform: none;
+        max-width: none;
+      }
       #nft-label { left: 8px; right: 8px; bottom: 8px; max-width: none; }
     }
   </style>
 </head>
 <body>
   <canvas id="gl"></canvas>
-  <svg id="selection-link" aria-hidden="true"><path id="selection-link-path"></path></svg>
+  <svg id="selection-link" aria-hidden="true">
+    <path id="selection-link-path"></path>
+    <path id="map-link-path"></path>
+  </svg>
+  <div id="main-axis" class="axis-gizmo" aria-hidden="true"></div>
+  <div id="owner-focus-label">All Cubes</div>
   <div id="nft-label">NFT: none</div>
   <div id="hud">
     <div id="wallet-controls">
@@ -268,6 +509,10 @@
     </div>
     <div id="mint-controls">
       <span id="mint-price">0.03 ETH</span>
+      <select id="mint-phase" aria-label="Mint phase">
+        <option value="allowlist">Allowlist</option>
+        <option value="public">Public</option>
+      </select>
       <button id="mint-minus" aria-label="Decrease mint count">-</button>
       <input id="mint-count" value="1" inputmode="numeric" aria-label="Mint count">
       <button id="mint-plus" aria-label="Increase mint count">+</button>
@@ -276,9 +521,18 @@
       <span id="mint-status">minted: 0 | empty slots: 64</span>
     </div>
     <div id="controls">
-      <button id="mode-2d">2D</button>
-      <button id="mode-3d">3D</button>
-      <button id="mode-big" class="active">Big Cube</button>
+      <button id="scope-street">Street</button>
+      <button id="scope-neighbourhood">Neighbourhood</button>
+      <button id="scope-region" class="active">Region</button>
+      <button id="owner-focus-toggle" aria-pressed="false">Owned</button>
+      <div id="nav-controls" aria-label="Directional cube navigation">
+        <button id="nav-up" aria-label="Move up">↑</button>
+        <button id="nav-left" aria-label="Move left">←</button>
+        <button id="nav-down" aria-label="Move down">↓</button>
+        <button id="nav-right" aria-label="Move right">→</button>
+        <button id="nav-z-neg" aria-label="Move backward on Z">Z-</button>
+        <button id="nav-z-pos" aria-label="Move forward on Z">Z+</button>
+      </div>
     </div>
     <div id="category-controls">
       <button class="active" data-category="all">All</button>
@@ -298,10 +552,24 @@
   <div id="cube-detail" aria-hidden="true">
     <div id="cube-detail-resize" aria-hidden="true"></div>
     <div id="cube-detail-bar">
+      <button id="cube-detail-prev" aria-label="Previous cube">Prev</button>
       <span id="cube-detail-title">Cube</span>
+      <button id="cube-detail-next" aria-label="Next cube">Next</button>
       <button id="cube-detail-close" aria-label="Close cube detail">X</button>
     </div>
     <div id="cube-detail-info" aria-hidden="true"></div>
+    <div id="cube-detail-axis" class="axis-gizmo" aria-hidden="true"></div>
+  </div>
+  <div id="world-map" aria-hidden="true">
+    <div id="world-map-bar">
+      <span>full block</span>
+      <span id="world-map-label">4096 plots</span>
+    </div>
+    <div id="world-map-axis" class="axis-gizmo" aria-hidden="true"></div>
+  </div>
+  <div id="owner-inventory" aria-hidden="true">
+    <div id="owner-inventory-title">Owned items</div>
+    <div id="owner-inventory-list"></div>
   </div>
   <div id="street-stats" aria-hidden="true">
     <div id="street-stat-occupied" class="street-stat"></div>

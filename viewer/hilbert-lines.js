@@ -10,8 +10,8 @@ import { mat4, identity } from '/renderer/src/math.js';
 import { worldPerp, buildCoreLineMesh, buildGlowLineMesh } from './materials/line-mesh.js';
 
 const GREEN        = new Float32Array([0.0, 1.0, 0.2]);
-const CORE_WIDTH   = 0.003;
-const GLOW_WIDTH   = 0.022;
+const CORE_WIDTH   = 0.0045;
+const GLOW_WIDTH   = 0.033;
 const LINE_OPACITY = 0.95;
 const GLOW_OPACITY = 0.65;
 const SAT_BOOST    = 2.4;
@@ -64,8 +64,10 @@ export function buildHilbertConnectors(hilbert, gl, meshes) {
 }
 
 // Full continuous Hilbert curve: every consecutive raw vertex, including both
-// intra-cube motif segments and inter-cube connector segments. This is the
-// empty mint-state scaffold.
+// intra-cube motif segments and inter-cube connector segments. This is used as
+// a fallback scaffold outside the Big Cube view. Big mode uses per-cube
+// buildHilbertLines plus buildHilbertConnectors so the empty world has the
+// same thick neon treatment without double-stacking internal cube segments.
 export function buildFullHilbertPath(hilbert, gl, meshes) {
   const lineKey = 'hilbert-full-path-line';
   const glowKey = 'hilbert-full-path-glow';
@@ -81,8 +83,8 @@ export function buildFullHilbertPath(hilbert, gl, meshes) {
         flat[i*6+0] = a.x; flat[i*6+1] = a.y; flat[i*6+2] = a.z;
         flat[i*6+3] = b.x; flat[i*6+4] = b.y; flat[i*6+5] = b.z;
       }
-      meshes[lineKey] = buildCoreLineMesh(gl, flat, worldPerp, CORE_WIDTH * 0.82);
-      meshes[glowKey] = buildGlowLineMesh(gl, flat, worldPerp, GLOW_WIDTH * 0.72);
+      meshes[lineKey] = buildCoreLineMesh(gl, flat, worldPerp, CORE_WIDTH);
+      meshes[glowKey] = buildGlowLineMesh(gl, flat, worldPerp, GLOW_WIDTH);
     }
   }
 
@@ -91,11 +93,49 @@ export function buildFullHilbertPath(hilbert, gl, meshes) {
   const items = [];
   if (meshes[glowKey]) items.push({
     mesh: glowKey, material: 'normie-glow', transform, blend: 'additive',
-    uniforms: { uTint: lumColor, uAlpha: GLOW_OPACITY * 0.62 },
+    uniforms: { uTint: lumColor, uAlpha: GLOW_OPACITY },
   });
   if (meshes[lineKey]) items.push({
     mesh: lineKey, material: 'lines', transform, blend: 'additive',
-    uniforms: { uBaseCol: lumColor, uLineOpacity: LINE_OPACITY * 0.82 },
+    uniforms: { uBaseCol: lumColor, uLineOpacity: LINE_OPACITY },
+  });
+  return items;
+}
+
+export function buildHilbertPathRange(hilbert, startMotif, motifCount, gl, meshes) {
+  const start = Math.max(0, Math.floor(Number(startMotif) || 0));
+  const count = Math.max(0, Math.floor(Number(motifCount) || 0));
+  const lineKey = `hilbert-range-path-line-${start}-${count}`;
+  const glowKey = `hilbert-range-path-glow-${start}-${count}`;
+
+  if (meshes[lineKey] === undefined) {
+    const firstVertex = start * 8;
+    const lastVertexExclusive = Math.min(hilbert.rawVertices.length, (start + count) * 8);
+    const n = lastVertexExclusive - firstVertex;
+    if (n < 2) { meshes[lineKey] = null; meshes[glowKey] = null; }
+    else {
+      const flat = new Float32Array((n - 1) * 6);
+      for (let i = 0; i < n - 1; i++) {
+        const a = hilbert.rawVertices[firstVertex + i];
+        const b = hilbert.rawVertices[firstVertex + i + 1];
+        flat[i*6+0] = a.x; flat[i*6+1] = a.y; flat[i*6+2] = a.z;
+        flat[i*6+3] = b.x; flat[i*6+4] = b.y; flat[i*6+5] = b.z;
+      }
+      meshes[lineKey] = buildCoreLineMesh(gl, flat, worldPerp, CORE_WIDTH);
+      meshes[glowKey] = buildGlowLineMesh(gl, flat, worldPerp, GLOW_WIDTH);
+    }
+  }
+
+  const lumColor = luminescentTint(GREEN);
+  const transform = mat4(); identity(transform);
+  const items = [];
+  if (meshes[glowKey]) items.push({
+    mesh: glowKey, material: 'normie-glow', transform, blend: 'additive',
+    uniforms: { uTint: lumColor, uAlpha: GLOW_OPACITY },
+  });
+  if (meshes[lineKey]) items.push({
+    mesh: lineKey, material: 'lines', transform, blend: 'additive',
+    uniforms: { uBaseCol: lumColor, uLineOpacity: LINE_OPACITY },
   });
   return items;
 }

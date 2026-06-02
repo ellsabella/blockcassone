@@ -8,6 +8,10 @@ The mint UI and the big-cube exploration website may be offchain. They can use i
 
 Current product requirements for the project home, Big Cube world, movement, consolidation, agentic visuals, and neighbourhood environments live in `WORLD_AND_MINT_REQUIREMENTS.md`.
 
+The production copyright-safe mint model lives in
+`PRODUCTION_MINT_AND_CC0_PLAN.md`. Genesis minting is now Normie-only, with
+CC0/owned-art ingestion deferred to a post-mint update flow.
+
 ## Current State
 
 The current repository is a JavaScript/WebGL prototype. It has:
@@ -31,7 +35,8 @@ A cube is fully onchain after mint if the following can be recovered from contra
 - Cube Hilbert slot.
 - Cube seed and placement facts.
 - Normie data references and font/glyph data.
-- Non-Normie flattened art payload.
+- Post-mint update payload, if the cube has been updated away from its genesis
+  Normie source.
 - Renderer version and payload schema version.
 
 The token must not need:
@@ -53,7 +58,15 @@ For Normies, the UI should:
 - Query onchain project state for already-cubed Normies.
 - Submit exact Normie token IDs to the mint contract.
 
-For non-Normies, the UI should:
+For production public/general genesis mints, the contract should assign any
+remaining unclaimed Normie source from the committed snapshot pool. No paid
+genesis mint should produce a placeholder or non-Normie-derived cube.
+
+The older arbitrary external NFT flattening path is retained as a dev/prototype
+or future update path unless it is explicitly reapproved for production.
+
+If arbitrary external ingestion is used in dev or a future reviewed mode, the UI
+should:
 
 - Discover wallet NFTs.
 - Fetch and rasterize the source art offchain.
@@ -61,18 +74,34 @@ For non-Normies, the UI should:
 - Request or produce an attestation for the flattened payload.
 - Submit source identity, flattened payload, and attestation to the mint contract.
 
-The contract must validate source ownership and uniqueness at mint time. It cannot generally enumerate every NFT in a wallet, so wallet scanning and normie-first ordering are UI responsibilities. Hard invariants remain onchain.
+The contract must validate source uniqueness and consume snapshot Normie IDs at
+mint time. It cannot generally enumerate every NFT in a wallet, so the snapshot
+artifact and proof system carry the allowlist ownership facts. Hard invariants
+remain onchain.
+
+Important boundary:
+
+- Solidity cannot enumerate a wallet's NFTs.
+- OpenSea agent data cannot be treated as available after mint unless captured
+  and committed during mint.
+- Ethereum contracts cannot directly verify ownership of source NFTs on L2
+  chains such as Base or Shape without a bridge/proof/oracle/attestation model.
+- Therefore, cross-chain and OpenSea-derived source facts must enter the mint as
+  signed, versioned payload data if they affect permanent token art or traits.
 
 ## Core Onchain Invariants
 
 These invariants must be enforced by Solidity:
 
 - One Normie token ID can mint at most one cube.
-- One external source key can mint at most one cube, if external uniqueness is enabled.
+- One update source key can be used according to the future update policy.
 - One Hilbert slot can contain at most one cube.
-- The minter must own the submitted source NFT at mint time.
+- Allowlist minters may only consume their own snapshot Normie IDs.
+- Public minters may only consume unclaimed snapshot Normie IDs after the public
+  phase opens.
 - Cube identity is immutable after mint.
-- The flattened non-Normie payload is stored or recoverable onchain.
+- If a cube is updated after mint, the update payload is stored or recoverable
+  onchain.
 
 ## Contract Layout
 
@@ -292,6 +321,26 @@ The big-cube viewer remains offchain and should evolve into the project home and
 
 The website is not part of the individual token's fully onchain guarantee.
 
+The Big Cube website may eventually be distributed from contract-stored chunks,
+IPFS, Arweave, ENS, or a conventional host, but those delivery mechanisms are
+not the same as the fully-onchain token renderer. The individual cube renderer
+is served by `tokenURI`/`animation_url`. The Big Cube app is a project-home
+interface that reads contract state.
+
+An indexer is not strictly required for correctness, but is likely required for
+the intended UX. The UI should treat the indexer as a cache over contract state
+and events, especially for:
+
+- focused wallet inventories
+- owner highlighting across all 4096 plots
+- population and agent counters
+- movement history
+- consolidation eligibility
+- cross-chain source summaries
+
+If the indexer is unavailable, the app should still be able to fall back to
+contract reads for the active region/neighbourhood and selected token.
+
 The final world supply is a 5th-order Hilbert cube:
 
 ```text
@@ -302,13 +351,15 @@ Each token should expose placement traits derived from its slot. Indices are 0-b
 
 - `plot`: the exact cube slot in the 5th-order path, `0..4095`.
 - `neighbourhood`: the local 3rd-order Hilbert block containing the cube, `0..63`.
-- `region`: the local 4th-order Hilbert block containing the cube, `0..511`.
+- `region`: the local 4th-order Hilbert block containing the cube, `0..7`.
+- `street`: the 8-cube Hilbert subset containing the cube, `0..511`.
 
 For an order-5 world, the block math is:
 
 ```text
-region(order 4)        = floor(slot / 8)
+region(order 4)        = floor(slot / 512)
 neighbourhood(order 3) = floor(slot / 64)
+street(order 2)        = floor(slot / 8)
 ```
 
 These traits should be emitted in token metadata and used by the offchain big-cube viewer for filtering, navigation, local context, and possible neighbourhood/region-level visual systems. In the final movement-enabled architecture, `plot`, `neighbourhood`, and `region` may be read from `CubeWorld` rather than immutable `CubeNFT` storage.

@@ -19,11 +19,73 @@ The project has two linked surfaces:
 The offchain website may use OpenSea, indexers, proxies, and richer rendering.
 The individual token must not depend on those systems after mint.
 
+The project home should ultimately have two tabs:
+
+- **Current Block**: indexed view of the minted 4096-cube world, with wallet
+  focus, whole-block exploration, current owner lookup, and cube detail panels.
+- **Update Cube**: owner flow for validating cube ownership, loading allowable
+  owned/CC0 assets, picking an update source, and submitting onchain update
+  payloads.
+
+Production copyright policy, Normie-only genesis minting, and the later
+CC0/owned-art update direction live in `PRODUCTION_MINT_AND_CC0_PLAN.md`. In
+production, arbitrary third-party NFT media ingestion is retired from the
+genesis mint unless explicitly reintroduced after legal review.
+
+## Mint UX Direction
+
+The mint website should make the newly minted world position immediately legible.
+
+Production genesis mint source policy:
+
+1. Allowlist phase: Normie holders mint only their snapshot Normies.
+2. Public phase: anyone can mint any unclaimed snapshot Normie source.
+3. The hard genesis supply cap is `4096`.
+4. No paid genesis mint produces a placeholder cube.
+
+Normie owners should receive cubes tied to their exact snapshot Normie token
+IDs during the allowlist phase. This is a product requirement, not only a
+visual preference. Public-phase cubes are still Normie-sourced; they are simply
+drawn from the unclaimed global snapshot pool.
+
+After a successful mint:
+
+- the main world view should return to `region` scale
+- owner focus should activate for the loaded wallet
+- all cubes owned by that wallet should be highlighted at any visible scale
+- the first newly minted cube should become the active selection
+- the active cube should open in the 3D detail panel
+- the camera/orbit target should look at the first newly minted cube
+- the project UI should expose a compact owner inventory list for the focused
+  wallet
+
+When owner focus is active:
+
+- clicks in the main world should prioritize, and may be restricted to, cubes
+  owned by the focused wallet
+- if the user deliberately navigates to an empty plot, the UI should label it as
+  `empty slot`
+- if the user navigates to another owner's cube, owner focus may pivot to that
+  owner and show all cubes owned by them
+- the minimap should show the focused owner's cube locations across the entire
+  4096-plot block
+
+This is a UI and discovery feature. Ownership and placement remain contract
+state; any indexer used by the UI is only a read cache.
+
 ## Art Refinements
 
-### Agentic Non-Normies
+### Post-Mint Updated Cubes
 
-Agentic non-Normie NFTs should gain some awakened Normie behaviors:
+The genesis mint is Normie-only. After launch, the project website should offer
+an owner update flow for people who acquired cubes and want to change the art.
+
+Allowed update sources may include:
+
+- owned wallet assets that pass source validation
+- approved CC0 project assets
+
+Updated cubes may gain awakened or source-specific behaviors:
 
 - moving RGB lights
 - higher movement or animation intensity
@@ -31,9 +93,10 @@ Agentic non-Normie NFTs should gain some awakened Normie behaviors:
 - possible particle systems
 - special material or glow treatment to show awakened status
 
-These visual treatments should be prototyped in the dev viewer first. The
-onchain renderer should later receive only the distilled behavior flags and
-compact rendering logic needed to reproduce the final result.
+These visual treatments should be prototyped in the update tab of the dev
+viewer first. The onchain renderer should later receive only the distilled
+payload, behavior flags, and compact rendering logic needed to reproduce the
+final result.
 
 ### Natural Neighbourhoods
 
@@ -174,6 +237,29 @@ Responsibilities:
 `CubeNFT` should remain the ERC-721 identity and source-provenance contract.
 `CubeWorld` should become the mutable map/state contract.
 
+## Indexer Boundary
+
+The contracts must be the source of truth for minting, placement, ownership,
+payloads, movement, and consolidation. An indexer is not allowed to be required
+for token validity or renderer correctness.
+
+For the project home / Big Cube website, an indexer is strongly recommended for
+performance and ergonomics:
+
+- wallet-owned cube lists
+- owner-focus highlighting
+- current owner lookup for secondary sales
+- current source/update status
+- movement history
+- population and agent counts
+- consolidation eligibility
+- cross-chain source/provenance summaries
+
+The UI should be designed so indexer data can be rebuilt from contract state and
+events. Direct contract reads should remain possible for correctness checks and
+small views, but the full city-scale experience may rely on indexed reads for
+speed.
+
 ## Dev Pipeline Priorities
 
 Before adding more Solidity, prototype in the dev viewer:
@@ -183,7 +269,8 @@ Before adding more Solidity, prototype in the dev viewer:
 3. Placement-policy simulator.
 4. Population counters and UI labels.
 5. Movement UX for vacant slots.
-6. Consolidation UX for full-neighbourhood ownership.
+6. Update-cube UX for owned/approved CC0 assets.
+7. Consolidation UX for full-neighbourhood ownership.
 
 Once the behavior feels right, move only the hard invariants and compact state
 into contracts.

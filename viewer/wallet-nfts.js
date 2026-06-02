@@ -1,4 +1,5 @@
 import { imageUrlToBinaryGrid } from './nft-art-grid.js';
+import { inflateGrid } from './art-snapshot.js';
 
 export const NORMIES_CONTRACT = '0x9eb6e2025b64f340691e424b7fe7022ffde12438';
 export const DEFAULT_WALLET_CHAINS = Object.freeze(['ethereum', 'base', 'shape']);
@@ -73,6 +74,31 @@ function isLikelySvgArtUrl(url) {
   return false;
 }
 
+function isLikelyVideoUrl(url) {
+  const clean = String(url || '').trim().toLowerCase();
+  if (!clean) return false;
+  if (clean.startsWith('data:video/')) return true;
+  return /\.(?:mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(clean);
+}
+
+function firstPresent(...values) {
+  return values.find(value => String(value || '').trim()) || '';
+}
+
+function chooseArtImageUrl(raw) {
+  const candidates = [
+    raw.display_image_url,
+    raw.nft?.display_image_url,
+    raw.metadata?.image_url,
+    raw.metadata?.display_image_url,
+    raw.image_url,
+    raw.nft?.image_url,
+    raw.metadata?.image,
+  ].map(value => String(value || '').trim()).filter(Boolean);
+
+  return candidates.find(url => !isLikelyVideoUrl(url)) || '';
+}
+
 function normalizeNft(raw, chain) {
   const contract =
     raw.contract ||
@@ -88,13 +114,14 @@ function normalizeNft(raw, chain) {
     raw.nft?.identifier ||
     raw.nft?.token_id ||
     '';
-  const imageUrl =
-    raw.image_url ||
-    raw.display_image_url ||
-    raw.metadata?.image ||
-    raw.nft?.image_url ||
-    raw.nft?.display_image_url ||
-    '';
+  const imageUrl = chooseArtImageUrl(raw);
+  const animationUrl = firstPresent(
+    raw.animation_url,
+    raw.metadata?.animation_url,
+    raw.nft?.animation_url,
+    isLikelyVideoUrl(raw.image_url) ? raw.image_url : '',
+    isLikelyVideoUrl(raw.nft?.image_url) ? raw.nft?.image_url : ''
+  );
   const collectionSlug =
     raw.collection ||
     raw.collection_slug ||
@@ -110,6 +137,8 @@ function normalizeNft(raw, chain) {
     name: raw.name || raw.nft?.name || `${collectionSlug || 'NFT'} #${tokenId}`,
     collection: collectionSlug,
     imageUrl,
+    animationUrl,
+    unsupportedMedia: !imageUrl && Boolean(animationUrl),
     agentic: false,
     agentId: '',
     agentBinding: null,
@@ -126,6 +155,8 @@ function normalizeNft(raw, chain) {
 function applyNftDetail(target, raw) {
   const detail = normalizeNft(raw?.nft || raw || {}, target.chain);
   if (detail.imageUrl) target.imageUrl = detail.imageUrl;
+  if (detail.animationUrl) target.animationUrl = detail.animationUrl;
+  target.unsupportedMedia = !target.imageUrl && Boolean(target.animationUrl);
   if (detail.name && !/^NFT #?$/.test(detail.name)) target.name = detail.name;
   if (detail.collection) target.collection = detail.collection;
   target.isSvgArt = !target.isNormie && isLikelySvgArtUrl(target.imageUrl);
@@ -404,15 +435,71 @@ export function normieIdFromAssignedNft(motifIdx) {
   return nft?.isNormie ? nft.normieId : null;
 }
 
+function hydrateGridFromAssignedSnapshot(nft) {
+  if (!nft || nft.isNormie || !nft.art || nft.art.k !== 'x') return null;
+  const key = nftKey(nft);
+  if (!gridCache.has(key)) {
+    const grid = inflateGrid(nft.art.g);
+    if (grid) gridCache.set(key, grid);
+  }
+  return gridCache.get(key) || null;
+}
+
 export function isAgenticNonNormieCube(motifIdx) {
   const nft = getWalletAssignmentForCube(motifIdx);
   return Boolean(nft && !nft.isNormie && nft.agentic);
 }
 
+function gridMediaUrlForNft(nft) {
+  return nft?.imageUrl || nft?.animationUrl || '';
+}
+
+function gridIsUsable(grid) {
+  return Boolean(grid && !grid.error && !grid.discarded && (grid.bits || grid.grayscale));
+}
+
+export async function prepareNonNormieGridForNft(nft) {
+  if (!nft || nft.isNormie) return null;
+  const key = nftKey(nft);
+  if (!nft.imageUrl && !nft.animationUrl && !nft.detailLoaded) {
+    await hydrateNftDetailForNft(nft);
+  }
+
+  const mediaUrl = gridMediaUrlForNft(nft);
+  if (!mediaUrl) {
+    gridCache.set(key, { error: 'NFT has no usable image or animation media', bits: null });
+    return null;
+  }
+
+  if (gridCache.has(key)) {
+    const cached = gridCache.get(key);
+    return gridIsUsable(cached) ? cached : null;
+  }
+  if (gridFetchCache.has(key)) {
+    await gridFetchCache.get(key);
+    const cached = gridCache.get(key);
+    return gridIsUsable(cached) ? cached : null;
+  }
+
+  const p = imageUrlToBinaryGrid(mediaUrl)
+    .then(grid => {
+      gridCache.set(key, grid);
+      return grid;
+    })
+    .catch(err => {
+      gridCache.set(key, { error: String(err?.message || err), bits: null });
+      throw err;
+    });
+  gridFetchCache.set(key, p);
+  const grid = await p;
+  return gridIsUsable(grid) ? grid : null;
+}
+
 export function ensureNonNormieGridFetched(motifIdx) {
   const nft = getWalletAssignmentForCube(motifIdx);
   if (!nft || nft.isNormie) return;
-  if (!nft.imageUrl) {
+  if (hydrateGridFromAssignedSnapshot(nft)) return;
+  if (!gridMediaUrlForNft(nft)) {
     const key = nftKey(nft);
     if (!nft.detailLoaded) {
       hydrateNftDetailForNft(nft);
@@ -424,20 +511,27 @@ export function ensureNonNormieGridFetched(motifIdx) {
     }
     if (!missingImageLogCache.has(key)) {
       missingImageLogCache.add(key);
-      console.warn(`[wallet-nfts] cube ${motifIdx} non-Normie has no image URL`, nft);
+      if (nft.unsupportedMedia) {
+        console.info(`[wallet-nfts] cube ${motifIdx} non-Normie has video/animation media only but no usable URL`, nft);
+      } else {
+        console.warn(`[wallet-nfts] cube ${motifIdx} non-Normie has no image URL`, nft);
+      }
     }
     return;
   }
   const key = nftKey(nft);
   if (gridCache.has(key) || gridFetchCache.has(key)) return;
+  const mediaUrl = gridMediaUrlForNft(nft);
 
   console.info(`[wallet-nfts] cube ${motifIdx} converting artwork grid`, {
     key,
     imageUrl: nft.imageUrl,
+    animationUrl: nft.animationUrl || '',
+    mediaKind: isLikelyVideoUrl(mediaUrl) ? 'video-frame' : 'image',
     name: nft.name,
     isSvgArt: nft.isSvgArt,
   });
-  const p = imageUrlToBinaryGrid(nft.imageUrl)
+  const p = imageUrlToBinaryGrid(mediaUrl)
     .then(grid => {
       gridCache.set(key, grid);
       console.info(`[wallet-nfts] artwork grid ready for ${key}`, {
@@ -456,7 +550,7 @@ export function ensureNonNormieGridFetched(motifIdx) {
     })
     .catch(err => {
       gridCache.set(key, { error: String(err?.message || err), bits: null });
-      console.warn(`[wallet-nfts] image grid failed for ${key}:`, err);
+      console.warn(`[wallet-nfts] media grid failed for ${key}:`, err);
       notify();
     });
   gridFetchCache.set(key, p);
@@ -465,6 +559,8 @@ export function ensureNonNormieGridFetched(motifIdx) {
 export function getNonNormieGridForCube(motifIdx) {
   const nft = getWalletAssignmentForCube(motifIdx);
   if (!nft || nft.isNormie) return null;
+  const hydrated = hydrateGridFromAssignedSnapshot(nft);
+  if (hydrated) return hydrated;
   ensureNonNormieGridFetched(motifIdx);
   return gridCache.get(nftKey(nft)) || null;
 }

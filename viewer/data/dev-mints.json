@@ -1,4 +1,500 @@
 {
-  "nextCubeId": 1,
-  "mints": []
+  "nextCubeId": 12,
+  "mints": [
+    {
+      "cubeId": 1,
+      "slot": 143,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "1250"
+      },
+      "agentic": false,
+      "agentId": ""
+    },
+    {
+      "cubeId": 2,
+      "slot": 3606,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "1252"
+      },
+      "agentic": false,
+      "agentId": ""
+    },
+    {
+      "cubeId": 3,
+      "slot": 468,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "5025"
+      },
+      "agentic": false,
+      "agentId": ""
+    },
+    {
+      "cubeId": 4,
+      "slot": 2488,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "chainId": 1,
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "0"
+      },
+      "cc0": null,
+      "agentic": false,
+      "agentId": "",
+      "art": {
+        "v": 1,
+        "k": "n",
+        "id": 0,
+        "a": 0,
+        "p": "AAAAAAAAAAAAAAAAPAAAAID/AQAAwP8DAADg/wcAAOD/BwAA4P8HAADg/wcAAP7/PwAA/v9/AAD+/38AAP7/fwAA//9/AAD+/X8AAP79fwCA/9v/AQC+i38AAL6FeQAA/pj4AACeod0BADKBWQAAFEAMAACgASkAADAACAAAYAAMAABgAA4AAIAAAgAAAAEAAAAAxAAAAAAcAAAAACEAAACAAAEAAHAAPAAAfAF9AAC5xnoBAL0TuQIAOXw9BUB7AXoJILm0OA0=",
+        "th": "626d985a",
+        "t": [
+          [
+            "Type",
+            "Human"
+          ],
+          [
+            "Gender",
+            "Male"
+          ],
+          [
+            "Age",
+            "Young"
+          ],
+          [
+            "Hair Style",
+            "Wavy Hair"
+          ],
+          [
+            "Facial Feature",
+            "Rosy Cheeks"
+          ],
+          [
+            "Eyes",
+            "Round Glasses"
+          ],
+          [
+            "Expression",
+            "Neutral"
+          ],
+          [
+            "Accessory",
+            "Top Hat"
+          ]
+        ]
+      }
+    },
+    {
+      "cubeId": 5,
+      "slot": 472,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "chainId": 1,
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "1"
+      },
+      "cc0": null,
+      "agentic": false,
+      "agentId": "",
+      "art": {
+        "v": 1,
+        "k": "n",
+        "id": 1,
+        "a": 0,
+        "p": "AAAAAAAAAAAAAAAAYAAAAAD9AQAAAP8BAACA/wEAAJD/EwAA8P8PAADg/wcAAPj/HwAA+P8fAADw/x8AAPj9HwAA/Ph/AADw8BwAAHDHHQAAMMccAAB4wR0AAEDEHQAA4AAWAABwEAwAAECsCgAAwP4GAADg/wcAAMD/BwAAwH0HAADA3wMAAID+AwAAAPcAAAAA/wMAAICuBQAAIDgDAACg0QQAADifNgAA3lR3AIB+InMDgJyUeQRAnqH0AkA9znAEkJwQ/RI=",
+        "th": "83e892f9",
+        "t": [
+          [
+            "Type",
+            "Human"
+          ],
+          [
+            "Gender",
+            "Male"
+          ],
+          [
+            "Age",
+            "Young"
+          ],
+          [
+            "Hair Style",
+            "Frumpy Hair"
+          ],
+          [
+            "Facial Feature",
+            "Full Beard"
+          ],
+          [
+            "Eyes",
+            "No Glasses"
+          ],
+          [
+            "Expression",
+            "Peaceful"
+          ],
+          [
+            "Accessory",
+            "Bandana"
+          ]
+        ]
+      }
+    },
+    {
+      "cubeId": 6,
+      "slot": 104,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "chainId": 1,
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "2"
+      },
+      "cc0": null,
+      "agentic": false,
+      "agentId": "",
+      "art": {
+        "v": 1,
+        "k": "n",
+        "id": 2,
+        "a": 0,
+        "p": "AAAAAAAAAP8BAADA/wMAAOD/BwAA8P8fAAD4/x8AAPz/PwAA/P9/AAD+/38AAH7ZfwAA/ph+AAC+EH8AAN4wfwAAHsJ4AAD+ZfsAAP+7/ACADyH5A4AvBPgCgN+DowEADwjoAQA/APgBAD8A+AEAfiR8AQD+AH4BAPyDXwAA8G0fAAD4GR8AAOgxPQAAIAELAADIAAUAAJQoQgAAx8eDAcCHAMIH4IUAAg/gf319D/B5hX0f8P8p/h/4/0D+P/z/Af9//P9D/38=",
+        "th": "684ee933",
+        "t": [
+          [
+            "Type",
+            "Human"
+          ],
+          [
+            "Gender",
+            "Female"
+          ],
+          [
+            "Age",
+            "Middle-Aged"
+          ],
+          [
+            "Hair Style",
+            "Stringy Hair"
+          ],
+          [
+            "Facial Feature",
+            "Handlebars"
+          ],
+          [
+            "Eyes",
+            "Square Glasses"
+          ],
+          [
+            "Expression",
+            "Serious"
+          ],
+          [
+            "Accessory",
+            "Fedora"
+          ]
+        ]
+      }
+    },
+    {
+      "cubeId": 7,
+      "slot": 1019,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "chainId": 1,
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "3"
+      },
+      "cc0": null,
+      "agentic": false,
+      "agentId": "",
+      "art": {
+        "v": 1,
+        "k": "n",
+        "id": 3,
+        "a": 0,
+        "p": "AAAAAAAAABgAAAAAPAAAAAD/AAAAgP8DAADA/wcAAOD/CwAAwMEPAADwfg8AALD/HQAA8P0bAABg/BcAAPhYHwAAUOAeAABQgQUAAPDHHwAA6LkNAAB46TsAALChKAAAOCQ8AADowxsAABwoDAAAKH4cAABw3xwAAOAADgAA8AEXAADgAzcAAPAhLwAA8EE3AADkAW8AAPABdwAA7AF/AAD8/28AAN7/fwAA////AYD///8DwP///wfA////B8D///8P4P///w8=",
+        "th": "00eee9aa",
+        "t": [
+          [
+            "Type",
+            "Human"
+          ],
+          [
+            "Gender",
+            "Female"
+          ],
+          [
+            "Age",
+            "Middle-Aged"
+          ],
+          [
+            "Hair Style",
+            "Long Hair"
+          ],
+          [
+            "Facial Feature",
+            "Mustache"
+          ],
+          [
+            "Eyes",
+            "Nerd Glasses"
+          ],
+          [
+            "Expression",
+            "Neutral"
+          ],
+          [
+            "Accessory",
+            "Cap Forward"
+          ]
+        ]
+      }
+    },
+    {
+      "cubeId": 8,
+      "slot": 2847,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "chainId": 1,
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "4"
+      },
+      "cc0": null,
+      "agentic": false,
+      "agentId": "",
+      "art": {
+        "v": 1,
+        "k": "n",
+        "id": 4,
+        "a": 0,
+        "p": "AAAAAAAAAAAAAAAAnwAAAAD/AgAAwP8DAADg/wcAAPz/HwAA/P8/AAD4/z8AAP7/fwAA/v9/AAD8h38AAH4G+AEAPsf5AIA/g/8AAJ8//wEA3q/vAADPh68AAM6H3wEA3oP3AwAWABAAAAMAQAAAPADwAAA+APgAAHwAeAAA/gD8AADwAR0AAOCCFgAAkHkSAADgAB4AAPAAHgAA8IAeAAD8h38AAP///wGA/f//A6D+/38JiP//fyME/f//AoL7/78DgP///wM=",
+        "th": "7a91e4bd",
+        "t": [
+          [
+            "Type",
+            "Human"
+          ],
+          [
+            "Gender",
+            "Male"
+          ],
+          [
+            "Age",
+            "Young"
+          ],
+          [
+            "Hair Style",
+            "Wavy Hair"
+          ],
+          [
+            "Facial Feature",
+            "Clean Shaven"
+          ],
+          [
+            "Eyes",
+            "Regular Shades"
+          ],
+          [
+            "Expression",
+            "Peaceful"
+          ],
+          [
+            "Accessory",
+            "Bandana"
+          ]
+        ]
+      }
+    },
+    {
+      "cubeId": 9,
+      "slot": 1780,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "chainId": 1,
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "5"
+      },
+      "cc0": null,
+      "agentic": false,
+      "agentId": "",
+      "art": {
+        "v": 1,
+        "k": "n",
+        "id": 5,
+        "a": 0,
+        "p": "AAAMAAAAgP8DAADg/ycIAPD/vwwA+P//DwD8//8HAPz/9wEA/uf/AwB/wf8DAA8Ahx8AA0AHDwADAY4AAAODBwAAQ64IAwD/z38BAN47/wEAngvbBQCfC/AFAD9MoAUAzofnB4AuIIAPgD8A8D8AF4TAPYBXAIB9wAEAhE1gAQKBTTABS4dFMIEDj0MYwSOfABzDA14ADOCfPwAI5P+/AQjC/x8CAIH/DwAAAP8PCICA/gcAgAL7FQCAgHoKEAAE7QMQQIDoBSQ=",
+        "th": "cdae5e63",
+        "t": [
+          [
+            "Type",
+            "Human"
+          ],
+          [
+            "Gender",
+            "Female"
+          ],
+          [
+            "Age",
+            "Middle-Aged"
+          ],
+          [
+            "Hair Style",
+            "Stringy Hair"
+          ],
+          [
+            "Facial Feature",
+            "Chin Strap"
+          ],
+          [
+            "Eyes",
+            "Nerd Glasses"
+          ],
+          [
+            "Expression",
+            "Friendly"
+          ],
+          [
+            "Accessory",
+            "Do-Rag"
+          ]
+        ]
+      }
+    },
+    {
+      "cubeId": 10,
+      "slot": 1669,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "chainId": 1,
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "6"
+      },
+      "cc0": null,
+      "agentic": false,
+      "agentId": "",
+      "art": {
+        "v": 1,
+        "k": "n",
+        "id": 6,
+        "a": 0,
+        "p": "APD/DwAA8P8PAADw/w8AAPD/DwAA4O8PAADw/x8AAPD/HwAA+P9/AAD+Pf8AAN8H+AEA+wb4AQD/A/gBAL4A8AAA/oc3AAB+h/MAAJ4D/wAAvwPXAYAvA9MBAA8AwAMAj4TkBQBfMPgFAH8A+AUA/iD8AQD+APwDgPcD/wcA/oV/AAD/cX8AAP4BPwAAvgEfAAD4A28AAP4wHAAA/gB8AAD/APwB4P6E/Afw/zH8H/j/Af49+P8D/z/4/wf+P/j/D/4//P8//n8=",
+        "th": "3eda0ed8",
+        "t": [
+          [
+            "Type",
+            "Human"
+          ],
+          [
+            "Gender",
+            "Female"
+          ],
+          [
+            "Age",
+            "Middle-Aged"
+          ],
+          [
+            "Hair Style",
+            "Wavy Hair"
+          ],
+          [
+            "Facial Feature",
+            "Shadow Beard"
+          ],
+          [
+            "Eyes",
+            "Nerd Glasses"
+          ],
+          [
+            "Expression",
+            "Confident"
+          ],
+          [
+            "Accessory",
+            "Top Hat"
+          ]
+        ]
+      }
+    },
+    {
+      "cubeId": 11,
+      "slot": 2364,
+      "wallet": "0x15f89dc0088f13ffabbc75ff3f279c9570a69c33",
+      "sourceKind": "normie",
+      "source": {
+        "chain": "ethereum",
+        "chainId": 1,
+        "contract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+        "tokenId": "7"
+      },
+      "cc0": null,
+      "agentic": false,
+      "agentId": "",
+      "art": {
+        "v": 1,
+        "k": "n",
+        "id": 7,
+        "a": 0,
+        "p": "AAAAAAAAAAAAAAAAJAMAAECSAQAAwAgIAAAIBhAAACwAMgAABAAEAACUAAgAgItwEAAAgAAAAACUAqEBAEXGogEAhdMnAQDlAI4AANUAGgAA/e/fAYA2u5kBADYp2QEAOgS4AAAKAOAAACJEqAAAMSjYAAAoAUkAAAQASAAATAAKAADMAScAAJgABwAAWIIxAABMfG0AALAQCwAAwCAHAADAAAYAAOABDgAA4AIOAADwAB8AAJT/YwAAq/+PAYCl/zMDgFX/ywU=",
+        "th": "eeb61cf0",
+        "t": [
+          [
+            "Type",
+            "Human"
+          ],
+          [
+            "Gender",
+            "Male"
+          ],
+          [
+            "Age",
+            "Old"
+          ],
+          [
+            "Hair Style",
+            "Stringy Hair"
+          ],
+          [
+            "Facial Feature",
+            "Chin Strap"
+          ],
+          [
+            "Eyes",
+            "Square Glasses"
+          ],
+          [
+            "Expression",
+            "Slight Smile"
+          ],
+          [
+            "Accessory",
+            "Bow Tie"
+          ]
+        ]
+      }
+    }
+  ]
 }

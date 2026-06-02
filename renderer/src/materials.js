@@ -25,7 +25,7 @@ const STANDARD_UNIFORMS = [
   'uBloomTex', 'uBloomStrength', 'uThreshold', 'uDir',     // bloom chain
   'uStreakStrength', 'uStreakStep',                        // lens streaks
   'uCamRight', 'uCamUp', 'uBillboardSize',                 // billboards
-  'uNoiseTex', 'uTint', 'uScale', 'uSpeed', 'uOpacity', 'uSliceOffset', // volumes
+  'uNoiseTex', 'uTint', 'uScale', 'uSpeed', 'uOpacity', 'uSliceOffset', 'uAmp', // volumes
   'uSpriteTex',                                                         // sprites
   'uLineOpacity',                                                       // lines
   'uEdgeCol', 'uFresnelPow', 'uEdgeAlpha',                              // fresnel shell
@@ -84,11 +84,40 @@ export function compileProgram(gl, vs, fs, name) {
 
 // ---------- Material lifecycle ----------
 
-async function fetchShader(path) {
-  // Cache-bust so hot-reload always fetches fresh content.
-  const res = await fetch(path + '?' + Date.now());
-  if (!res.ok) throw new Error(`shader fetch failed: ${path} (${res.status})`);
-  return res.text();
+const shaderTextCache = new Map();
+const shaderSourceCache = new Map();
+
+async function fetchTextCached(path, label, { bust = false } = {}) {
+  if (!bust && shaderTextCache.has(path)) return shaderTextCache.get(path);
+  const promise = (async () => {
+    const res = await fetch(path + (bust ? '?' + Date.now() : ''));
+    if (!res.ok) throw new Error(`${label} failed: ${path} (${res.status})`);
+    return res.text();
+  })();
+  if (!bust) shaderTextCache.set(path, promise);
+  return promise;
+}
+
+async function fetchShader(path, { bust = false } = {}) {
+  if (!bust && shaderSourceCache.has(path)) return shaderSourceCache.get(path);
+  const promise = (async () => {
+    // Cache-bust only on hot-reload. Initial material setup shares shader
+    // sources across programs so common terrain/line shaders are fetched once.
+    let src = await fetchTextCached(path, 'shader fetch', { bust });
+    // Resolve `// #include "chunks/foo.glsl"` directives. Paths are relative to
+    // /renderer/shaders/. Single-pass (no nested includes); add a loop here if
+    // chunks ever need to include other chunks. The directive must be the only
+    // thing on its line so the comment form stays a no-op for editors/linters.
+    const re = /^[ \t]*\/\/[ \t]*#include[ \t]+"([^"]+)"[ \t]*$/gm;
+    const matches = [...src.matchAll(re)];
+    for (const m of matches) {
+      const incPath = '/renderer/shaders/' + m[1];
+      src = src.replace(m[0], await fetchTextCached(incPath, '#include', { bust }));
+    }
+    return src;
+  })();
+  if (!bust) shaderSourceCache.set(path, promise);
+  return promise;
 }
 
 function cacheLocations(gl, prog, extraNames) {
@@ -122,8 +151,8 @@ export async function loadMaterial(gl, def) {
 // reference stable so callers don't need to re-lookup.
 export async function reloadMaterial(gl, mat) {
   const [vs, fs] = await Promise.all([
-    fetchShader(mat.vertPath),
-    fetchShader(mat.fragPath),
+    fetchShader(mat.vertPath, { bust: true }),
+    fetchShader(mat.fragPath, { bust: true }),
   ]);
   const newProg = compileProgram(gl, vs, fs, mat.name);
   if (!newProg) {

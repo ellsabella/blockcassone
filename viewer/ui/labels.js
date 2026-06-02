@@ -23,7 +23,7 @@ export function updateNftLabel(el, motifIdx) {
     el.textContent = `slot ${motifIdx} | empty`;
     return;
   }
-  const kind     = nft.isNormie ? 'Normie' : 'Non-normie';
+  const kind     = nft.isNormie ? 'Normie' : (nft.isCC0Seed ? 'CC0 seed' : 'Non-normie');
   const name     = nft.name || `#${nft.tokenId || '?'}`;
   const contract = nft.contract ? `${nft.contract.slice(0, 6)}...${nft.contract.slice(-4)}` : 'unknown';
   const prefix   = mintedCube ? `cube ${mintedCube.cubeId} @ slot ${motifIdx}` : `slot ${motifIdx}`;

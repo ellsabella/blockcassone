@@ -3,6 +3,11 @@
 import { getWalletState } from '../wallet-nfts.js';
 import { mintSimulationSummary } from '../mint-simulator.js';
 
+function shortAddress(address) {
+  const value = String(address || '');
+  return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value || 'unknown';
+}
+
 export function updateWalletStatus(el) {
   if (!el) return;
   const state = getWalletState();
@@ -11,7 +16,7 @@ export function updateWalletStatus(el) {
   else if (state.loaded) {
     const chains = state.chains?.join('+') || state.chain || 'unknown';
     const failed = Object.keys(state.chainErrors || {});
-    el.textContent = `wallet: ${state.nfts.length} NFTs @ ${chains} | normies ${state.normies.length} | non ${state.nonNormies.length}${failed.length ? ` | failed ${failed.join(',')}` : ''}`;
+    el.textContent = `minting as ${shortAddress(state.address)} | ${state.nfts.length} NFTs @ ${chains} | normies ${state.normies.length} | non ${state.nonNormies.length}${failed.length ? ` | failed ${failed.join(',')}` : ''}`;
   }
   else                     el.textContent = 'wallet: not loaded';
 }
@@ -29,5 +34,6 @@ export function updateMintStatus(el, uniqueMotifs) {
   if (!el) return;
   const summary = mintSimulationSummary();
   const empty   = Math.max(0, uniqueMotifs.length - summary.slots);
-  el.textContent = `minted: ${summary.total} | normie ${summary.normies} | non ${summary.external} | empty slots: ${empty}`;
+  const legacy = (summary.cc0 || 0) + (summary.external || 0);
+  el.textContent = `minted: ${summary.total} | normie ${summary.normies}${legacy ? ` | legacy ${legacy}` : ''} | empty slots: ${empty}`;
 }

@@ -16,6 +16,7 @@ const CROP_ALPHA_THRESHOLD_8BIT = 5;
 const CROP_MAX_CONTENT_RATIO = 0.85;
 const CROP_MIN_BBOX = 16;
 const CROP_MARGIN_PX = 2;
+const VIDEO_FRAME_TIMEOUT_MS = 9000;
 
 function proxiedImageUrl(url) {
   return `/api/image?url=${encodeURIComponent(url)}`;
@@ -48,6 +49,63 @@ async function loadImageFromDataUrl(dataUrl) {
   img.src = dataUrl;
   await img.decode();
   return img;
+}
+
+function waitForVideoEvent(video, eventName, timeoutMs = VIDEO_FRAME_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`video ${eventName} timed out`));
+    }, timeoutMs);
+    function cleanup() {
+      clearTimeout(timer);
+      video.removeEventListener(eventName, onEvent);
+      video.removeEventListener('error', onError);
+    }
+    function onEvent() {
+      cleanup();
+      resolve();
+    }
+    function onError() {
+      cleanup();
+      reject(new Error('video decode failed'));
+    }
+    video.addEventListener(eventName, onEvent, { once: true });
+    video.addEventListener('error', onError, { once: true });
+  });
+}
+
+async function loadVideoFrameFromBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.src = url;
+    await waitForVideoEvent(video, 'loadedmetadata');
+
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 1;
+    const targetTime = Math.min(Math.max(duration * 0.18, 0.12), Math.max(0, duration - 0.05));
+    if (targetTime > 0.01) {
+      video.currentTime = targetTime;
+      await waitForVideoEvent(video, 'seeked');
+    } else {
+      await waitForVideoEvent(video, 'loadeddata');
+    }
+
+    const width = video.videoWidth || 1;
+    const height = video.videoHeight || 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, width, height);
+    console.debug(`[nft-grid] extracted video frame ${width}x${height}`, { duration, targetTime });
+    return canvas;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 async function loadImageFromUrl(url) {
@@ -95,6 +153,12 @@ function svgTextToDataUrl(svgText) {
 async function loadImageFromProxyResponse(res, normalizedUrl) {
   const contentType = (res.headers.get('content-type') || '').toLowerCase();
   const isSvg = contentType.includes('svg') || /\.svg(?:$|[?#])/i.test(normalizedUrl);
+  const isVideo = contentType.startsWith('video/') || /\.(?:mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(normalizedUrl);
+
+  if (isVideo) {
+    console.debug(`[nft-grid] video media detected; extracting representative frame`, normalizedUrl);
+    return loadVideoFrameFromBlob(await res.blob());
+  }
 
   if (isSvg) {
     const svgText = await res.text();
@@ -769,7 +833,7 @@ function inferPixelGrid(sample) {
 export async function imageUrlToBinaryGrid(imageUrl) {
   if (!imageUrl) throw new Error('NFT has no image URL');
   const normalizedUrl = normalizeMediaUrl(imageUrl);
-  console.debug(`[nft-grid] fetch image`, { imageUrl, normalizedUrl });
+  console.debug(`[nft-grid] fetch media`, { imageUrl, normalizedUrl });
   const res = await fetch(proxiedImageUrl(normalizedUrl));
   if (!res.ok) throw new Error(`image fetch failed: ${res.status}`);
   const img = await loadImageFromProxyResponse(res, normalizedUrl);

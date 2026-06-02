@@ -12,6 +12,7 @@ import {
   fetchAgentBinding,
 } from '../normies-api.js';
 import { isAssignedNormieCube, normieIdFromAssignedNft, walletInventoryLoaded } from '../wallet-nfts.js';
+import { inflateNormieArt } from '../art-snapshot.js';
 
 // ---------------------------------------------------------------------------
 // Module-level state
@@ -57,6 +58,12 @@ function classifyNormie(data) {
   return 1;
 }
 
+function logOptionalFetchFailure(label, id, err) {
+  const message = String(err?.message || err);
+  const log = /\b(?:429|500|502|503|504)\b/.test(message) ? console.debug : console.warn;
+  log(`[normies] ${label} failed ${id}:`, err);
+}
+
 function planeRoleForCubePlane(plane, cubePlanes) {
   const axisCounts = {};
   for (const p of cubePlanes) axisCounts[p.axis] = (axisCounts[p.axis] || 0) + 1;
@@ -86,9 +93,9 @@ export function ensureFetched(id) {
     fetchNormiePixels(id),
     fetchNormieOriginalPixels(id),
     fetchNormieCanvasPixels(id),
-    fetchNormieCanvasDiff(id).catch(err => { console.warn(`[normies] canvas diff failed ${id}:`, err); return null; }),
-    fetchNormieCanvasInfo(id).catch(err => { console.warn(`[normies] canvas info failed ${id}:`, err); return null; }),
-    fetchNormieTraits(id).catch(err => { console.warn(`[normies] traits failed ${id}:`, err); return null; }),
+    fetchNormieCanvasDiff(id).catch(err => { logOptionalFetchFailure('canvas diff', id, err); return null; }),
+    fetchNormieCanvasInfo(id).catch(err => { logOptionalFetchFailure('canvas info', id, err); return null; }),
+    fetchNormieTraits(id).catch(err => { logOptionalFetchFailure('traits', id, err); return null; }),
   ]).then(([current, original, canvas, diff, info, traits]) => {
     const prev   = normieCache.get(id) || {};
     const edited = Boolean(info?.customized) || canvas.some(v => v !== 0);
@@ -100,13 +107,36 @@ export function ensureFetched(id) {
   fetchCache.set(id, p);
 }
 
+export function hydrateNormieArtSnapshot(snapshot) {
+  const data = inflateNormieArt(snapshot);
+  if (!data || data.id === null || data.id === undefined) return;
+  const prev = normieCache.get(data.id) || {};
+  const next = {
+    ...prev,
+    current: data.current,
+    original: data.original,
+    canvas: data.canvas,
+    traits: data.traits || prev.traits || null,
+    traitHash: data.traitHash,
+    edited: data.edited,
+    awakened: data.awakened,
+    bindingInfo: data.awakened ? { binding: true, agentId: data.agentId } : prev.bindingInfo,
+  };
+  next.category = classifyNormie(next);
+  normieCache.set(data.id, next);
+  pixelCache.set(data.id, data.current);
+  fetchCache.set(data.id, Promise.resolve(next));
+  statusFetchCache.set(data.id, Promise.resolve(next));
+  if (gl_ && !texCache.has(data.id)) texCache.set(data.id, makeNormieTexture(gl_, data.current));
+}
+
 export function ensureNormieStatusFetched(id) {
   if (id === null || id === undefined) return;
   ensureFetched(id);
   if (statusFetchCache.has(id)) return;
   const p = Promise.all([
     fetchNormieBurnedInfo(id).catch(err => { if (err?.message && !err.message.includes('404')) console.warn(`[normies] burned info failed ${id}:`, err); return null; }),
-    fetchAgentBinding(id).catch(err => { console.warn(`[normies] agent binding failed ${id}:`, err); return null; }),
+    fetchAgentBinding(id).catch(err => { logOptionalFetchFailure('agent binding', id, err); return null; }),
   ]).then(([burnedInfo, bindingInfo]) => {
     const prev = normieCache.get(id) || {};
     const next = { ...prev, burnedInfo, bindingInfo, burned: isBurnedPayload(burnedInfo), awakened: Boolean(bindingInfo?.binding) };

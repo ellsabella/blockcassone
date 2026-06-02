@@ -50,7 +50,7 @@ export function buildCoreLineMesh(gl, flatSegs, perpFn, width) {
   return createMeshGL(gl, {
     positions: new Float32Array(positions),
     alphas:    new Float32Array(alphas),
-    indices:   new Uint16Array(indices),
+    indices,
   });
 }
 
@@ -98,6 +98,6 @@ export function buildGlowLineMesh(gl, flatSegs, perpFn, width, squareCaps = fals
     positions: new Float32Array(positions),
     alphas:    new Float32Array(lhws),
     uvs:       new Float32Array(uvs),
-    indices:   new Uint16Array(indices),
+    indices,
   });
 }

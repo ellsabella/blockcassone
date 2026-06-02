@@ -15,11 +15,16 @@ import {
   build2DOutline, build3DVoxels, buildPlaneOutline, buildNormieIdLabel,
   buildNormieTraitsBanner, isNormieCube,
 } from './normies-manager.js';
-import { buildHilbertLines, buildFullHilbertPath } from './hilbert-lines.js';
+import { buildHilbertLines, buildFullHilbertPath, buildHilbertPathRange } from './hilbert-lines.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
 import { buildStoneWalker }   from './materials/stone-walker.js';
 import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner } from './non-normie-art-plane.js';
-import { isAgenticNonNormieCube, loadWalletNftsAcrossChains, setWalletDataReadyCallback } from './wallet-nfts.js';
+import {
+  getWalletState,
+  isAgenticNonNormieCube,
+  loadWalletNftsAcrossChains,
+  setWalletDataReadyCallback,
+} from './wallet-nfts.js';
 import { serializeAllPlaced } from '/core/serialize.js';
 import {
   getMintedCubeForSlot,
@@ -36,6 +41,7 @@ import {
   applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor, applyBannerGlitch,
   applyAgenticAwakening, applyAgenticBannerPulse,
 } from './scene/styling.js';
+import { buildEmptySlotItems, environmentNameForStreet } from './environments.js';
 import {
   ensureMotifCategory, visibleMotifs, visiblePlanes, categoryCounts,
   motifPassesCategory,
@@ -51,6 +57,14 @@ const logEl  = document.getElementById('log');
 const nftLabelEl = document.getElementById('nft-label');
 const selectionLinkEl = document.getElementById('selection-link');
 const selectionLinkPathEl = document.getElementById('selection-link-path');
+const mapLinkPathEl = document.getElementById('map-link-path');
+const worldMapEl = document.getElementById('world-map');
+const worldMapLabelEl = document.getElementById('world-map-label');
+const mainAxisEl = document.getElementById('main-axis');
+const worldMapAxisEl = document.getElementById('world-map-axis');
+const ownerInventoryEl = document.getElementById('owner-inventory');
+const ownerInventoryTitleEl = document.getElementById('owner-inventory-title');
+const ownerInventoryListEl = document.getElementById('owner-inventory-list');
 
 const logLines = [];
 function log(msg) {
@@ -86,27 +100,37 @@ window.addEventListener('resize', () => {
 
 // ---------- Blockcassone data layer ----------
 // These come from globals defined by the /public/*.js script tags.
+const HILBERT_ORDER = 5;
+const STREET_SIZE = 8;
+const NEIGHBOURHOOD_SIZE = 64;
+const REGION_SIZE = 512;
+
 const R = new Random();
-const hilbert = generateHilbert3D(3);
+const hilbert = generateHilbert3D(HILBERT_ORDER);
 assignPlaneProperties(hilbert, R);
 buildPlaneEdges(hilbert);
 const blocks = buildBlocks(hilbert);
 
-const allPlanes = hilbert.planes.concat(hilbert.boundaryPlanes);
-const placer    = createPlacement(hilbert);
-
-// Place every plane so we have a full cube set to navigate. In the existing
-// dev viewer the user steps placement with the spacebar; here we just fill it.
-while (placer.placeNext(R) !== null) {}
-const placedPlanes = placer.getPlaced();
-
-log(`hilbert order ${hilbert.order}, planes placed ${placedPlanes.length}/${allPlanes.length}`);
+const placedPlanes = hilbert.planes;
+log(`hilbert order ${hilbert.order}, regular planes ${placedPlanes.length}`);
 
 // Serialize all placed planes — gives a clean shape with .axis, .center,
 // .hierarchy.motifIndex, etc.
 const serializedPlanes = serializeAllPlaced(hilbert, placedPlanes, blocks)
   .filter(p => p.type !== 'boundary');
 log(`serialized (non-boundary) planes: ${serializedPlanes.length}`);
+
+const planesByMotif = new Map();
+for (const plane of serializedPlanes) {
+  const motifIdx = plane.hierarchy?.motifIndex;
+  if (motifIdx === null || motifIdx === undefined) continue;
+  if (!planesByMotif.has(motifIdx)) planesByMotif.set(motifIdx, []);
+  planesByMotif.get(motifIdx).push(plane);
+}
+
+function planesForMotif(motifIdx) {
+  return planesByMotif.get(motifIdx) || [];
+}
 
 // Pick the initial selection — first non-boundary plane, and the cube it belongs to.
 let currentPlaneIdx = 0;
@@ -148,6 +172,18 @@ function aabbForMotifs(motifIndices) {
   return { mn, mx };
 }
 
+function centerOfAABB(box) {
+  return [
+    (box.mn[0] + box.mx[0]) * 0.5,
+    (box.mn[1] + box.mx[1]) * 0.5,
+    (box.mn[2] + box.mx[2]) * 0.5,
+  ];
+}
+
+function sizeOfAABB(box) {
+  return Math.max(box.mx[0] - box.mn[0], box.mx[1] - box.mn[1], box.mx[2] - box.mn[2]);
+}
+
 function wireTransformForAABB(box, pad = 0.08) {
   const sx = (box.mx[0] - box.mn[0]) * (1 + pad);
   const sy = (box.mx[1] - box.mn[1]) * (1 + pad);
@@ -161,6 +197,51 @@ function wireTransformForAABB(box, pad = 0.08) {
   M[8] = 0;  M[9] = 0;  M[10] = sz; M[11] = 0;
   M[12] = cx; M[13] = cy; M[14] = cz; M[15] = 1;
   return M;
+}
+
+function buildAABBGridMesh(gl, box, divisions) {
+  const xs = [box.mn[0], box.mx[0]];
+  const ys = [box.mn[1], box.mx[1]];
+  const zs = [box.mn[2], box.mx[2]];
+  const positions = [];
+  const alphas = [];
+  const pushLine = (a, b, alpha = 1.0) => {
+    positions.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    alphas.push(alpha, alpha);
+  };
+  const pushFaceGrid = (axis, sideValue, div, alpha) => {
+    for (let i = 1; i < div; i++) {
+      const t = i / div;
+      if (axis === 'x') {
+        const y = box.mn[1] + (box.mx[1] - box.mn[1]) * t;
+        const z = box.mn[2] + (box.mx[2] - box.mn[2]) * t;
+        pushLine([sideValue, y, box.mn[2]], [sideValue, y, box.mx[2]], alpha);
+        pushLine([sideValue, box.mn[1], z], [sideValue, box.mx[1], z], alpha);
+      } else if (axis === 'y') {
+        const x = box.mn[0] + (box.mx[0] - box.mn[0]) * t;
+        const z = box.mn[2] + (box.mx[2] - box.mn[2]) * t;
+        pushLine([x, sideValue, box.mn[2]], [x, sideValue, box.mx[2]], alpha);
+        pushLine([box.mn[0], sideValue, z], [box.mx[0], sideValue, z], alpha);
+      } else {
+        const x = box.mn[0] + (box.mx[0] - box.mn[0]) * t;
+        const y = box.mn[1] + (box.mx[1] - box.mn[1]) * t;
+        pushLine([x, box.mn[1], sideValue], [x, box.mx[1], sideValue], alpha);
+        pushLine([box.mn[0], y, sideValue], [box.mx[0], y, sideValue], alpha);
+      }
+    }
+  };
+
+  for (const [div, alpha] of divisions) {
+    for (const x of xs) pushFaceGrid('x', x, div, alpha);
+    for (const y of ys) pushFaceGrid('y', y, div, alpha);
+    for (const z of zs) pushFaceGrid('z', z, div, alpha);
+  }
+
+  return createMeshGL(gl, {
+    positions: new Float32Array(positions),
+    alphas: new Float32Array(alphas),
+    mode: 'LINES',
+  });
 }
 
 function rayAABBIntersect(ro, rd, mn, mx) {
@@ -180,13 +261,28 @@ function rayAABBIntersect(ro, rd, mn, mx) {
 
 // ---------- Mode + navigation ----------
 let mode = 'BIG';
+let mainViewScope = 'region';
 let selectedMotifIdx = null;   // BIG mode: which cube is focused (null = none)
 let selectedStreetIdx = null;
+let selectedNeighbourhoodIdx = null;
+let selectedRegionIdx = null;
+let ownerFocusEnabled = false;
+let ownerFocusAddress = '';
+let ownerFocusLabelVersion = 0;
+let ownerFocusMotifCache = new Set();
 const lightsSelectedEl = document.getElementById('lights-selected');
 
-const btn2D  = document.getElementById('mode-2d');
-const btn3D  = document.getElementById('mode-3d');
-const btnBig = document.getElementById('mode-big');
+const btnScopeStreet = document.getElementById('scope-street');
+const btnScopeNeighbourhood = document.getElementById('scope-neighbourhood');
+const btnScopeRegion = document.getElementById('scope-region');
+const ownerFocusToggleBtn = document.getElementById('owner-focus-toggle');
+const ownerFocusLabelEl = document.getElementById('owner-focus-label');
+const btnNavUp = document.getElementById('nav-up');
+const btnNavDown = document.getElementById('nav-down');
+const btnNavLeft = document.getElementById('nav-left');
+const btnNavRight = document.getElementById('nav-right');
+const btnNavZNeg = document.getElementById('nav-z-neg');
+const btnNavZPos = document.getElementById('nav-z-pos');
 
 const _updateLightsLabel = () => updateLightsLabel(lightsSelectedEl, mode, selectedMotifIdx);
 
@@ -200,12 +296,11 @@ const _updateNftLabel = () => updateNftLabel(nftLabelEl, activeMotifIdx());
 function setMode(next) {
   if (mode === next) return;
   mode = next;
-  btn2D.classList.toggle('active',  mode === '2D');
-  btn3D.classList.toggle('active',  mode === '3D');
-  btnBig.classList.toggle('active', mode === 'BIG');
   if (mode === 'BIG') {
     selectedMotifIdx = currentPlane().hierarchy.motifIndex;
     selectedStreetIdx = null;
+    selectedNeighbourhoodIdx = null;
+    selectedRegionIdx = null;
     recentreOrbit();
   } else {
     recentreOrbit();
@@ -214,14 +309,159 @@ function setMode(next) {
   _updateNftLabel();
   if (typeof rebuildScene === 'function') rebuildScene();
 }
-btn2D.addEventListener('click',  () => setMode('2D'));
-btn3D.addEventListener('click',  () => setMode('3D'));
-btnBig.addEventListener('click', () => setMode('BIG'));
+
+function updateScopeButtons() {
+  if (btnScopeStreet) btnScopeStreet.classList.toggle('active', mainViewScope === 'street');
+  if (btnScopeNeighbourhood) btnScopeNeighbourhood.classList.toggle('active', mainViewScope === 'neighbourhood');
+  if (btnScopeRegion) btnScopeRegion.classList.toggle('active', mainViewScope === 'region');
+  updateWorldMapLabel();
+}
+
+function scopeDisplayName(scope) {
+  if (scope === 'street') return 'Street';
+  if (scope === 'neighbourhood') return 'Neighbourhood';
+  return 'Region';
+}
+
+function selectionRangeLabel() {
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
+    const plotStart = selectedRegionIdx * REGION_SIZE;
+    const plotEnd = plotStart + REGION_SIZE - 1;
+    const nStart = Math.floor(plotStart / NEIGHBOURHOOD_SIZE);
+    const nEnd = Math.floor(plotEnd / NEIGHBOURHOOD_SIZE);
+    return `Region ${selectedRegionIdx} | neighbourhoods ${nStart}-${nEnd} | cubes ${plotStart}-${plotEnd}`;
+  }
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+    const plotStart = selectedNeighbourhoodIdx * NEIGHBOURHOOD_SIZE;
+    const plotEnd = plotStart + NEIGHBOURHOOD_SIZE - 1;
+    const sStart = Math.floor(plotStart / STREET_SIZE);
+    const sEnd = Math.floor(plotEnd / STREET_SIZE);
+    return `Neighbourhood ${selectedNeighbourhoodIdx} | streets ${sStart}-${sEnd} | cubes ${plotStart}-${plotEnd}`;
+  }
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+    const plotStart = selectedStreetIdx * STREET_SIZE;
+    const plotEnd = plotStart + STREET_SIZE - 1;
+    return `Street ${selectedStreetIdx} | cubes ${plotStart}-${plotEnd}`;
+  }
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
+    if (mainViewScope === 'region') {
+      const region = regionIndexForMotif(selectedMotifIdx);
+      const plotStart = region * REGION_SIZE;
+      const plotEnd = plotStart + REGION_SIZE - 1;
+      const nStart = Math.floor(plotStart / NEIGHBOURHOOD_SIZE);
+      const nEnd = Math.floor(plotEnd / NEIGHBOURHOOD_SIZE);
+      return `Region ${region} | neighbourhoods ${nStart}-${nEnd} | cubes ${plotStart}-${plotEnd} | selected ${selectedMotifIdx}`;
+    }
+    if (mainViewScope === 'street') {
+      const street = streetIndexForMotif(selectedMotifIdx);
+      const plotStart = street * STREET_SIZE;
+      const plotEnd = plotStart + STREET_SIZE - 1;
+      return `Street ${street} | cubes ${plotStart}-${plotEnd} | selected ${selectedMotifIdx}`;
+    }
+    const neighbourhood = neighbourhoodIndexForMotif(selectedMotifIdx);
+    const plotStart = neighbourhood * NEIGHBOURHOOD_SIZE;
+    const plotEnd = plotStart + NEIGHBOURHOOD_SIZE - 1;
+    const sStart = Math.floor(plotStart / STREET_SIZE);
+    const sEnd = Math.floor(plotEnd / STREET_SIZE);
+    return `Neighbourhood ${neighbourhood} | streets ${sStart}-${sEnd} | cubes ${plotStart}-${plotEnd} | selected ${selectedMotifIdx}`;
+  }
+  const plotStart = mainScopeStart();
+  const plotEnd = plotStart + mainScopeCount() - 1;
+  return `${scopeDisplayName(mainViewScope)} view | cubes ${plotStart}-${plotEnd}`;
+}
+
+function updateWorldMapLabel() {
+  if (worldMapLabelEl) worldMapLabelEl.textContent = selectionRangeLabel();
+}
+
+function setMainViewScope(next) {
+  if (next !== 'region' && next !== 'neighbourhood' && next !== 'street') return;
+  mainViewScope = next;
+  const anchor = selectedMotifIdx ?? currentAnchorMotif();
+  if (mainViewScope === 'region') {
+    selectedRegionIdx = regionIndexForMotif(anchor);
+    selectedNeighbourhoodIdx = null;
+    selectedStreetIdx = null;
+  } else if (mainViewScope === 'neighbourhood') {
+    selectedNeighbourhoodIdx = neighbourhoodIndexForMotif(anchor);
+    selectedRegionIdx = null;
+    selectedStreetIdx = null;
+  } else {
+    selectedStreetIdx = streetIndexForMotif(anchor);
+    selectedNeighbourhoodIdx = null;
+    selectedRegionIdx = null;
+  }
+  updateScopeButtons();
+  recentreOrbit();
+  rebuildScene();
+}
+
+if (btnScopeStreet) btnScopeStreet.addEventListener('click', () => setMainViewScope('street'));
+if (btnScopeNeighbourhood) btnScopeNeighbourhood.addEventListener('click', () => setMainViewScope('neighbourhood'));
+if (btnScopeRegion) btnScopeRegion.addEventListener('click', () => setMainViewScope('region'));
+updateScopeButtons();
 
 // Unique cube indices (ordered) for 3D-mode stepping.
 const uniqueMotifs = [...new Set(serializedPlanes.map(p => p.hierarchy.motifIndex))]
   .sort((a, b) => a - b);
 log(`unique cubes: ${uniqueMotifs.length}`);
+
+function motifCenterTicks(motifIdx) {
+  const box = cubeAABBFor(motifIdx);
+  return [
+    Math.round((box.mn[0] + box.mx[0])),
+    Math.round((box.mn[1] + box.mx[1])),
+    Math.round((box.mn[2] + box.mx[2])),
+  ];
+}
+
+const motifCenterTicksByIdx = new Map();
+for (const motifIdx of uniqueMotifs) {
+  const ticks = motifCenterTicks(motifIdx);
+  motifCenterTicksByIdx.set(motifIdx, ticks);
+}
+
+function mintPlacementSlots() {
+  // Mint placement tests the production-scale world: any vacant plot across
+  // the full order-5 curve is eligible. Selection/detail rendering still caps
+  // focus at region scope so the UI never tries to select the whole block.
+  return uniqueMotifs;
+}
+
+function currentAnchorMotif() {
+  return selectedMotifIdx ?? currentPlane()?.hierarchy?.motifIndex ?? 0;
+}
+
+function mainScopeStart() {
+  const anchor = currentAnchorMotif();
+  if (mainViewScope === 'region') return regionIndexForMotif(anchor) * REGION_SIZE;
+  if (mainViewScope === 'neighbourhood') return neighbourhoodIndexForMotif(anchor) * NEIGHBOURHOOD_SIZE;
+  return streetIndexForMotif(anchor) * STREET_SIZE;
+}
+
+function mainScopeCount() {
+  if (mainViewScope === 'region') return REGION_SIZE;
+  if (mainViewScope === 'neighbourhood') return NEIGHBOURHOOD_SIZE;
+  return STREET_SIZE;
+}
+
+function mainScopeMotifs() {
+  return motifRange(mainScopeStart(), mainScopeCount());
+}
+
+function motifInMainScope(motifIdx) {
+  const start = mainScopeStart();
+  return motifIdx >= start && motifIdx < start + mainScopeCount();
+}
+
+function motifRange(start, count) {
+  const out = [];
+  const end = start + count;
+  for (let motifIdx = start; motifIdx < end; motifIdx++) {
+    if (planesByMotif.has(motifIdx)) out.push(motifIdx);
+  }
+  return out;
+}
 
 // Dev category filter:
 // 0 burned, 1 base, 2 edited, 3 awakened, 4 awakened+edited.
@@ -235,6 +475,7 @@ const walletStatusEl = document.getElementById('wallet-status');
 const mintMinusBtn = document.getElementById('mint-minus');
 const mintPlusBtn = document.getElementById('mint-plus');
 const mintCountInput = document.getElementById('mint-count');
+const mintPhaseInput = document.getElementById('mint-phase');
 const mintRunBtn = document.getElementById('mint-run');
 const mintResetBtn = document.getElementById('mint-reset');
 const mintStatusEl = document.getElementById('mint-status');
@@ -245,7 +486,10 @@ const cubeDetailEl = document.getElementById('cube-detail');
 const cubeDetailResizeEl = document.getElementById('cube-detail-resize');
 const cubeDetailTitleEl = document.getElementById('cube-detail-title');
 const cubeDetailCloseBtn = document.getElementById('cube-detail-close');
+const cubeDetailPrevBtn = document.getElementById('cube-detail-prev');
+const cubeDetailNextBtn = document.getElementById('cube-detail-next');
 const cubeDetailInfoEl = document.getElementById('cube-detail-info');
+const cubeDetailAxisEl = document.getElementById('cube-detail-axis');
 const streetStatsEl = document.getElementById('street-stats');
 const streetStatOccupiedEl = document.getElementById('street-stat-occupied');
 const streetStatTypeEl = document.getElementById('street-stat-type');
@@ -282,6 +526,8 @@ function setCategoryFilter(next) {
   for (const motifIdx of uniqueMotifs) ensureMotifCategory(motifIdx);
   selectedMotifIdx = null;
   selectedStreetIdx = null;
+  selectedNeighbourhoodIdx = null;
+  selectedRegionIdx = null;
   const hasVisible = jumpToFirstVisibleForFilter();
   _updateCategoryButtons();
   _updateCubeTypeButtons();
@@ -305,6 +551,8 @@ function setCubeTypeFilter(next) {
   if (cubeTypeFilter !== 'normie' && categoryFilter !== null) categoryFilter = null;
   selectedMotifIdx = null;
   selectedStreetIdx = null;
+  selectedNeighbourhoodIdx = null;
+  selectedRegionIdx = null;
   const hasVisible = jumpToFirstVisibleForFilter();
   _updateCategoryButtons();
   _updateCubeTypeButtons();
@@ -321,11 +569,14 @@ if (cubeTypeControls) {
     setCubeTypeFilter(btn.dataset.cubeType);
   });
 }
+if (ownerFocusToggleBtn) ownerFocusToggleBtn.addEventListener('click', toggleOwnerFocus);
+refreshOwnerFocusLabel();
 
 const _updateWalletStatus = () => updateWalletStatus(walletStatusEl);
 const _updateMintStatus   = () => updateMintStatus(mintStatusEl, uniqueMotifs);
 const _mintCountValue     = () => mintCountValue(mintCountInput);
 const _setMintCountValue  = (v) => setMintCountValue(mintCountInput, v);
+const _mintPhaseValue     = () => mintPhaseInput?.value === 'public' ? 'public' : 'allowlist';
 
 async function resetMintAndScene() {
   clearGeneratedMeshes();
@@ -337,32 +588,39 @@ async function resetMintAndScene() {
   }
   selectedMotifIdx = null;
   selectedStreetIdx = null;
+  selectedNeighbourhoodIdx = null;
+  selectedRegionIdx = null;
   currentPlaneIdx = 0;
   _updateMintStatus();
   _updateNftLabel();
+  refreshOwnerFocusLabel();
   recentreOrbit();
   rebuildScene();
 }
 
 function streetIndexForMotif(motifIdx) {
-  return Math.floor((Number(motifIdx) || 0) / 8);
+  return Math.floor((Number(motifIdx) || 0) / STREET_SIZE);
 }
 
 function neighbourhoodIndexForMotif(motifIdx) {
-  return Math.floor((Number(motifIdx) || 0) / 64);
+  return Math.floor((Number(motifIdx) || 0) / NEIGHBOURHOOD_SIZE);
 }
 
 function regionIndexForMotif(motifIdx) {
-  return Math.floor((Number(motifIdx) || 0) / 512);
+  return Math.floor((Number(motifIdx) || 0) / REGION_SIZE);
 }
 
 function environmentForStreet(streetIdx) {
-  return ['desert', 'forest', 'grasslands', 'water'][Math.abs(Number(streetIdx) || 0) % 4];
+  return environmentNameForStreet(streetIdx);
 }
 
 function shortAddress(address) {
   const value = String(address || '');
   return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value || 'unknown';
+}
+
+function normalizeAddress(address) {
+  return String(address || '').trim().toLowerCase();
 }
 
 async function ownerLabelFor(address) {
@@ -380,6 +638,126 @@ async function ownerLabelFor(address) {
     }
   } catch (_) {}
   return ownerLabelCache.get(clean);
+}
+
+function loadedWalletAddress() {
+  const wallet = getWalletState();
+  return normalizeAddress(wallet.loaded ? wallet.address : walletAddressInput?.value);
+}
+
+function ownerAddressForSlot(slot) {
+  return normalizeAddress(getMintedCubeForSlot(slot)?.wallet);
+}
+
+function ownerFocusedCubes() {
+  if (!ownerFocusEnabled || !ownerFocusAddress) return [];
+  return getMintedCubes()
+    .filter(cube => normalizeAddress(cube.wallet) === ownerFocusAddress)
+    .sort((a, b) => a.slot - b.slot);
+}
+
+function ownerFocusedMotifSet() {
+  return ownerFocusMotifCache;
+}
+
+function updateOwnerFocusButton() {
+  if (ownerFocusToggleBtn) {
+    ownerFocusToggleBtn.classList.toggle('active', ownerFocusEnabled);
+    ownerFocusToggleBtn.setAttribute('aria-pressed', ownerFocusEnabled ? 'true' : 'false');
+  }
+}
+
+function setOwnerFocusLabel(text) {
+  if (ownerFocusLabelEl) ownerFocusLabelEl.textContent = text;
+}
+
+function refreshOwnerFocusLabel() {
+  const version = ++ownerFocusLabelVersion;
+  ownerFocusMotifCache = ownerFocusEnabled && ownerFocusAddress
+    ? new Set(ownerFocusedCubes().map(cube => cube.slot))
+    : new Set();
+  updateOwnerFocusButton();
+  if (!ownerFocusEnabled) {
+    setOwnerFocusLabel('All Cubes');
+    updateOwnerInventory('');
+    return;
+  }
+  if (!ownerFocusAddress) {
+    setOwnerFocusLabel('empty slot');
+    updateOwnerInventory('empty slot');
+    return;
+  }
+  const count = ownerFocusedCubes().length;
+  const fallback = shortAddress(ownerFocusAddress);
+  setOwnerFocusLabel(`All items owned by ${fallback}${count ? ` (${count})` : ''}`);
+  updateOwnerInventory(fallback);
+  ownerLabelFor(ownerFocusAddress).then(label => {
+    if (version !== ownerFocusLabelVersion || !ownerFocusEnabled || ownerFocusAddress === '') return;
+    setOwnerFocusLabel(`All items owned by ${label}${count ? ` (${count})` : ''}`);
+    updateOwnerInventory(label);
+  });
+}
+
+function updateOwnerInventory(ownerLabel) {
+  if (!ownerInventoryEl || !ownerInventoryListEl) return;
+  ownerInventoryListEl.replaceChildren();
+  if (!ownerFocusEnabled || !ownerFocusAddress) {
+    ownerInventoryEl.classList.remove('open');
+    ownerInventoryEl.setAttribute('aria-hidden', 'true');
+    return;
+  }
+  const cubes = ownerFocusedCubes();
+  if (ownerInventoryTitleEl) {
+    ownerInventoryTitleEl.textContent = `${ownerLabel || shortAddress(ownerFocusAddress)} (${cubes.length})`;
+  }
+  for (const cube of cubes) {
+    const button = document.createElement('button');
+    button.className = 'owner-inventory-item';
+    if (cube.slot === selectedMotifIdx) button.classList.add('active');
+    button.type = 'button';
+    const source = cube.sourceKind === 'normie' ? `Normie #${cube.nft?.normieId ?? cube.nft?.tokenId ?? '?'}` : `${cube.nft?.name || 'Source'} #${cube.nft?.tokenId ?? '?'}`;
+    const slotEl = document.createElement('span');
+    const sourceEl = document.createElement('span');
+    slotEl.textContent = String(cube.slot);
+    sourceEl.textContent = source;
+    button.append(slotEl, sourceEl);
+    button.addEventListener('click', () => {
+      mainViewScope = 'region';
+      selectedStreetIdx = null;
+      selectedNeighbourhoodIdx = null;
+      selectedRegionIdx = null;
+      updateScopeButtons();
+      openCubeDetail(cube.slot);
+      setOrbitTargetToSelection();
+    });
+    ownerInventoryListEl.append(button);
+  }
+  ownerInventoryEl.classList.add('open');
+  ownerInventoryEl.setAttribute('aria-hidden', 'false');
+}
+
+function setOwnerFocusAddress(address) {
+  ownerFocusAddress = normalizeAddress(address);
+  refreshOwnerFocusLabel();
+}
+
+function syncOwnerFocusToSlot(slot) {
+  if (!ownerFocusEnabled) return;
+  setOwnerFocusAddress(ownerAddressForSlot(slot));
+}
+
+function toggleOwnerFocus() {
+  ownerFocusEnabled = !ownerFocusEnabled;
+  if (ownerFocusEnabled) {
+    const walletOwner = loadedWalletAddress();
+    const selectedOwner = selectedMotifIdx !== null && selectedMotifIdx !== undefined
+      ? ownerAddressForSlot(selectedMotifIdx)
+      : '';
+    setOwnerFocusAddress(walletOwner || selectedOwner);
+  } else {
+    setOwnerFocusAddress('');
+  }
+  rebuildScene();
 }
 
 function setDetailInfo(rows) {
@@ -404,7 +782,7 @@ function updateCubeDetailInfo() {
   const owner = minted?.wallet || '';
   const street = streetIndexForMotif(motifIdx);
   const rows = [
-    ['owner', shortAddress(owner)],
+    ['owner', owner ? shortAddress(owner) : 'empty slot'],
     ['plot', String(motifIdx)],
     ['street', String(street)],
     ['neighbourhood', String(neighbourhoodIndexForMotif(motifIdx))],
@@ -440,6 +818,44 @@ function updateStreetStats() {
 }
 
 function projectWorldToScreen(point, VP) {
+  return projectWorldToRect(point, VP, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
+}
+
+function axisScreenVector(view, axis) {
+  const x = view[0] * axis[0] + view[4] * axis[1] + view[8] * axis[2];
+  const y = view[1] * axis[0] + view[5] * axis[1] + view[9] * axis[2];
+  const len = Math.hypot(x, y) || 1;
+  return [x / len, -y / len];
+}
+
+function updateAxisGizmo(el, cam, scale = 28) {
+  if (!el || !cam?.view) return;
+  const axes = [
+    { label: 'X', color: '#ff4fae', dir: axisScreenVector(cam.view, [1, 0, 0]) },
+    { label: 'Y', color: '#3cff78', dir: axisScreenVector(cam.view, [0, 1, 0]) },
+    { label: 'Z', color: '#62a8ff', dir: axisScreenVector(cam.view, [0, 0, 1]) },
+  ].sort((a, b) => {
+    // Draw the more vertical/up-facing axis last so labels remain legible when
+    // directions overlap in shallow camera angles.
+    return Math.abs(a.dir[1]) - Math.abs(b.dir[1]);
+  });
+  const cx = 38;
+  const cy = 42;
+  const parts = [
+    `<circle cx="${cx}" cy="${cy}" r="2" fill="rgba(230,230,240,0.72)"></circle>`,
+  ];
+  for (const axis of axes) {
+    const x2 = cx + axis.dir[0] * scale;
+    const y2 = cy + axis.dir[1] * scale;
+    const lx = cx + axis.dir[0] * (scale + 9);
+    const ly = cy + axis.dir[1] * (scale + 9);
+    parts.push(`<path d="M ${cx.toFixed(1)} ${cy.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}" style="color:${axis.color};stroke:${axis.color}"></path>`);
+    parts.push(`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" style="fill:${axis.color};color:${axis.color}">${axis.label}</text>`);
+  }
+  el.innerHTML = `<svg viewBox="0 0 76 84" aria-hidden="true">${parts.join('')}</svg>`;
+}
+
+function projectWorldToRect(point, VP, rect) {
   const x = VP[0]*point[0] + VP[4]*point[1] + VP[8]*point[2]  + VP[12];
   const y = VP[1]*point[0] + VP[5]*point[1] + VP[9]*point[2]  + VP[13];
   const z = VP[2]*point[0] + VP[6]*point[1] + VP[10]*point[2] + VP[14];
@@ -448,9 +864,99 @@ function projectWorldToScreen(point, VP) {
   const nx = x / w;
   const ny = y / w;
   return [
-    (nx * 0.5 + 0.5) * window.innerWidth,
-    (-ny * 0.5 + 0.5) * window.innerHeight,
+    rect.left + (nx * 0.5 + 0.5) * rect.width,
+    rect.top + (-ny * 0.5 + 0.5) * rect.height,
   ];
+}
+
+function selectionAABB() {
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
+    return motifRangeAABB(selectedRegionIdx * REGION_SIZE, REGION_SIZE);
+  }
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+    return motifRangeAABB(selectedNeighbourhoodIdx * NEIGHBOURHOOD_SIZE, NEIGHBOURHOOD_SIZE);
+  }
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+    return motifRangeAABB(selectedStreetIdx * STREET_SIZE, STREET_SIZE);
+  }
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
+    return cubeAABBFor(selectedMotifIdx);
+  }
+  return null;
+}
+
+function miniMapSelectionAABB() {
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
+    return motifRangeAABB(selectedRegionIdx * REGION_SIZE, REGION_SIZE);
+  }
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+    return motifRangeAABB(selectedNeighbourhoodIdx * NEIGHBOURHOOD_SIZE, NEIGHBOURHOOD_SIZE);
+  }
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+    return motifRangeAABB(selectedStreetIdx * STREET_SIZE, STREET_SIZE);
+  }
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
+    if (mainViewScope === 'region') {
+      return motifRangeAABB(regionIndexForMotif(selectedMotifIdx) * REGION_SIZE, REGION_SIZE);
+    }
+    if (mainViewScope === 'neighbourhood') {
+      return motifRangeAABB(neighbourhoodIndexForMotif(selectedMotifIdx) * NEIGHBOURHOOD_SIZE, NEIGHBOURHOOD_SIZE);
+    }
+    return motifRangeAABB(streetIndexForMotif(selectedMotifIdx) * STREET_SIZE, STREET_SIZE);
+  }
+  return motifRangeAABB(mainScopeStart(), mainScopeCount());
+}
+
+function wireAnchorCandidates(box) {
+  if (!box) return [];
+  const xs = [box.mn[0], box.mx[0]];
+  const ys = [box.mn[1], box.mx[1]];
+  const zs = [box.mn[2], box.mx[2]];
+  const cx = (box.mn[0] + box.mx[0]) * 0.5;
+  const cy = (box.mn[1] + box.mx[1]) * 0.5;
+  const cz = (box.mn[2] + box.mx[2]) * 0.5;
+  const points = [];
+
+  for (const x of xs) for (const y of ys) for (const z of zs) points.push([x, y, z]);
+  for (const y of ys) for (const z of zs) points.push([cx, y, z]);
+  for (const x of xs) for (const z of zs) points.push([x, cy, z]);
+  for (const x of xs) for (const y of ys) points.push([x, y, cz]);
+  return points;
+}
+
+function expandAABB(box, pad) {
+  if (!box) return null;
+  const sx = box.mx[0] - box.mn[0];
+  const sy = box.mx[1] - box.mn[1];
+  const sz = box.mx[2] - box.mn[2];
+  return {
+    mn: [box.mn[0] - sx * pad * 0.5, box.mn[1] - sy * pad * 0.5, box.mn[2] - sz * pad * 0.5],
+    mx: [box.mx[0] + sx * pad * 0.5, box.mx[1] + sy * pad * 0.5, box.mx[2] + sz * pad * 0.5],
+  };
+}
+
+function selectionWirePad() {
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) return 0.018;
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) return 0.025;
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) return 0.035;
+  return 0.12;
+}
+
+function selectionWireAABB() {
+  return expandAABB(selectionAABB(), selectionWirePad());
+}
+
+function selectionLinkColor() {
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+    return {
+      stroke: 'rgba(255, 132, 45, 0.92)',
+      filter: 'drop-shadow(0 0 5px rgba(255, 132, 45, 0.58))',
+    };
+  }
+  return {
+    stroke: 'rgba(255, 58, 184, 0.86)',
+    filter: 'drop-shadow(0 0 5px rgba(255, 58, 184, 0.52))',
+  };
 }
 
 function updateSelectionLink(VP) {
@@ -459,22 +965,79 @@ function updateSelectionLink(VP) {
     selectionLinkEl.classList.remove('active');
     return;
   }
-  const box = cubeAABBFor(selectedMotifIdx);
-  const start = projectWorldToScreen([
-    (box.mn[0] + box.mx[0]) * 0.5,
-    (box.mn[1] + box.mx[1]) * 0.5,
-    (box.mn[2] + box.mx[2]) * 0.5,
-  ], VP);
+  const rect = cubeDetailEl.getBoundingClientRect();
+  const end = [rect.left, rect.top + rect.height * 0.5];
+  let start = null;
+  let bestD = Infinity;
+  for (const point of wireAnchorCandidates(selectionWireAABB())) {
+    const screen = projectWorldToScreen(point, VP);
+    if (!screen) continue;
+    const dx = screen[0] - end[0];
+    const dy = screen[1] - end[1];
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      start = screen;
+    }
+  }
   if (!start) {
     selectionLinkEl.classList.remove('active');
     return;
   }
-  const rect = cubeDetailEl.getBoundingClientRect();
-  const end = [rect.left, rect.top + rect.height * 0.5];
   const c1 = [start[0] + (end[0] - start[0]) * 0.42, start[1]];
   const c2 = [end[0] - 38, end[1]];
+  const color = selectionLinkColor();
   selectionLinkPathEl.setAttribute('d', `M ${start[0].toFixed(1)} ${start[1].toFixed(1)} C ${c1[0].toFixed(1)} ${c1[1].toFixed(1)}, ${c2[0].toFixed(1)} ${c2[1].toFixed(1)}, ${end[0].toFixed(1)} ${end[1].toFixed(1)}`);
+  selectionLinkPathEl.style.stroke = color.stroke;
+  selectionLinkPathEl.style.filter = color.filter;
   selectionLinkEl.classList.add('active');
+}
+
+function nearestProjectedAnchor(box, VP, rect, target) {
+  let best = null;
+  let bestD = Infinity;
+  for (const point of wireAnchorCandidates(box)) {
+    const screen = projectWorldToRect(point, VP, rect);
+    if (!screen) continue;
+    const dx = screen[0] - target[0];
+    const dy = screen[1] - target[1];
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      best = screen;
+    }
+  }
+  return best;
+}
+
+function updateMapLink(mainVP, mapVP, mapRect) {
+  if (!selectionLinkEl || !mapLinkPathEl || !worldMapEl) return;
+  if (!mainVP || !mapVP || !mapRect) {
+    selectionLinkEl.classList.remove('map-active');
+    return;
+  }
+  const box = selectionWireAABB();
+  if (!box || !mapRect) {
+    selectionLinkEl.classList.remove('map-active');
+    return;
+  }
+  const mainTarget = projectWorldToScreen(centerOfAABB(box), mainVP);
+  if (!mainTarget) {
+    selectionLinkEl.classList.remove('map-active');
+    return;
+  }
+  const mapStart = nearestProjectedAnchor(box, mapVP, mapRect, mainTarget);
+  const mainEnd = nearestProjectedAnchor(box, mainVP, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }, mapStart || mainTarget);
+  if (!mapStart || !mainEnd) {
+    selectionLinkEl.classList.remove('map-active');
+    return;
+  }
+  const c1 = [mapStart[0] + (mainEnd[0] - mapStart[0]) * 0.36, mapStart[1]];
+  const c2 = [mainEnd[0] - (mainEnd[0] - mapStart[0]) * 0.18, mainEnd[1]];
+  mapLinkPathEl.setAttribute('d', `M ${mapStart[0].toFixed(1)} ${mapStart[1].toFixed(1)} C ${c1[0].toFixed(1)} ${c1[1].toFixed(1)}, ${c2[0].toFixed(1)} ${c2[1].toFixed(1)}, ${mainEnd[0].toFixed(1)} ${mainEnd[1].toFixed(1)}`);
+  mapLinkPathEl.style.stroke = 'rgba(255, 132, 45, 0.9)';
+  mapLinkPathEl.style.filter = 'drop-shadow(0 0 5px rgba(255, 132, 45, 0.55))';
+  selectionLinkEl.classList.add('map-active');
 }
 
 function openMintSuccess(count) {
@@ -504,10 +1067,16 @@ function applyCubeDetailWidth(width) {
 }
 
 function openCubeDetail(motifIdx, { preserveStreet = false } = {}) {
+  startDetailMaterialLoad();
   const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === motifIdx);
   if (idx >= 0) currentPlaneIdx = idx;
   selectedMotifIdx = motifIdx;
-  if (!preserveStreet) selectedStreetIdx = null;
+  syncOwnerFocusToSlot(motifIdx);
+  if (!preserveStreet) {
+    selectedStreetIdx = null;
+    selectedNeighbourhoodIdx = null;
+    selectedRegionIdx = null;
+  }
   cubeDetailOpen = true;
   if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube ${motifIdx}`;
   if (cubeDetailEl) {
@@ -522,13 +1091,42 @@ function openCubeDetail(motifIdx, { preserveStreet = false } = {}) {
   _updateNftLabel();
   updateCubeDetailInfo();
   updateStreetStats();
+  setOrbitTargetToSelection();
   rebuildScene();
+}
+
+function activateOwnerFocusFor(address) {
+  ownerFocusEnabled = true;
+  setOwnerFocusAddress(address);
 }
 
 function selectStreet(motifIdx) {
   selectedStreetIdx = streetIndexForMotif(motifIdx);
+  selectedNeighbourhoodIdx = null;
+  selectedRegionIdx = null;
+  updateScopeButtons();
   openCubeDetail(motifIdx, { preserveStreet: true });
   log(`street ${selectedStreetIdx} selected`);
+}
+
+function selectNeighbourhood(motifIdx, { preserveView = false } = {}) {
+  if (!preserveView) mainViewScope = 'neighbourhood';
+  selectedNeighbourhoodIdx = neighbourhoodIndexForMotif(motifIdx);
+  selectedStreetIdx = null;
+  selectedRegionIdx = null;
+  updateScopeButtons();
+  openCubeDetail(motifIdx, { preserveStreet: true });
+  log(`neighbourhood ${selectedNeighbourhoodIdx} selected`);
+}
+
+function selectRegion(motifIdx) {
+  mainViewScope = 'region';
+  selectedRegionIdx = regionIndexForMotif(motifIdx);
+  selectedNeighbourhoodIdx = null;
+  selectedStreetIdx = null;
+  updateScopeButtons();
+  openCubeDetail(motifIdx, { preserveStreet: true });
+  log(`region ${selectedRegionIdx} selected`);
 }
 
 function closeCubeDetail() {
@@ -570,21 +1168,39 @@ if (cubeDetailResizeEl && cubeDetailEl) {
 async function runMintSimulation() {
   if (mintRunBtn) mintRunBtn.disabled = true;
   try {
-    const minted = await simulateMintBatch(_mintCountValue(), uniqueMotifs);
+    const wallet = getWalletState();
+    const inputAddress = normalizeAddress(walletAddressInput?.value);
+    const loadedAddress = normalizeAddress(wallet.address);
+    if (!wallet.loaded) throw new Error('Load wallet NFTs before minting');
+    if (inputAddress && inputAddress !== loadedAddress) {
+      throw new Error(`Load ${shortAddress(inputAddress)} before minting. Currently loaded: ${shortAddress(loadedAddress)}`);
+    }
+    const mintSlots = mintPlacementSlots();
+    const mintPhase = _mintPhaseValue();
+    const minted = await simulateMintBatch(_mintCountValue(), mintSlots, { phase: mintPhase });
     clearGeneratedMeshes();
     if (minted.length > 0) {
       const first = minted[0].slot;
       const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === first);
       if (idx >= 0) currentPlaneIdx = idx;
-      if (mode === 'BIG') selectedMotifIdx = first;
-      log(`minted ${minted.length}: ${minted.map(c => `${c.sourceKind}@slot${c.slot}`).join(', ')}`);
+      if (mode === 'BIG') {
+        mainViewScope = 'region';
+        updateScopeButtons();
+        selectedStreetIdx = null;
+        selectedNeighbourhoodIdx = null;
+        selectedRegionIdx = null;
+      }
+      activateOwnerFocusFor(loadedAddress);
+      openCubeDetail(first);
+      setOrbitTargetToSelection();
+      log(`minted ${minted.length} ${mintPhase} Normie ${minted.length === 1 ? 'cube' : 'cubes'} for ${shortAddress(loadedAddress)} across full curve: ${minted.map(c => `#${c.nft?.normieId}@slot${c.slot}`).join(', ')}`);
       openMintSuccess(minted.length);
     } else {
-      log('mint simulation: no eligible NFTs or no empty slots');
+      log(`mint simulation: no eligible ${mintPhase} Normies or no empty slots`);
     }
     _updateMintStatus();
     _updateNftLabel();
-    recentreOrbit();
+    refreshOwnerFocusLabel();
     rebuildScene();
   } catch (err) {
     log(`mint failed: ${String(err?.message || err)}`);
@@ -618,10 +1234,13 @@ async function loadWalletFromInput() {
     }
     selectedMotifIdx = null;
     selectedStreetIdx = null;
+    selectedNeighbourhoodIdx = null;
+    selectedRegionIdx = null;
     currentPlaneIdx = 0;
     _updateMintStatus();
     _updateCategoryButtons();
     _updateCubeTypeButtons();
+    if (ownerFocusEnabled) setOwnerFocusAddress(normalizeAddress(state.address));
     rebuildScene();
   } catch (err) {
     log(`wallet load failed: ${String(err?.message || err)}`);
@@ -643,7 +1262,10 @@ fetch('/dev-config')
 
 function navigate(dir) {
   if (serializedPlanes.length === 0) return;
-  if (mode === 'BIG') return;
+  if (mode === 'BIG') {
+    navigateMainSelection(dir);
+    return;
+  }
   if (mode === '3D') {
     const cur = currentPlane().hierarchy.motifIndex;
     const motifs = _visibleMotifs();
@@ -665,24 +1287,189 @@ function navigate(dir) {
   log(`plane ${currentPlaneIdx} | cube ${p.hierarchy.motifIndex} | ${p.material} | ${p.axis}-axis`);
 }
 
-// Dynamically create prev/next buttons inside #controls so we don't touch the HTML twice.
-const controls = document.getElementById('controls');
-const btnPrev = document.createElement('button'); btnPrev.textContent = '← prev';
-const btnNext = document.createElement('button'); btnNext.textContent = 'next →';
-controls.appendChild(btnPrev); controls.appendChild(btnNext);
-btnPrev.addEventListener('click', () => navigate(-1));
-btnNext.addEventListener('click', () => navigate(+1));
+function navigateMainSelection(dir) {
+  const size = mainScopeCount();
+  const sectionCount = Math.max(1, Math.ceil(uniqueMotifs.length / size));
+  const currentSection = Math.floor(currentAnchorMotif() / size);
+  const nextSection = (currentSection + dir + sectionCount) % sectionCount;
+  const nextMotif = Math.min(uniqueMotifs.length - 1, nextSection * size);
+  const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === nextMotif);
+  if (idx >= 0) currentPlaneIdx = idx;
+  if (mainViewScope === 'region') selectRegion(nextMotif);
+  else if (mainViewScope === 'neighbourhood') selectNeighbourhood(nextMotif);
+  else selectStreet(nextMotif);
+  recentreOrbit();
+  log(`${mainViewScope} ${nextSection} selected`);
+}
+
+function navigateDetailCube(dir) {
+  if (selectedMotifIdx === null || selectedMotifIdx === undefined) return;
+  const owned = ownerFocusEnabled && ownerFocusAddress
+    ? ownerFocusedCubes().map(cube => cube.slot)
+    : [];
+  const motifs = owned.length ? owned : mainScopeMotifs();
+  if (motifs.length === 0) return;
+  const curIdx = motifs.indexOf(selectedMotifIdx);
+  const i = curIdx >= 0 ? curIdx : 0;
+  openCubeDetail(motifs[(i + dir + motifs.length) % motifs.length]);
+}
+
+function axisDirectionVector(direction) {
+  if (direction === 'up') return [0, 1, 0];
+  if (direction === 'down') return [0, -1, 0];
+  if (direction === 'right') return [1, 0, 0];
+  if (direction === 'left') return [-1, 0, 0];
+  if (direction === 'z-pos') return [0, 0, 1];
+  return [0, 0, -1];
+}
+
+function rangeCenterTicks(start, count) {
+  const box = motifRangeAABB(start, count);
+  if (!box) return null;
+  return [
+    Math.round(box.mn[0] + box.mx[0]),
+    Math.round(box.mn[1] + box.mx[1]),
+    Math.round(box.mn[2] + box.mx[2]),
+  ];
+}
+
+function bestCandidateInDirection(currentCenter, candidates, dir) {
+  let best = null;
+  let bestScore = Infinity;
+  for (const candidate of candidates) {
+    const delta = [
+      candidate.center[0] - currentCenter[0],
+      candidate.center[1] - currentCenter[1],
+      candidate.center[2] - currentCenter[2],
+    ];
+    const along = delta[0] * dir[0] + delta[1] * dir[1] + delta[2] * dir[2];
+    if (along <= 0.001) continue;
+    const len2 = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
+    const perpendicular = Math.max(0, len2 - along * along);
+    const score = perpendicular * 64 + along;
+    if (score < bestScore) {
+      bestScore = score;
+      best = candidate.id;
+    }
+  }
+  return best;
+}
+
+function sectionInDirection(currentSection, sectionSize, dir, rangeStart = 0, rangeCount = uniqueMotifs.length) {
+  const sectionCount = Math.max(1, Math.ceil(uniqueMotifs.length / sectionSize));
+  const currentStart = currentSection * sectionSize;
+  const currentCenter = rangeCenterTicks(currentStart, sectionSize);
+  if (!currentCenter) return null;
+
+  const rangeEnd = Math.min(uniqueMotifs.length, rangeStart + rangeCount);
+  const firstSection = Math.max(0, Math.floor(rangeStart / sectionSize));
+  const lastSection = Math.min(sectionCount - 1, Math.floor((rangeEnd - 1) / sectionSize));
+  const candidates = [];
+  for (let section = firstSection; section <= lastSection; section++) {
+    if (section === currentSection) continue;
+    const center = rangeCenterTicks(section * sectionSize, sectionSize);
+    if (center) candidates.push({ id: section, center });
+  }
+  return bestCandidateInDirection(currentCenter, candidates, dir);
+}
+
+function motifInDirection(motifIdx, dir, candidatesInScope = uniqueMotifs) {
+  const currentCenter = motifCenterTicksByIdx.get(motifIdx);
+  if (!currentCenter) return null;
+  const candidates = [];
+  for (const candidate of candidatesInScope) {
+    if (candidate === motifIdx) continue;
+    const center = motifCenterTicksByIdx.get(candidate);
+    if (center) candidates.push({ id: candidate, center });
+  }
+  return bestCandidateInDirection(currentCenter, candidates, dir);
+}
+
+function sectionNavigationRange(sectionSize) {
+  const scopeCount = mainScopeCount();
+  if (scopeCount > sectionSize) {
+    return { start: mainScopeStart(), count: scopeCount };
+  }
+  return { start: 0, count: uniqueMotifs.length };
+}
+
+function navigateScreenDirection(direction) {
+  const motifIdx = selectedMotifIdx ?? currentAnchorMotif();
+  const dir = axisDirectionVector(direction);
+
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+    const navStreetIdx = selectedStreetIdx;
+    const range = sectionNavigationRange(STREET_SIZE);
+    const nextStreet = sectionInDirection(navStreetIdx, STREET_SIZE, dir, range.start, range.count);
+    if (nextStreet === null || nextStreet === undefined) {
+      log(`no street ${direction} from ${navStreetIdx}`);
+      return;
+    }
+    selectStreet(nextStreet * STREET_SIZE);
+    setOrbitTargetToSelection();
+    log(`${direction}: street ${navStreetIdx} -> ${nextStreet}`);
+    return;
+  }
+
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+    const navNeighbourhoodIdx = selectedNeighbourhoodIdx;
+    const range = sectionNavigationRange(NEIGHBOURHOOD_SIZE);
+    const nextNeighbourhood = sectionInDirection(navNeighbourhoodIdx, NEIGHBOURHOOD_SIZE, dir, range.start, range.count);
+    if (nextNeighbourhood === null || nextNeighbourhood === undefined) {
+      log(`no neighbourhood ${direction} from ${navNeighbourhoodIdx}`);
+      return;
+    }
+    selectNeighbourhood(nextNeighbourhood * NEIGHBOURHOOD_SIZE, { preserveView: mainViewScope === 'region' });
+    setOrbitTargetToSelection();
+    log(`${direction}: neighbourhood ${navNeighbourhoodIdx} -> ${nextNeighbourhood}`);
+    return;
+  }
+
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
+    const navRegionIdx = selectedRegionIdx;
+    const nextRegion = sectionInDirection(navRegionIdx, REGION_SIZE, dir);
+    if (nextRegion === null || nextRegion === undefined) {
+      log(`no region ${direction} from ${navRegionIdx}`);
+      return;
+    }
+    selectRegion(nextRegion * REGION_SIZE);
+    setOrbitTargetToSelection();
+    log(`${direction}: region ${navRegionIdx} -> ${nextRegion}`);
+    return;
+  }
+
+  const nextMotif = motifInDirection(motifIdx, dir, mainScopeMotifs());
+  if (nextMotif === null || nextMotif === undefined) {
+    log(`no cube ${direction} from ${motifIdx}`);
+    return;
+  }
+  openCubeDetail(nextMotif);
+  setOrbitTargetToSelection();
+  log(`${direction}: cube ${motifIdx} -> ${nextMotif}`);
+}
+
+if (btnNavUp) btnNavUp.addEventListener('click', () => navigateScreenDirection('up'));
+if (btnNavDown) btnNavDown.addEventListener('click', () => navigateScreenDirection('down'));
+if (btnNavLeft) btnNavLeft.addEventListener('click', () => navigateScreenDirection('left'));
+if (btnNavRight) btnNavRight.addEventListener('click', () => navigateScreenDirection('right'));
+if (btnNavZNeg) btnNavZNeg.addEventListener('click', () => navigateScreenDirection('z-neg'));
+if (btnNavZPos) btnNavZPos.addEventListener('click', () => navigateScreenDirection('z-pos'));
+if (cubeDetailPrevBtn) cubeDetailPrevBtn.addEventListener('click', () => navigateDetailCube(-1));
+if (cubeDetailNextBtn) cubeDetailNextBtn.addEventListener('click', () => navigateDetailCube(+1));
 
 // Debug toggles.
 let showCubeGlass = false;
 let showLightMarkers = false;
 let showEdgePoints = false;
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowLeft')  navigate(-1);
-  if (e.key === 'ArrowRight') navigate(+1);
-  if (e.key === '2')          setMode('2D');
-  if (e.key === '3')          setMode('3D');
-  if (e.key === 'b' || e.key === 'B') setMode('BIG');
+  const tag = String(document.activeElement?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || document.activeElement?.isContentEditable) return;
+  if (e.key === 'ArrowUp')    { e.preventDefault(); navigateScreenDirection('up'); }
+  if (e.key === 'ArrowDown')  { e.preventDefault(); navigateScreenDirection('down'); }
+  if (e.key === 'ArrowLeft')  { e.preventDefault(); navigateScreenDirection('left'); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); navigateScreenDirection('right'); }
+  if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); navigateScreenDirection('z-neg'); }
+  if (e.key === 'x' || e.key === 'X') { e.preventDefault(); navigateScreenDirection('z-pos'); }
   if (e.key === 'g' || e.key === 'G') { showCubeGlass      = !showCubeGlass;      rebuildScene(); log(`cube-glass overlay: ${showCubeGlass ? 'on' : 'off'}`); }
   if (e.key === 'l' || e.key === 'L') { showLightMarkers   = !showLightMarkers;   rebuildScene(); log(`light markers: ${showLightMarkers ? 'on' : 'off'}`); }
   if (e.key === 'e' || e.key === 'E') { showEdgePoints     = !showEdgePoints;     rebuildScene(); log(`edge points: ${showEdgePoints ? 'on' : 'off'}`); }
@@ -697,71 +1484,170 @@ const meshes = {
   const wire = createWireframeBox(1, 1, 1);
   wire.alphas = new Float32Array(wire.positions.length / 3).fill(1);
   meshes.selectionWireBox = createMeshGL(gl, wire);
+  meshes.worldMapGrid = buildAABBGridMesh(gl, worldAABB(), [
+    [2, 0.95], // region grid: order-4 octants
+    [4, 0.36], // neighbourhood grid: order-3 blocks
+  ]);
 }
 
 function clearGeneratedMeshes() {
   for (const key of Object.keys(meshes)) {
-    if (key !== 'wireBox' && key !== 'solidBox') delete meshes[key];
+    if (key !== 'wireBox' && key !== 'solidBox' && key !== 'selectionWireBox' && key !== 'worldMapGrid') delete meshes[key];
   }
 }
 
 // ---------- Materials ----------
-const plantParticleMat = await loadMaterial(gl, {
-  name: 'plant-particle',
-  phase: 'ADDITIVE',
-  vertPath: '/renderer/shaders/plant-particle.vert.glsl',
-  fragPath: '/renderer/shaders/plant-particle.frag.glsl',
-  uniforms: {},
-});
-const linesMat = await loadMaterial(gl, {
-  name: 'lines',
-  phase: 'ADDITIVE',
-  vertPath: '/renderer/shaders/lines.vert.glsl',
-  fragPath: '/renderer/shaders/lines.frag.glsl',
-  uniforms: {},
-});
-const stoneGlassMat = await loadMaterial(gl, {
-  name: 'stone-glass',
-  phase: 'TRANSPARENT',
-  vertPath: '/renderer/shaders/stone-glass.vert.glsl',
-  fragPath: '/renderer/shaders/stone-glass.frag.glsl',
-  uniforms: {},
-});
-const edgeGlowMat = await loadMaterial(gl, {
-  name: 'edge-glow',
-  phase: 'ADDITIVE',
-  vertPath: '/renderer/shaders/edge-glow.vert.glsl',
-  fragPath: '/renderer/shaders/edge-glow.frag.glsl',
-  uniforms: {},
-});
-const normieVoxelMat = await loadMaterial(gl, {
-  name: 'normie-voxel',
-  phase: 'TRANSPARENT',
-  vertPath: '/renderer/shaders/normie-voxel.vert.glsl',
-  fragPath: '/renderer/shaders/normie-voxel.frag.glsl',
-  uniforms: {},
-});
-const normieGlowMat = await loadMaterial(gl, {
-  name: 'normie-glow',
-  phase: 'TRANSPARENT',
-  vertPath: '/renderer/shaders/normie-glow.vert.glsl',
-  fragPath: '/renderer/shaders/normie-glow.frag.glsl',
-  uniforms: {},
-});
-const featherGlassMat = await loadMaterial(gl, {
-  name: 'feather-glass',
-  phase: 'TRANSPARENT',
-  vertPath: '/renderer/shaders/feather-glass.vert.glsl',
-  fragPath: '/renderer/shaders/feather-glass.frag.glsl',
-  uniforms: {},
-});
-const textBannerMat = await loadMaterial(gl, {
-  name: 'text-banner',
-  phase: 'ADDITIVE',
-  vertPath: '/renderer/shaders/text-banner.vert.glsl',
-  fragPath: '/renderer/shaders/text-banner.frag.glsl',
-  uniforms: {},
-});
+const materialDefs = [
+  {
+    key: 'lines',
+    name: 'lines',
+    phase: 'ADDITIVE',
+    vertPath: '/renderer/shaders/lines.vert.glsl',
+    fragPath: '/renderer/shaders/lines.frag.glsl',
+    uniforms: {},
+    core: true,
+  },
+  {
+    key: 'stone-glass',
+    name: 'stone-glass',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/stone-glass.vert.glsl',
+    fragPath: '/renderer/shaders/stone-glass.frag.glsl',
+    uniforms: {},
+    core: true,
+  },
+  {
+    key: 'normie-glow',
+    name: 'normie-glow',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/normie-glow.vert.glsl',
+    fragPath: '/renderer/shaders/normie-glow.frag.glsl',
+    uniforms: {},
+    core: true,
+  },
+  {
+    key: 'plant-particle',
+    name: 'plant-particle',
+    phase: 'ADDITIVE',
+    vertPath: '/renderer/shaders/plant-particle.vert.glsl',
+    fragPath: '/renderer/shaders/plant-particle.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'edge-glow',
+    name: 'edge-glow',
+    phase: 'ADDITIVE',
+    vertPath: '/renderer/shaders/edge-glow.vert.glsl',
+    fragPath: '/renderer/shaders/edge-glow.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'normie-voxel',
+    name: 'normie-voxel',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/normie-voxel.vert.glsl',
+    fragPath: '/renderer/shaders/normie-voxel.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'feather-glass',
+    name: 'feather-glass',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/feather-glass.vert.glsl',
+    fragPath: '/renderer/shaders/feather-glass.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'text-banner',
+    name: 'text-banner',
+    phase: 'ADDITIVE',
+    vertPath: '/renderer/shaders/text-banner.vert.glsl',
+    fragPath: '/renderer/shaders/text-banner.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'sand-grain',
+    name: 'sand-grain',
+    phase: 'ADDITIVE',
+    vertPath: '/renderer/shaders/sand-grain.vert.glsl',
+    fragPath: '/renderer/shaders/sand-grain.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'water-surface',
+    name: 'water-surface',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/water-surface.vert.glsl',
+    fragPath: '/renderer/shaders/water-surface.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'grass-ground',
+    name: 'grass-ground',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/smooth-ground.vert.glsl',
+    fragPath: '/renderer/shaders/smooth-ground.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'desert-dunes',
+    name: 'desert-dunes',
+    phase: 'OPAQUE',
+    vertPath: '/renderer/shaders/smooth-ground.vert.glsl',
+    fragPath: '/renderer/shaders/smooth-ground.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'grass-blade',
+    name: 'grass-blade',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/grass-blade.vert.glsl',
+    fragPath: '/renderer/shaders/grass-blade.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'mountain-range',
+    name: 'mountain-range',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/ridge-terrain.vert.glsl',
+    fragPath: '/renderer/shaders/mountain-range.frag.glsl',
+    uniforms: {},
+  },
+  {
+    key: 'ice-surface',
+    name: 'ice-surface',
+    phase: 'TRANSPARENT',
+    vertPath: '/renderer/shaders/ridge-terrain.vert.glsl',
+    fragPath: '/renderer/shaders/ice-surface.frag.glsl',
+    uniforms: {},
+  },
+];
+
+const materialsMap = {};
+for (const mat of await Promise.all(materialDefs.filter(def => def.core).map(def => loadMaterial(gl, def)))) {
+  materialsMap[mat.name] = mat;
+}
+log(`core materials: ${Object.keys(materialsMap).join(', ')}`);
+
+let detailMaterialsStarted = false;
+function startDetailMaterialLoad() {
+  if (detailMaterialsStarted) return;
+  detailMaterialsStarted = true;
+  Promise.all(materialDefs.filter(def => !def.core).map(def => loadMaterial(gl, def)))
+    .then(mats => {
+      for (const mat of mats) materialsMap[mat.name] = mat;
+      log(`detail materials loaded: ${mats.map(m => m.name).join(', ')}`);
+      detailedEmptyScopesEnabled = true;
+      rebuildScene();
+    })
+    .catch(err => log(`detail materials failed: ${String(err?.message || err)}`));
+}
+
+function scheduleDetailMaterialLoad() {
+  const run = () => startDetailMaterialLoad();
+  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 1600 });
+  else setTimeout(run, 250);
+}
 
 // Env texture for the glass shader. Re-loadable at runtime via drag-and-drop
 // (any image dropped onto the page becomes the new env). Layout is auto-
@@ -828,17 +1714,6 @@ window.addEventListener('keydown', (e) => {
 });
 
 initNormiesManager(gl, serializedPlanes);
-const materialsMap = {
-  'plant-particle': plantParticleMat,
-  'lines':          linesMat,
-  'stone-glass':    stoneGlassMat,
-  'edge-glow':      edgeGlowMat,
-  'normie-voxel':   normieVoxelMat,
-  'normie-glow':    normieGlowMat,
-  'feather-glass':  featherGlassMat,
-  'text-banner':    textBannerMat,
-};
-log(`materials: ${Object.keys(materialsMap).join(', ')}`);
 
 // Plane-material → scene-item builders. First matching builder wins.
 const BUILDERS = [buildForestPlane];
@@ -850,13 +1725,25 @@ function eventInCubeDetail(e) {
   return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
 }
 
+function eventInWorldMap(e) {
+  if (!worldMapEl) return false;
+  const r = worldMapEl.getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+}
+
 const orbit = createOrbitCamera(canvas, {
   distance: 3.5,
-  shouldHandleEvent: e => !eventInCubeDetail(e),
+  shouldHandleEvent: e => !eventInCubeDetail(e) && !eventInWorldMap(e),
 });
 const detailOrbit = createOrbitCamera(canvas, {
   distance: 3.5,
   shouldHandleEvent: eventInCubeDetail,
+});
+const miniMapOrbit = createOrbitCamera(canvas, {
+  distance: 3.2,
+  yaw: Math.PI * 0.17,
+  pitch: Math.PI * 0.11,
+  shouldHandleEvent: eventInWorldMap,
 });
 const lights = createLights();
 
@@ -882,36 +1769,74 @@ const lights = createLights();
   });
 }
 
-// Recentre orbit target on the active cube. Called once at startup and
-// after every navigate() (see hook below).
-function recentreOrbit() {
+function worldAABB() {
+  const mn = [Infinity, Infinity, Infinity];
+  const mx = [-Infinity, -Infinity, -Infinity];
+  for (const v of hilbert.rawVertices) {
+    if (v.x < mn[0]) mn[0]=v.x; if (v.x > mx[0]) mx[0]=v.x;
+    if (v.y < mn[1]) mn[1]=v.y; if (v.y > mx[1]) mx[1]=v.y;
+    if (v.z < mn[2]) mn[2]=v.z; if (v.z > mx[2]) mx[2]=v.z;
+  }
+  return { mn, mx };
+}
+
+{
+  const box = worldAABB();
+  const center = centerOfAABB(box);
+  miniMapOrbit.setTarget(center[0], center[1], center[2]);
+  miniMapOrbit.setDistance(sizeOfAABB(box) * 2.35);
+}
+
+function motifRangeAABB(start, count) {
+  const motifs = motifRange(start, count);
+  return motifs.length ? aabbForMotifs(motifs) : null;
+}
+
+function activeOrbitAABB() {
   if (mode === 'BIG') {
+    if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
+      return motifRangeAABB(selectedRegionIdx * REGION_SIZE, REGION_SIZE) || worldAABB();
+    }
+    if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+      return motifRangeAABB(selectedNeighbourhoodIdx * NEIGHBOURHOOD_SIZE, NEIGHBOURHOOD_SIZE) || worldAABB();
+    }
+    if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+      return motifRangeAABB(selectedStreetIdx * STREET_SIZE, STREET_SIZE) || worldAABB();
+    }
     if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
-      const { mn, mx } = cubeAABBFor(selectedMotifIdx);
-      orbit.setTarget((mn[0]+mx[0])*0.5, (mn[1]+mx[1])*0.5, (mn[2]+mx[2])*0.5);
-      orbit.setDistance(Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 5.8);
-      return;
+      return cubeAABBFor(selectedMotifIdx);
     }
-    let mnX=Infinity, mnY=Infinity, mnZ=Infinity, mxX=-Infinity, mxY=-Infinity, mxZ=-Infinity;
-    for (const v of hilbert.rawVertices) {
-      if (v.x < mnX) mnX=v.x; if (v.x > mxX) mxX=v.x;
-      if (v.y < mnY) mnY=v.y; if (v.y > mxY) mxY=v.y;
-      if (v.z < mnZ) mnZ=v.z; if (v.z > mxZ) mxZ=v.z;
-    }
-    orbit.setTarget((mnX+mxX)*0.5, (mnY+mxY)*0.5, (mnZ+mxZ)*0.5);
-    orbit.setDistance(Math.max(mxX-mnX, mxY-mnY, mxZ-mnZ) * 1.5);
-    return;
+    return motifRangeAABB(mainScopeStart(), mainScopeCount()) || worldAABB();
   }
-  const verts = currentCubeVerts();
-  let mnX=Infinity, mnY=Infinity, mnZ=Infinity, mxX=-Infinity, mxY=-Infinity, mxZ=-Infinity;
-  for (const v of verts) {
-    if (v.x < mnX) mnX = v.x; if (v.x > mxX) mxX = v.x;
-    if (v.y < mnY) mnY = v.y; if (v.y > mxY) mxY = v.y;
-    if (v.z < mnZ) mnZ = v.z; if (v.z > mxZ) mxZ = v.z;
+  return aabbForMotifs([currentPlane().hierarchy.motifIndex]);
+}
+
+// Recentre orbit target and framing on the active scope. Called once at startup
+// and after explicit navigation/reset actions. Selection clicks only update
+// overlays/detail state so the Big Cube view does not jump under the cursor.
+function recentreOrbit() {
+  const box = activeOrbitAABB();
+  const center = centerOfAABB(box);
+  orbit.setTarget(center[0], center[1], center[2]);
+  if (mode === 'BIG') {
+    const isBroadScope =
+      selectedRegionIdx !== null && selectedRegionIdx !== undefined ||
+      selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined ||
+      selectedStreetIdx !== null && selectedStreetIdx !== undefined ||
+      selectedMotifIdx === null || selectedMotifIdx === undefined;
+    const mult = isBroadScope
+      ? (mainViewScope === 'region' ? 1.55 : mainViewScope === 'neighbourhood' ? 1.9 : 2.7)
+      : 5.8;
+    orbit.setDistance(sizeOfAABB(box) * mult);
   }
-  orbit.setTarget((mnX+mxX)*0.5, (mnY+mxY)*0.5, (mnZ+mxZ)*0.5);
 }
 recentreOrbit();
+
+function setOrbitTargetToSelection() {
+  const box = selectionAABB() || activeOrbitAABB();
+  const center = centerOfAABB(box);
+  orbit.setTarget(center[0], center[1], center[2]);
+}
 
 function recentreDetailOrbit() {
   if (selectedMotifIdx === null || selectedMotifIdx === undefined) return;
@@ -920,19 +1845,61 @@ function recentreDetailOrbit() {
   detailOrbit.setDistance(Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 2.25);
 }
 
-// Wrap navigate so target follows the active cube. The previously-installed
-// click + key handlers call `navigate` by reference in the closure; we can't
-// easily reassign that, so instead we install one extra listener that fires
-// after each handler-driven keypress.
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') recentreOrbit();
-});
-btnPrev.addEventListener('click', recentreOrbit);
-btnNext.addEventListener('click', recentreOrbit);
-
 // ---------- BIG-mode cube pick (click, not drag) ----------
 {
   let downX = 0, downY = 0;
+  let lastClickT = 0;
+  let lastClickX = 0;
+  let lastClickY = 0;
+  let lastClickMotif = null;
+  let clickSequenceCount = 0;
+
+  function isRepeatClick(e, motifIdx) {
+    const now = performance.now();
+    const dx = e.clientX - lastClickX;
+    const dy = e.clientY - lastClickY;
+    return lastClickMotif === motifIdx && now - lastClickT < 360 && dx * dx + dy * dy < 36;
+  }
+
+  function rememberClick(e, motifIdx) {
+    clickSequenceCount = isRepeatClick(e, motifIdx) ? clickSequenceCount + 1 : 1;
+    lastClickT = performance.now();
+    lastClickX = e.clientX;
+    lastClickY = e.clientY;
+    lastClickMotif = motifIdx;
+  }
+
+  function forgetClick() {
+    lastClickT = 0;
+    lastClickMotif = null;
+    clickSequenceCount = 0;
+  }
+
+  function applyClickSequence(motifIdx) {
+    const clickedStreetIdx = streetIndexForMotif(motifIdx);
+    const promotingSelectedStreet = selectedStreetIdx === clickedStreetIdx;
+
+    if (clickSequenceCount >= 4) {
+      selectRegion(motifIdx);
+      forgetClick();
+      return true;
+    }
+    if (clickSequenceCount === 3) {
+      selectNeighbourhood(motifIdx, { preserveView: promotingSelectedStreet });
+      return true;
+    }
+    if (clickSequenceCount === 2) {
+      if (promotingSelectedStreet) {
+        selectNeighbourhood(motifIdx, { preserveView: true });
+      } else {
+        selectStreet(motifIdx);
+      }
+      return true;
+    }
+    openCubeDetail(motifIdx, { preserveStreet: promotingSelectedStreet });
+    return true;
+  }
+
   function pickBigMotifAt(e) {
     if (mode !== 'BIG') return null;
     if (eventInCubeDetail(e)) return null;
@@ -959,8 +1926,21 @@ btnNext.addEventListener('click', recentreOrbit);
     const rl = Math.sqrt(rr[0]*rr[0]+rr[1]*rr[1]+rr[2]*rr[2]);
     const rd = [rr[0]/rl, rr[1]/rl, rr[2]/rl];
 
+    // Pickable set: in owner-focus mode, clicks intentionally target only
+    // cubes belonging to the focused wallet. In general mode, filtered minted
+    // cubes + every empty slot are pickable because biomes render
+    // unconditionally in BIG mode.
     let bestT = Infinity, hitMotif = null;
-    for (const motifIdx of _visibleMotifs()) {
+    const pickable = new Set();
+    if (ownerFocusEnabled && ownerFocusAddress) {
+      for (const motifIdx of ownerFocusedMotifSet()) {
+        if (motifInMainScope(motifIdx)) pickable.add(motifIdx);
+      }
+    } else {
+      for (const motifIdx of _visibleMotifs().filter(motifInMainScope)) pickable.add(motifIdx);
+      for (const motifIdx of mainScopeMotifs()) if (!isMintedSlot(motifIdx)) pickable.add(motifIdx);
+    }
+    for (const motifIdx of pickable) {
       const { mn, mx } = cubeAABBFor(motifIdx);
       const t = rayAABBIntersect(ro, rd, mn, mx);
       if (t < bestT) { bestT = t; hitMotif = motifIdx; }
@@ -971,24 +1951,34 @@ btnNext.addEventListener('click', recentreOrbit);
   canvas.addEventListener('mousedown', (e) => { downX = e.clientX; downY = e.clientY; });
   canvas.addEventListener('mouseup', (e) => {
     if (mode !== 'BIG') return;
-    if (eventInCubeDetail(e)) return;
     const dx = e.clientX - downX, dy = e.clientY - downY;
     if (dx*dx + dy*dy > 25) return;  // was a drag, not a click
+
+    if (eventInCubeDetail(e)) {
+      if (lastClickMotif !== null && isRepeatClick(e, lastClickMotif)) {
+        rememberClick(e, lastClickMotif);
+        applyClickSequence(lastClickMotif);
+      }
+      return;
+    }
+
     const hitMotif = pickBigMotifAt(e);
     if (hitMotif !== null) {
-      openCubeDetail(hitMotif);
+      rememberClick(e, hitMotif);
+      applyClickSequence(hitMotif);
       return;
     } else {
+      forgetClick();
       selectedMotifIdx = null;
       selectedStreetIdx = null;
+      selectedNeighbourhoodIdx = null;
+      selectedRegionIdx = null;
     }
     _updateLightsLabel();
     rebuildScene();
   });
   canvas.addEventListener('dblclick', (e) => {
     e.preventDefault();
-    const hitMotif = pickBigMotifAt(e);
-    if (hitMotif !== null) selectStreet(hitMotif);
   });
 }
 
@@ -1094,12 +2084,30 @@ function setUniformByName(gl, loc, name, value) {
 // ---------- Scene build ----------
 let sceneItems = [];
 let detailSceneItems = [];
+let miniMapSceneItems = [];
+let detailedEmptyScopesEnabled = false;
 let lastInvVP  = null;
 let lastCamPos = null;
 
 // applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor imported from scene/styling.js
 
 function pushMotifItems(itemsOut, motifIdx, renderMode, dim) {
+  if (renderMode === 'BIG') {
+    const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
+    const cubePlanes = planesForMotif(motifIdx);
+
+    const hlItems = buildHilbertLines(motifIdx, hilbert, gl, meshes);
+    if (agenticNonNormie) applyAgenticAwakening(hlItems);
+    applyDim(hlItems, dim);
+    if (hlItems?.length) itemsOut.push(...hlItems);
+
+    const cardItems = buildCubeCardioid(motifIdx, hilbert, cubePlanes, gl, meshes);
+    if (agenticNonNormie) applyAgenticAwakening(cardItems);
+    applyDim(cardItems, dim);
+    if (cardItems?.length) itemsOut.push(...cardItems);
+    return;
+  }
+
   const cat = ensureMotifCategory(motifIdx);
   const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
 
@@ -1210,11 +2218,18 @@ function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
 
 function bigModeDimForMotif(motifIdx) {
   if (mode !== 'BIG') return 1.0;
+  if (ownerFocusEnabled && ownerFocusAddress && ownerFocusedMotifSet().has(motifIdx)) return 1.5;
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
+    return regionIndexForMotif(motifIdx) === selectedRegionIdx ? 1.0 : 0.16;
+  }
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+    return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? 1.0 : 0.20;
+  }
   if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
-    return streetIndexForMotif(motifIdx) === selectedStreetIdx ? 1.0 : 0.08;
+    return streetIndexForMotif(motifIdx) === selectedStreetIdx ? 1.0 : 0.32;
   }
   return selectedMotifIdx !== null && selectedMotifIdx !== undefined && motifIdx !== selectedMotifIdx
-    ? 0.15
+    ? 0.60
     : 1.0;
 }
 
@@ -1223,9 +2238,23 @@ function buildSelectionOverlayItems() {
   let box;
   let color;
   let opacity;
-  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
-    const start = selectedStreetIdx * 8;
-    const motifs = uniqueMotifs.filter(motifIdx => motifIdx >= start && motifIdx < start + 8);
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
+    const start = selectedRegionIdx * REGION_SIZE;
+    const motifs = motifRange(start, REGION_SIZE);
+    if (!motifs.length) return [];
+    box = aabbForMotifs(motifs);
+    color = new Float32Array([1.0, 0.18, 0.72]);
+    opacity = 0.95;
+  } else if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+    const start = selectedNeighbourhoodIdx * NEIGHBOURHOOD_SIZE;
+    const motifs = motifRange(start, NEIGHBOURHOOD_SIZE);
+    if (!motifs.length) return [];
+    box = aabbForMotifs(motifs);
+    color = new Float32Array([1.0, 0.18, 0.72]);
+    opacity = 0.95;
+  } else if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+    const start = selectedStreetIdx * STREET_SIZE;
+    const motifs = motifRange(start, STREET_SIZE);
     if (!motifs.length) return [];
     box = aabbForMotifs(motifs);
     color = new Float32Array([1.0, 0.44, 0.15]);
@@ -1235,25 +2264,168 @@ function buildSelectionOverlayItems() {
     color = new Float32Array([1.0, 0.18, 0.72]);
     opacity = 0.9;
   }
-  return [{
-    mesh: 'selectionWireBox',
-    material: 'lines',
-    transform: wireTransformForAABB(box, selectedStreetIdx !== null ? 0.035 : 0.12),
-    blend: 'additive',
-    uniforms: { uBaseCol: color, uLineOpacity: opacity },
-  }];
+  return buildWireGlowItems(box, color, opacity, selectionWirePad());
+}
+
+function buildWireGlowItems(box, color, opacity, pad) {
+  return [
+    {
+      mesh: 'selectionWireBox',
+      material: 'lines',
+      transform: wireTransformForAABB(box, pad + 0.028),
+      blend: 'additive',
+      lineWidth: 4,
+      uniforms: { uBaseCol: color, uLineOpacity: opacity * 0.34 },
+    },
+    {
+      mesh: 'selectionWireBox',
+      material: 'lines',
+      transform: wireTransformForAABB(box, pad + 0.012),
+      blend: 'additive',
+      lineWidth: 3,
+      uniforms: { uBaseCol: color, uLineOpacity: opacity * 0.58 },
+    },
+    {
+      mesh: 'selectionWireBox',
+      material: 'lines',
+      transform: wireTransformForAABB(box, pad),
+      blend: 'additive',
+      lineWidth: 2,
+      uniforms: { uBaseCol: color, uLineOpacity: opacity },
+    },
+  ];
+}
+
+function buildOwnerFocusOverlayItems() {
+  if (mode !== 'BIG' || !ownerFocusEnabled || !ownerFocusAddress) return [];
+  const items = [];
+  const start = mainScopeStart();
+  const end = start + mainScopeCount();
+  for (const motifIdx of ownerFocusedMotifSet()) {
+    if (motifIdx < start || motifIdx >= end) continue;
+    items.push(...buildWireGlowItems(
+      cubeAABBFor(motifIdx),
+      new Float32Array([1.0, 0.18, 0.72]),
+      motifIdx === selectedMotifIdx ? 1.0 : 0.68,
+      0.18
+    ));
+  }
+  return items;
+}
+
+function buildMiniMapOverlayItems() {
+  const box = miniMapSelectionAABB();
+  if (!box) return [];
+  const transform = wireTransformForAABB(box, 0.0);
+  return [
+    {
+      mesh: 'solidBox',
+      material: 'stone-glass',
+      transform,
+      blend: 'alpha',
+      noCull: true,
+      uniforms: { uTint: new Float32Array([1.0, 0.45, 0.0]), uAlpha: 1.0 },
+    },
+    {
+      mesh: 'solidBox',
+      material: 'normie-glow',
+      transform,
+      blend: 'additive',
+      noCull: true,
+      uniforms: { uTint: new Float32Array([1.0, 0.32, 0.0]), uAlpha: 0.72 },
+    },
+  ];
+}
+
+function buildMiniMapOwnerMarkerItems() {
+  if (!ownerFocusEnabled || !ownerFocusAddress) return [];
+  const items = [];
+  for (const motifIdx of ownerFocusedMotifSet()) {
+    const transform = wireTransformForAABB(cubeAABBFor(motifIdx), 0.18);
+    items.push({
+      mesh: 'solidBox',
+      material: 'stone-glass',
+      transform,
+      blend: 'alpha',
+      noCull: true,
+      uniforms: { uTint: new Float32Array([1.0, 0.02, 0.0]), uAlpha: motifIdx === selectedMotifIdx ? 1.0 : 0.78 },
+    });
+    items.push({
+      mesh: 'solidBox',
+      material: 'normie-glow',
+      transform,
+      blend: 'additive',
+      noCull: true,
+      uniforms: { uTint: new Float32Array([1.0, 0.0, 0.0]), uAlpha: motifIdx === selectedMotifIdx ? 0.85 : 0.42 },
+    });
+  }
+  return items;
+}
+
+function motifSetForRange(start, count) {
+  return new Set(motifRange(start, count));
+}
+
+function detailedEmptyMotifSet() {
+  if (mode !== 'BIG') return new Set();
+  if (!detailedEmptyScopesEnabled) return new Set();
+  return motifSetForRange(mainScopeStart(), mainScopeCount());
+}
+
+function emptyBiomeDimForMotif(motifIdx) {
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
+    return streetIndexForMotif(motifIdx) === selectedStreetIdx ? 0.74 : (
+      mainViewScope === 'street' ? 0.38 : mainViewScope === 'neighbourhood' ? 0.13 : 0.055
+    );
+  }
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
+    return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? 0.59 : (
+      mainViewScope === 'street' ? 0.38 : mainViewScope === 'neighbourhood' ? 0.13 : 0.055
+    );
+  }
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
+    return regionIndexForMotif(motifIdx) === selectedRegionIdx ? 0.46 : (
+      mainViewScope === 'street' ? 0.38 : mainViewScope === 'neighbourhood' ? 0.13 : 0.055
+    );
+  }
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
+    return motifIdx === selectedMotifIdx ? 0.70 : (
+      mainViewScope === 'street' ? 0.32 : mainViewScope === 'neighbourhood' ? 0.10 : 0.04
+    );
+  }
+  return mainViewScope === 'street' ? 0.48 : mainViewScope === 'neighbourhood' ? 0.16 : 0.06;
+}
+
+function fullArtworkMotifSet() {
+  if (mode !== 'BIG') return new Set();
+  if (ownerFocusEnabled && ownerFocusAddress) {
+    const start = mainScopeStart();
+    const end = start + mainScopeCount();
+    return new Set([...ownerFocusedMotifSet()].filter(motifIdx => motifIdx >= start && motifIdx < end && isMintedSlot(motifIdx)));
+  }
+  if (mainViewScope === 'street' || mainViewScope === 'neighbourhood') {
+    return new Set(mainScopeMotifs().filter(isMintedSlot));
+  }
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined && isMintedSlot(selectedMotifIdx)) {
+    return new Set([selectedMotifIdx]);
+  }
+  return new Set();
 }
 
 function rebuildScene() {
   sceneItems = [];
   detailSceneItems = [];
+  miniMapSceneItems = [];
+  updateWorldMapLabel();
   jumpToFirstVisibleForFilter();
   _updateNftLabel();
   const p0 = currentPlane();
 
+  const fullArtworkMotifs = fullArtworkMotifSet();
+  if (fullArtworkMotifs.size > 0) startDetailMaterialLoad();
   const motifsInFilter = _visibleMotifs();
   const motifsToRender = (mode === 'BIG')
-    ? motifsInFilter
+    ? motifsInFilter.filter(motifIdx => motifInMainScope(motifIdx) && !fullArtworkMotifs.has(motifIdx))
     : (mode === '2D' ? [] : (isMintedSlot(p0.hierarchy.motifIndex) ? [p0.hierarchy.motifIndex] : []));
 
   const hasMinted = mintSimulationLoaded();
@@ -1263,23 +2435,28 @@ function rebuildScene() {
       ? (isMintedSlot(p0.hierarchy.motifIndex) ? [p0] : [])
       : (mode === '3D')
         ? (isMintedSlot(p0.hierarchy.motifIndex)
-            ? serializedPlanes.filter(p => p.hierarchy.motifIndex === p0.hierarchy.motifIndex)
+            ? planesForMotif(p0.hierarchy.motifIndex)
             : [])
-        : serializedPlanes.filter(p => _passesCategory(p.hierarchy.motifIndex));
+        : (mode === 'BIG')
+          ? serializedPlanes.filter(p => fullArtworkMotifs.has(p.hierarchy.motifIndex))
+          : [];
 
   // Precompute per-motif cubeCtx (mirror slices for forest builder).
   // Always include the current plane's motif so 2D mode forest has context.
   const cubeCtxMap = {};
-  const motifsForCtx = new Set([...motifsToRender, p0.hierarchy.motifIndex]);
+  const motifsForCtx = new Set([...motifsToRender, ...fullArtworkMotifs, p0.hierarchy.motifIndex]);
   if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) motifsForCtx.add(selectedMotifIdx);
   for (const motifIdx of motifsForCtx) {
     cubeCtxMap[motifIdx] = {
-      slicesByAxis: computeMirrorSlices(motifIdx, hilbert, serializedPlanes),
+      slicesByAxis: computeMirrorSlices(motifIdx, hilbert, planesForMotif(motifIdx)),
     };
   }
   // --- Per-cube items ---
   for (const motifIdx of motifsToRender) {
     pushMotifItems(sceneItems, motifIdx, mode, bigModeDimForMotif(motifIdx));
+  }
+  for (const motifIdx of fullArtworkMotifs) {
+    pushMotifItems(sceneItems, motifIdx, '3D', bigModeDimForMotif(motifIdx));
   }
 
   // Light markers — once in any non-2D mode, anchored to the active cube.
@@ -1311,9 +2488,18 @@ function rebuildScene() {
     if (walkerItems2D?.length) sceneItems.push(...walkerItems2D);
   }
 
-  // Inter-cube Hilbert path connectors in BIG mode.
+  // Main viewport scaffold is capped at the selected region/neighbourhood.
+  // The full order-5 block lives in the minimap so this view never tries to
+  // present the entire 4096-plot world at once.
   if (mode === 'BIG' && categoryFilter === null) {
-    sceneItems.push(...buildFullHilbertPath(hilbert, gl, meshes));
+    const scaffoldItems = buildHilbertPathRange(hilbert, mainScopeStart(), mainScopeCount(), gl, meshes);
+    const hasFocusedScope =
+      selectedMotifIdx !== null && selectedMotifIdx !== undefined ||
+      selectedStreetIdx !== null && selectedStreetIdx !== undefined ||
+      selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined ||
+      selectedRegionIdx !== null && selectedRegionIdx !== undefined;
+    applyDim(scaffoldItems, hasFocusedScope ? 0.24 : 0.62);
+    sceneItems.push(...scaffoldItems);
   }
 
   // Empty mint-state scaffold: show the bare Hilbert structure before any
@@ -1328,15 +2514,90 @@ function rebuildScene() {
     pushPlaneItems(sceneItems, plane, mode, cubeCtxMap[motifIdx], bigModeDimForMotif(motifIdx));
   }
 
-  if (cubeDetailOpen && selectedMotifIdx !== null && selectedMotifIdx !== undefined && isMintedSlot(selectedMotifIdx)) {
-    const cubeCtx = cubeCtxMap[selectedMotifIdx];
-    pushMotifItems(detailSceneItems, selectedMotifIdx, '3D', 1.0);
-    for (const plane of serializedPlanes.filter(p => p.hierarchy.motifIndex === selectedMotifIdx)) {
-      pushPlaneItems(detailSceneItems, plane, '3D', cubeCtx, 1.0);
+  // --- Empty-slot biomes (Big Cube view) ---
+  // Biomes are world backdrop, not focus content — they use their own dim
+  // policy: full brightness when nothing is selected, mild dim when a single
+  // cube is selected, in-street stays bright when a street is selected.
+  // The per-cube Hilbert line is drawn alongside so empty cubes still show
+  // their internal Hilbert geometry in the correct perspective.
+  function emptySlotItemsFor(motifIdx) {
+    const cubePlanes = planesForMotif(motifIdx);
+    const aabb = cubeAABBFor(motifIdx);
+    const items = [
+      ...buildEmptySlotItems(motifIdx, cubePlanes, aabb, gl, meshes),
+      ...buildHilbertLines(motifIdx, hilbert, gl, meshes),
+    ];
+
+    // Empty slots should already read as part of the same world-language as
+    // populated cubes: green Hilbert spine, pink corner-web, and glowing edge
+    // bit/corner points. The source art layers are the only things missing.
+    const cardItems = buildCubeCardioid(motifIdx, hilbert, cubePlanes, gl, meshes);
+    if (cardItems?.length) items.push(...cardItems);
+    for (const plane of cubePlanes) {
+      const dbg = buildEdgePointDebug(plane, gl, meshes);
+      const edgeItems = Array.isArray(dbg) ? dbg.filter(Boolean) : (dbg ? [dbg] : []);
+      if (edgeItems.length) items.push(...edgeItems);
+    }
+    return items;
+  }
+
+  if (mode === 'BIG') {
+    const detailedEmpty = detailedEmptyMotifSet();
+    for (const motifIdx of detailedEmpty) {
+      if (isMintedSlot(motifIdx)) continue;
+      const items = emptySlotItemsFor(motifIdx);
+      applyDim(items, emptyBiomeDimForMotif(motifIdx));
+      sceneItems.push(...items);
     }
   }
 
+  if (cubeDetailOpen && selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
+    if (isMintedSlot(selectedMotifIdx)) {
+      const cubeCtx = cubeCtxMap[selectedMotifIdx];
+      pushMotifItems(detailSceneItems, selectedMotifIdx, '3D', 1.0);
+      for (const plane of planesForMotif(selectedMotifIdx)) {
+        pushPlaneItems(detailSceneItems, plane, '3D', cubeCtx, 1.0);
+      }
+    } else {
+      detailSceneItems.push(...emptySlotItemsFor(selectedMotifIdx));
+    }
+  }
+
+  sceneItems.push(...buildOwnerFocusOverlayItems());
   sceneItems.push(...buildSelectionOverlayItems());
+  miniMapSceneItems.push({
+    mesh: 'solidBox',
+    material: 'stone-glass',
+    transform: wireTransformForAABB(worldAABB(), 0.0),
+    blend: 'alpha',
+    noCull: true,
+    uniforms: {
+      uTint: new Float32Array([0.0, 1.0, 0.24]),
+      uAlpha: 0.035,
+    },
+  });
+  miniMapSceneItems.push({
+    mesh: 'selectionWireBox',
+    material: 'lines',
+    transform: wireTransformForAABB(worldAABB(), 0.0),
+    blend: 'additive',
+    uniforms: {
+      uBaseCol: new Float32Array([0.0, 1.0, 0.24]),
+      uLineOpacity: 0.26,
+    },
+  });
+  miniMapSceneItems.push({
+    mesh: 'worldMapGrid',
+    material: 'lines',
+    transform: identity(mat4()),
+    blend: 'additive',
+    uniforms: {
+      uBaseCol: new Float32Array([0.0, 1.0, 0.24]),
+      uLineOpacity: 0.46,
+    },
+  });
+  miniMapSceneItems.push(...buildMiniMapOwnerMarkerItems());
+  miniMapSceneItems.push(...buildMiniMapOverlayItems());
 
   const cnt = {};
   for (const it of sceneItems) cnt[it.material] = (cnt[it.material] || 0) + 1;
@@ -1347,8 +2608,8 @@ function rebuildScene() {
 // get built once their pixel data is available.
 setDataReadyCallback(() => rebuildScene());
 setBannerDataReadyCallback(() => rebuildScene());
-setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
-setMintDataReadyCallback(() => { _updateMintStatus(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
+setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
+setMintDataReadyCallback(() => { _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
 
 loadMintSimulation()
   .then(cubes => {
@@ -1360,11 +2621,12 @@ loadMintSimulation()
       recentreOrbit();
       log(`loaded ${cubes.length} saved mints`);
     } else {
-      selectedMotifIdx = uniqueMotifs[Math.floor(Math.random() * uniqueMotifs.length)] ?? null;
+      selectedMotifIdx = uniqueMotifs[Math.floor(hash1(0x9eb6e202, uniqueMotifs.length, HILBERT_ORDER) * uniqueMotifs.length)] ?? null;
       recentreOrbit();
     }
     _updateMintStatus();
     _updateNftLabel();
+    refreshOwnerFocusLabel();
     rebuildScene();
   })
   .catch(err => log(`saved mints unavailable: ${String(err?.message || err)}`));
@@ -1413,9 +2675,20 @@ function drawScene(items, cam, t) {
 
     let currentProg = null;
     let L = null;
+    let cullEnabled = (blendMode === 'opaque');
     for (const item of drawList) {
       const mat = materialsMap[item.material];
       if (!mat) continue;
+
+      // Per-item culling override. Needed for thin opaque meshes (e.g. dune
+      // ground planes) where the per-cube transform can invert winding so
+      // back-face culling would silently hide the surface.
+      const wantCull = (blendMode === 'opaque') && !item.noCull;
+      if (wantCull !== cullEnabled) {
+        if (wantCull) { gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
+        else          { gl.disable(gl.CULL_FACE); }
+        cullEnabled = wantCull;
+      }
 
       if (mat.program !== currentProg) {
         gl.useProgram(mat.program);
@@ -1481,10 +2754,11 @@ function drawScene(items, cam, t) {
       const mesh = meshes[item.mesh];
       if (!mesh) continue;
       gl.bindVertexArray(mesh.vao);
+      if (mesh.mode === gl.LINES) gl.lineWidth(item.lineWidth || 1);
       if (mesh.mode === 'INSTANCED') {
         gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, mesh.instanceCount);
       } else if (mesh.indexCount > 0) {
-        gl.drawElements(mesh.mode, mesh.indexCount, gl.UNSIGNED_SHORT, 0);
+        gl.drawElements(mesh.mode, mesh.indexCount, mesh.indexType || gl.UNSIGNED_SHORT, 0);
       } else {
         gl.drawArrays(mesh.mode, 0, mesh.vertexCount);
       }
@@ -1531,8 +2805,36 @@ function frame() {
   lastCamPos = mainCam.pos;
   updateSelectionLink(VP);
   updateStreetStats();
+  updateAxisGizmo(mainAxisEl, mainCam, 28);
 
   drawScene(sceneItems, mainCam, t);
+
+  let mapVP = null;
+  let mapRectScreen = null;
+  if (worldMapEl && miniMapSceneItems.length > 0) {
+    const rect = worldMapEl.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    const dprX = canvas.width / Math.max(1, canvasRect.width);
+    const dprY = canvas.height / Math.max(1, canvasRect.height);
+    const x = Math.max(0, Math.floor((rect.left - canvasRect.left) * dprX));
+    const y = Math.max(0, Math.floor((canvasRect.bottom - rect.bottom) * dprY));
+    const w = Math.min(canvas.width - x, Math.floor(rect.width * dprX));
+    const h = Math.min(canvas.height - y, Math.floor(rect.height * dprY));
+    if (w > 8 && h > 8) {
+      const mapCam = miniMapOrbit.camera(w / Math.max(1, h));
+      mapVP = mat4(); multiply(mapVP, mapCam.proj, mapCam.view);
+      mapRectScreen = rect;
+      gl.enable(gl.SCISSOR_TEST);
+      gl.viewport(x, y, w, h);
+      gl.scissor(x, y, w, h);
+      gl.clearColor(0.005, 0.009, 0.007, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      drawScene(miniMapSceneItems, mapCam, t);
+      updateAxisGizmo(worldMapAxisEl, mapCam, 24);
+      gl.disable(gl.SCISSOR_TEST);
+    }
+  }
+  updateMapLink(VP, mapVP, mapRectScreen);
 
   if (cubeDetailOpen && detailSceneItems.length > 0 && cubeDetailEl) {
     const rect = cubeDetailEl.getBoundingClientRect();
@@ -1549,7 +2851,9 @@ function frame() {
       gl.scissor(x, y, w, h);
       gl.clearColor(0.015, 0.016, 0.02, 1.0);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      drawScene(detailSceneItems, detailOrbit.camera(w / Math.max(1, h)), t);
+      const detailCam = detailOrbit.camera(w / Math.max(1, h));
+      drawScene(detailSceneItems, detailCam, t);
+      updateAxisGizmo(cubeDetailAxisEl, detailCam, 24);
       gl.disable(gl.SCISSOR_TEST);
     }
   }
@@ -1561,5 +2865,8 @@ function frame() {
   requestAnimationFrame(frame);
 }
 log('entering render loop');
-rebuildScene();  // Initial scene build before first frame
+rebuildScene();  // Initial scaffold before first frame.
+requestAnimationFrame(() => {
+  scheduleDetailMaterialLoad();
+});
 requestAnimationFrame(frame);

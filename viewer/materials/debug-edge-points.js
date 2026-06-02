@@ -7,8 +7,8 @@
 import { createInstancedBillboardMesh } from '../instanced-mesh.js';
 import { mat4, identity } from '/renderer/src/math.js';
 
-const BIT_SIZE    = 0.030;
-const CORNER_SIZE = 0.055;
+const BIT_SIZE    = 0.045;
+const CORNER_SIZE = 0.0825;
 const CORNER_COL  = new Float32Array([2.5, 2.5, 2.5]);  // bright white for corners
 
 function axisColorLinear(axis) {

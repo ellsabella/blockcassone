@@ -153,11 +153,19 @@ export function createMeshGL(gl, mesh) {
   if (mesh.variants) addAttr(mesh.variants, 5, 1);
 
   let indexCount = 0;
+  let indexType = gl.UNSIGNED_SHORT;
   if (mesh.indices) {
+    let indices = mesh.indices;
+    if (!(indices instanceof Uint16Array) && !(indices instanceof Uint32Array)) {
+      let maxIndex = 0;
+      for (let i = 0; i < indices.length; i++) if (indices[i] > maxIndex) maxIndex = indices[i];
+      indices = maxIndex > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
+    }
+    indexType = indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
     const idxBuf = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
-    indexCount = mesh.indices.length;
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    indexCount = indices.length;
   }
 
   gl.bindVertexArray(null);
@@ -165,6 +173,7 @@ export function createMeshGL(gl, mesh) {
   return {
     vao,
     indexCount,
+    indexType,
     vertexCount: mesh.positions.length / 3,
     mode: glMode,
   };

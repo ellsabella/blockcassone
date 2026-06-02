@@ -31,7 +31,7 @@ loadDotEnv(ENV_PATH);
 
 // Route prefixes that should resolve from the repo root (outside renderer/).
 // Everything else resolves from renderer/.
-const REPO_PREFIXES = ['/viewer/', '/core/', '/public/', '/schema/', '/renderer/'];
+const REPO_PREFIXES = ['/viewer/', '/core/', '/public/', '/schema/', '/renderer/', '/data/'];
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -113,14 +113,22 @@ function sanitizeMintRecord(record, cubeId) {
     cubeId,
     slot,
     wallet: String(record?.wallet || '').toLowerCase(),
-    sourceKind: record?.sourceKind === 'normie' ? 'normie' : 'external',
+    sourceKind: record?.sourceKind === 'normie' ? 'normie' : (record?.sourceKind === 'cc0' ? 'cc0' : 'external'),
     source: {
       chain: String(source.chain || ''),
+      chainId: Number(source.chainId || 0),
       contract: String(source.contract || '').toLowerCase(),
       tokenId: String(source.tokenId || ''),
     },
+    cc0: record?.cc0 && typeof record.cc0 === 'object' ? {
+      projectId: String(record.cc0.projectId || ''),
+      projectName: String(record.cc0.projectName || ''),
+      license: String(record.cc0.license || ''),
+      provenance: String(record.cc0.provenance || ''),
+    } : null,
     agentic: Boolean(record?.agentic),
     agentId: record?.agentId ? String(record.agentId) : '',
+    art: record?.art && typeof record.art === 'object' ? record.art : null,
   };
 }
 
@@ -139,7 +147,7 @@ async function handleDevMints(req, res) {
 
   if (req.method === 'POST') {
     try {
-      const payload = JSON.parse(await readRequestBody(req));
+      const payload = JSON.parse(await readRequestBody(req, 12_000_000));
       const incoming = Array.isArray(payload?.mints) ? payload.mints : [];
       const state = readDevMints();
       for (const mint of incoming) {

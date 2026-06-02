@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "On-chain generative art — Hilbert cubes + swappable SDF materials.",
   "scripts": {
-    "start": "node renderer/server.js"
+    "start": "node renderer/server.js",
+    "snapshot:normies": "node scripts/take-normie-snapshot.mjs"
   },
   "author": "",
   "license": "ISC"

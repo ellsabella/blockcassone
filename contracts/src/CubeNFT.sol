@@ -153,6 +153,30 @@ contract CubeNFT is ERC721, Ownable {
         cubeForNormieId[normieId] = cubeId;
     }
 
+    function mintSnapshotNormieCubeFor(address minter, uint256 normieId, uint32 slot, bytes32 seed)
+        external
+        onlyOwner
+        returns (uint256 cubeId)
+    {
+        uint256 existingCubeId = cubeForNormieId[normieId];
+        if (existingCubeId != 0) revert NormieAlreadyCubed(normieId, existingCubeId);
+
+        bytes32 key = sourceKey(block.chainid, normieContract, normieId);
+        cubeId = _mintCube(_mintParams(
+            minter,
+            slot,
+            SOURCE_KIND_NORMIE,
+            normieContract,
+            normieId,
+            key,
+            seed,
+            0,
+            false,
+            0
+        ));
+        cubeForNormieId[normieId] = cubeId;
+    }
+
     function mintExternalERC721Cube(
         address sourceContract,
         uint256 sourceTokenId,
