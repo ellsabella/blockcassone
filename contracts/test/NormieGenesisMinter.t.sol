@@ -35,6 +35,9 @@ contract NormieGenesisMinterTest is Test {
 
         _add(ALICE, _ids(101, 102, 103));
         _add(BOB, _ids(201, 202));
+        uint256[] memory aliceSnapshot = _ids(101, 102, 103);
+        vm.prank(OWNER);
+        genesis.setSnapshotRoot(genesis.hashSnapshot(ALICE, aliceSnapshot));
 
         vm.prank(OWNER);
         genesis.finalizeSnapshot();
@@ -146,14 +149,21 @@ contract NormieGenesisMinterTest is Test {
     function testSeaDropMintsAllowlistPhase() public {
         vm.prank(OWNER);
         genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+        uint256[] memory aliceSnapshot = _ids(101, 102, 103);
+        uint256[] memory selected = _ids(103, 101);
+        bytes32[] memory proof = new bytes32[](0);
+        vm.prank(ALICE);
+        genesis.selectAllowlistNormies(aliceSnapshot, selected, proof);
 
         vm.prank(SEA_DROP);
         uint256[] memory cubeIds = genesis.mintSeaDrop(ALICE, 2);
 
         assertEq(cubeIds.length, 2);
         assertEq(cubes.ownerOf(cubeIds[0]), ALICE);
-        assertEq(_sourceToken(cubeIds[0]), 101);
-        assertEq(_sourceToken(cubeIds[1]), 102);
+        assertEq(_sourceToken(cubeIds[0]), 103);
+        assertEq(_sourceToken(cubeIds[1]), 101);
+        assertEq(genesis.selectedNormieCount(ALICE), 2);
+        assertEq(genesis.selectionCursor(ALICE), 2);
     }
 
     function testSeaDropMintsPublicPhase() public {
@@ -191,6 +201,44 @@ contract NormieGenesisMinterTest is Test {
         genesis.mintSeaDrop(ALICE, 1);
     }
 
+    function testSeaDropAllowlistRequiresPreselection() public {
+        vm.prank(OWNER);
+        genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+
+        vm.prank(SEA_DROP);
+        vm.expectRevert(abi.encodeWithSelector(
+            NormieGenesisMinter.NoAllowlistNormies.selector,
+            ALICE
+        ));
+        genesis.mintSeaDrop(ALICE, 1);
+    }
+
+    function testCannotSelectNormieOutsideSnapshot() public {
+        uint256[] memory aliceSnapshot = _ids(101, 102, 103);
+        uint256[] memory selected = _ids(101, 201);
+        bytes32[] memory proof = new bytes32[](0);
+
+        vm.prank(ALICE);
+        vm.expectRevert(abi.encodeWithSelector(
+            NormieGenesisMinter.NormieNotInSnapshot.selector,
+            201
+        ));
+        genesis.selectAllowlistNormies(aliceSnapshot, selected, proof);
+    }
+
+    function testCannotSelectWithInvalidSnapshotProof() public {
+        uint256[] memory bobSnapshot = _ids(201, 202);
+        uint256[] memory selected = _ids(201);
+        bytes32[] memory proof = new bytes32[](0);
+
+        vm.prank(BOB);
+        vm.expectRevert(abi.encodeWithSelector(
+            NormieGenesisMinter.InvalidSnapshotProof.selector,
+            BOB
+        ));
+        genesis.selectAllowlistNormies(bobSnapshot, selected, proof);
+    }
+
     function testOwnerCanUpdateSeaDropCaller() public {
         address newSeaDrop = address(0xBEEF);
         vm.prank(OWNER);
@@ -216,6 +264,11 @@ contract NormieGenesisMinterTest is Test {
         ids = new uint256[](2);
         ids[0] = a;
         ids[1] = b;
+    }
+
+    function _ids(uint256 a) private pure returns (uint256[] memory ids) {
+        ids = new uint256[](1);
+        ids[0] = a;
     }
 
     function _ids(uint256 a, uint256 b, uint256 c) private pure returns (uint256[] memory ids) {

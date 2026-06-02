@@ -74,18 +74,33 @@ number of discovered owners does not match that supply.
 
 Allowlist means "mint your Normies only."
 
-For each quantity mint:
+To keep "pick your own Normies" compatible with SeaDrop, selection happens
+before the SeaDrop mint:
 
-1. The minter proves their snapshot allowance.
-2. The contract assigns the next unclaimed Normie token ID from that minter's
-   ordered snapshot list.
-3. The Normie token ID is marked claimed.
+1. The website loads the wallet's snapshot Normie list.
+2. The user chooses which of those Normies they want to mint.
+3. The user submits a preselection transaction with:
+
+```solidity
+selectAllowlistNormies(snapshotNormies, selectedNormies, proof)
+```
+
+The contract verifies that `snapshotNormies` is committed by the Merkle snapshot
+root and that every `selectedNormie` belongs to that proven list.
+
+Then, for each SeaDrop quantity mint:
+
+1. SeaDrop calls `mintSeaDrop(minter, quantity)`.
+2. The contract consumes the next unclaimed Normie IDs from the minter's stored
+   selection.
+3. Each Normie token ID is marked claimed.
 4. A cube is minted with `Source Type = Normie`.
-5. The mint stops if the wallet has no unclaimed snapshot Normies or the global
+5. The mint stops if the wallet has no sufficient selected snapshot Normies or the global
    `4096` supply cap is reached.
 
-The holder does not need to pass arbitrary art data. Exact source assignment is
-derived from committed snapshot state and contract consumption state.
+The holder does not pass arbitrary art data during the SeaDrop mint. Exact
+source assignment is derived from committed snapshot state, the user's stored
+selection, and contract consumption state.
 
 ### Public Phase
 
@@ -142,6 +157,7 @@ If SeaDrop calls the token contract with only `minter` and `quantity`, source
 assignment must be derivable from committed onchain state:
 
 - wallet snapshot commitment
+- allowlist preselection queue
 - per-wallet claim cursor/count
 - global Normie source pool
 - claimed Normie bitmap or equivalent tracking

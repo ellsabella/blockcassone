@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {CubeNFT} from "./CubeNFT.sol";
 
@@ -17,16 +18,21 @@ contract NormieGenesisMinter is Ownable {
     error DuplicateNormie(uint256 normieId);
     error InvalidQuantity();
     error InvalidSeaDrop(address seaDrop);
+    error InvalidSnapshotProof(address wallet);
     error InvalidSlot(uint32 slot);
     error MintClosed();
     error NoAllowlistNormies(address minter);
     error NoPublicNormies();
+    error NormieAlreadyClaimed(uint256 normieId);
+    error NormieNotInSnapshot(uint256 normieId);
     error SnapshotAlreadyFinalized();
     error SnapshotNotFinalized();
     error UnauthorizedSeaDrop(address caller);
 
     event SnapshotNormiesAdded(address indexed wallet, uint256 count);
     event SnapshotFinalized(uint256 normieCount, uint32 totalSlots, bytes32 publicSeed);
+    event SnapshotRootUpdated(bytes32 oldRoot, bytes32 newRoot);
+    event AllowlistSelectionUpdated(address indexed wallet, uint256 count);
     event PhaseUpdated(Phase oldPhase, Phase newPhase);
     event SeaDropUpdated(address indexed oldSeaDrop, address indexed newSeaDrop);
     event GenesisCubeMinted(
@@ -43,11 +49,14 @@ contract NormieGenesisMinter is Ownable {
 
     Phase public phase;
     address public seaDrop;
+    bytes32 public snapshotRoot;
     bool public finalized;
     uint256 public mintedCount;
 
     mapping(address wallet => uint256[] normieIds) private _walletNormies;
     mapping(address wallet => uint256 cursor) public walletCursor;
+    mapping(address wallet => uint256[] normieIds) private _selectedNormies;
+    mapping(address wallet => uint256 cursor) public selectionCursor;
     mapping(uint256 normieId => bool registered) public normieRegistered;
     mapping(uint256 normieId => bool claimed) public normieClaimed;
     mapping(uint256 normieId => uint256 indexPlusOne) public publicIndexPlusOne;
@@ -87,6 +96,13 @@ contract NormieGenesisMinter is Ownable {
         emit SnapshotFinalized(_publicNormies.length, totalSlots, publicSeed);
     }
 
+    function setSnapshotRoot(bytes32 newRoot) external onlyOwner {
+        if (finalized) revert SnapshotAlreadyFinalized();
+        bytes32 oldRoot = snapshotRoot;
+        snapshotRoot = newRoot;
+        emit SnapshotRootUpdated(oldRoot, newRoot);
+    }
+
     function setPhase(Phase newPhase) external onlyOwner {
         Phase oldPhase = phase;
         phase = newPhase;
@@ -105,9 +121,32 @@ contract NormieGenesisMinter is Ownable {
         returns (uint256[] memory cubeIds)
     {
         if (msg.sender != seaDrop) revert UnauthorizedSeaDrop(msg.sender);
-        if (phase == Phase.Allowlist) return _mintAllowlist(minter, quantity);
+        if (phase == Phase.Allowlist) return _mintSelectedAllowlist(minter, quantity);
         if (phase == Phase.Public) return _mintPublic(minter, quantity);
         revert MintClosed();
+    }
+
+    function selectAllowlistNormies(
+        uint256[] calldata snapshotNormies,
+        uint256[] calldata selectedNormies,
+        bytes32[] calldata proof
+    ) external {
+        if (selectedNormies.length == 0) revert EmptySnapshot();
+        if (!_validSnapshotProof(msg.sender, snapshotNormies, proof)) {
+            revert InvalidSnapshotProof(msg.sender);
+        }
+
+        delete _selectedNormies[msg.sender];
+        selectionCursor[msg.sender] = 0;
+
+        for (uint256 i = 0; i < selectedNormies.length; i++) {
+            uint256 normieId = selectedNormies[i];
+            if (normieClaimed[normieId]) revert NormieAlreadyClaimed(normieId);
+            if (!_contains(snapshotNormies, normieId)) revert NormieNotInSnapshot(normieId);
+            _selectedNormies[msg.sender].push(normieId);
+        }
+
+        emit AllowlistSelectionUpdated(msg.sender, selectedNormies.length);
     }
 
     function mintAllowlist(uint256 quantity) external returns (uint256[] memory cubeIds) {
@@ -142,12 +181,28 @@ contract NormieGenesisMinter is Ownable {
         return _walletNormies[wallet][index];
     }
 
+    function selectedNormieCount(address wallet) external view returns (uint256) {
+        return _selectedNormies[wallet].length;
+    }
+
+    function selectedNormieAt(address wallet, uint256 index) external view returns (uint256) {
+        return _selectedNormies[wallet][index];
+    }
+
     function publicRemaining() external view returns (uint256) {
         return _publicNormies.length;
     }
 
     function publicNormieAt(uint256 index) external view returns (uint256) {
         return _publicNormies[index];
+    }
+
+    function hashSnapshot(address wallet, uint256[] calldata normieIds)
+        external
+        pure
+        returns (bytes32)
+    {
+        return _hashSnapshot(wallet, normieIds);
     }
 
     function _mintAllowlist(address minter, uint256 quantity)
@@ -170,6 +225,27 @@ contract NormieGenesisMinter is Ownable {
         walletCursor[minter] = cursor;
         if (mintedNow == 0) revert NoAllowlistNormies(minter);
         return _trim(cubeIds, mintedNow);
+    }
+
+    function _mintSelectedAllowlist(address minter, uint256 quantity)
+        private
+        returns (uint256[] memory cubeIds)
+    {
+        _requireMintOpen(quantity);
+
+        cubeIds = new uint256[](quantity);
+        uint256 mintedNow = 0;
+        uint256[] storage rows = _selectedNormies[minter];
+        uint256 cursor = selectionCursor[minter];
+
+        while (mintedNow < quantity && cursor < rows.length) {
+            uint256 normieId = rows[cursor++];
+            if (normieClaimed[normieId]) continue;
+            cubeIds[mintedNow++] = _consumeAndMint(minter, normieId, Phase.Allowlist);
+        }
+
+        selectionCursor[minter] = cursor;
+        if (mintedNow != quantity) revert NoAllowlistNormies(minter);
     }
 
     function _mintPublic(address minter, uint256 quantity)
@@ -231,6 +307,30 @@ contract NormieGenesisMinter is Ownable {
         }
         _publicNormies.pop();
         publicIndexPlusOne[normieId] = 0;
+    }
+
+    function _validSnapshotProof(
+        address wallet,
+        uint256[] calldata normieIds,
+        bytes32[] calldata proof
+    ) private view returns (bool) {
+        if (snapshotRoot == bytes32(0)) return false;
+        return MerkleProof.verifyCalldata(proof, snapshotRoot, _hashSnapshot(wallet, normieIds));
+    }
+
+    function _hashSnapshot(address wallet, uint256[] calldata normieIds)
+        private
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(wallet, keccak256(abi.encode(normieIds))));
+    }
+
+    function _contains(uint256[] calldata values, uint256 needle) private pure returns (bool) {
+        for (uint256 i = 0; i < values.length; i++) {
+            if (values[i] == needle) return true;
+        }
+        return false;
     }
 
     function _trim(uint256[] memory values, uint256 len)
