@@ -37,7 +37,7 @@ contract NormieGenesisMinterTest is Test {
         _add(BOB, _ids(201, 202));
         uint256[] memory aliceSnapshot = _ids(101, 102, 103);
         vm.prank(OWNER);
-        genesis.setSnapshotRoot(genesis.hashSnapshot(ALICE, aliceSnapshot));
+        genesis.setSnapshotRoot(_snapshotHash(ALICE, aliceSnapshot));
 
         vm.prank(OWNER);
         genesis.finalizeSnapshot();
@@ -324,5 +324,13 @@ contract NormieGenesisMinterTest is Test {
             remaining
         ))) % remaining;
         return genesis.publicNormieAt(index);
+    }
+
+    function _snapshotHash(address wallet, uint256[] memory normieIds)
+        private
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(wallet, keccak256(abi.encode(normieIds))));
     }
 }
