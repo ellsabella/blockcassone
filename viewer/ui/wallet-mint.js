@@ -1,7 +1,7 @@
 // UI — wallet status and mint simulation controls.
 
 import { getWalletState } from '../wallet-nfts.js';
-import { mintSimulationSummary } from '../mint-simulator.js';
+import { mintedStateSource, mintSimulationSummary } from '../mint-simulator.js';
 
 function shortAddress(address) {
   const value = String(address || '');
@@ -35,5 +35,5 @@ export function updateMintStatus(el, uniqueMotifs) {
   const summary = mintSimulationSummary();
   const empty   = Math.max(0, uniqueMotifs.length - summary.slots);
   const legacy = (summary.cc0 || 0) + (summary.external || 0);
-  el.textContent = `minted: ${summary.total} | normie ${summary.normies}${legacy ? ` | legacy ${legacy}` : ''} | empty slots: ${empty}`;
+  el.textContent = `${mintedStateSource()}: minted ${summary.total} | normie ${summary.normies}${legacy ? ` | legacy ${legacy}` : ''} | empty slots: ${empty}`;
 }

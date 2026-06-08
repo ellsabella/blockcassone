@@ -106,6 +106,18 @@ function writeDevMints(state) {
   fs.writeFileSync(DEV_MINTS_PATH, JSON.stringify(state, null, 2) + '\n');
 }
 
+function readChainConfig() {
+  try {
+    const configPath = path.join(REPO_ROOT, 'data', 'chain-config.json');
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return {
+      rpcUrl: String(parsed.rpcUrl || 'http://127.0.0.1:8545'),
+    };
+  } catch (_) {
+    return { rpcUrl: 'http://127.0.0.1:8545' };
+  }
+}
+
 function sanitizeMintRecord(record, cubeId) {
   const slot = Number(record?.slot);
   const source = record?.source || {};
@@ -227,6 +239,36 @@ async function proxyNormies(req, res) {
   }
 }
 
+async function proxyChainRpc(req, res) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Method not allowed' });
+    return;
+  }
+
+  try {
+    const body = await readRequestBody(req, 4_000_000);
+    const config = readChainConfig();
+    const upstreamRes = await devFetch(config.rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const text = await upstreamRes.text();
+    res.writeHead(upstreamRes.status, {
+      'Content-Type': upstreamRes.headers.get('content-type') || 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(text);
+  } catch (err) {
+    sendJson(res, 502, {
+      error: 'Chain RPC proxy failed',
+      detail: String(err?.message || err),
+      cause: err?.cause ? String(err.cause?.message || err.cause) : undefined,
+      code: err?.cause?.code,
+    });
+  }
+}
+
 async function proxyImage(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const imageUrl = url.searchParams.get('url');
@@ -308,6 +350,11 @@ const server = http.createServer((req, res) => {
 
   if (req.url.startsWith('/api/normies/')) {
     proxyNormies(req, res);
+    return;
+  }
+
+  if (req.url === '/api/chain-rpc') {
+    proxyChainRpc(req, res);
     return;
   }
 

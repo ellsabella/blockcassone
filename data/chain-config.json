@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "chainId": 31337,
+  "rpcUrl": "http://127.0.0.1:8545",
+  "cubeNft": "",
+  "genesisMinter": "",
+  "normies": "",
+  "maxCubes": 4096
+}

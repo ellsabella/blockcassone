@@ -27,6 +27,12 @@ The project home should ultimately have two tabs:
   owned/CC0 assets, picking an update source, and submitting onchain update
   payloads.
 
+The dev viewer has an intermediate contract-read mode for the Current Block
+tab. When `data/chain-config.json` is enabled, it reads `CubeNFT` state through
+JSON-RPC and uses that as the minted-cube source. When disabled, it falls back
+to `viewer/data/dev-mints.json`. This does not replace the eventual indexer,
+but it proves the viewer can be driven by contract state.
+
 Production copyright policy, Normie-only genesis minting, and the later
 CC0/owned-art update direction live in `PRODUCTION_MINT_AND_CC0_PLAN.md`. In
 production, arbitrary third-party NFT media ingestion is retired from the

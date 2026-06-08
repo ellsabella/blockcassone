@@ -4,6 +4,7 @@ import {
   nftKey,
 } from './wallet-nfts.js';
 import { compactNormieArt } from './art-snapshot.js';
+import { loadChainMintRecords } from './chain-cubes.js';
 import { snapshotAllNormieIds, snapshotHasEntries, snapshotNormieIdsForWallet } from './normie-snapshot.js';
 import {
   fetchNormiePixels,
@@ -18,6 +19,7 @@ let minted = [];
 let mintedNormieIds = new Set();
 let occupiedSlots = new Set();
 let onMintReady = null;
+let mintStateSource = 'dev';
 
 function notify() {
   if (onMintReady) onMintReady();
@@ -119,6 +121,15 @@ async function clearMintRecords() {
 }
 
 export async function loadMintSimulation() {
+  const chainState = await loadChainMintRecords();
+  if (chainState.enabled) {
+    mintStateSource = 'chain';
+    setMintedFromRecords(chainState.records || []);
+    notify();
+    return getMintedCubes();
+  }
+
+  mintStateSource = 'dev';
   const state = await fetchMintState();
   setMintedFromRecords(state.mints || []);
   notify();
@@ -137,6 +148,10 @@ export function clearMintSimulationSilent() {
 
 export function getMintedCubes() {
   return minted.slice();
+}
+
+export function mintedStateSource() {
+  return mintStateSource;
 }
 
 export function getMintedCubeForSlot(slot) {
