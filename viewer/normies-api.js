@@ -2,7 +2,7 @@
 // Pixel endpoints are parsed to a 40x40 Uint8Array, where
 // index = row * 40 + col, value = 0 or 1.
 
-const API_ROOT = 'https://api.normies.art';
+const API_ROOT = '/api/normies';
 const BASE_URL = `${API_ROOT}/normie`;
 const GRID_SIZE = 40;
 const PIXEL_COUNT = GRID_SIZE * GRID_SIZE;

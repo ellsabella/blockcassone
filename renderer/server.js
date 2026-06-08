@@ -203,6 +203,30 @@ async function proxyOpenSea(req, res) {
   }
 }
 
+async function proxyNormies(req, res) {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  const upstreamPath = url.pathname.replace(/^\/api\/normies\/?/, '');
+  const upstream = new URL(`https://api.normies.art/${upstreamPath}`);
+  upstream.search = url.search;
+
+  try {
+    const upstreamRes = await devFetch(upstream);
+    const buf = Buffer.from(await upstreamRes.arrayBuffer());
+    res.writeHead(upstreamRes.status, {
+      'Content-Type': upstreamRes.headers.get('content-type') || 'application/octet-stream',
+      'Cache-Control': 'no-store',
+    });
+    res.end(buf);
+  } catch (err) {
+    sendJson(res, 502, {
+      error: 'Normies proxy failed',
+      detail: String(err?.message || err),
+      cause: err?.cause ? String(err.cause?.message || err.cause) : undefined,
+      code: err?.cause?.code,
+    });
+  }
+}
+
 async function proxyImage(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const imageUrl = url.searchParams.get('url');
@@ -279,6 +303,11 @@ const server = http.createServer((req, res) => {
 
   if (req.url.startsWith('/api/opensea/')) {
     proxyOpenSea(req, res);
+    return;
+  }
+
+  if (req.url.startsWith('/api/normies/')) {
+    proxyNormies(req, res);
     return;
   }
 
