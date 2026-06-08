@@ -36,3 +36,6 @@ Optional environment variables:
 
 The viewer reads `data/chain-config.json` and proxies JSON-RPC through
 `/api/chain-rpc`, so browser CORS settings on Anvil do not matter.
+
+For local Anvil testing, leave `BLOCKCASSONE_OWNER` unset unless you are also
+broadcasting from that same address. The setup calls are owner-gated.

@@ -25,39 +25,53 @@ contract DeployLocalGenesis is Script {
         bytes32 publicSeed = vm.envOr("BLOCKCASSONE_PUBLIC_SEED", keccak256("blockcassone-local"));
         string memory configOut = vm.envOr("BLOCKCASSONE_CHAIN_CONFIG_OUT", string("data/chain-config.json"));
 
-        vm.startBroadcast();
-
+        vm.broadcast();
         LocalMockNormies normies = new LocalMockNormies();
+
+        vm.broadcast();
         CubeNFT cubes = new CubeNFT(
             "Blockcassone Cubes",
             "CUBE",
             address(normies),
             totalSlots,
-            address(this)
+            initialOwner
         );
-        CubeRendererV1 renderer = new CubeRendererV1(cubes);
-        NormieGenesisMinter genesis = new NormieGenesisMinter(cubes, publicSeed, address(this));
 
+        vm.broadcast();
+        CubeRendererV1 renderer = new CubeRendererV1(cubes);
+
+        vm.broadcast();
+        NormieGenesisMinter genesis = new NormieGenesisMinter(cubes, publicSeed, initialOwner);
+
+        vm.broadcast();
         cubes.setRenderer(address(renderer));
+
+        vm.broadcast();
         cubes.transferOwnership(address(genesis));
 
         uint256[] memory sampleNormies = new uint256[](sampleMints);
         for (uint256 i = 0; i < sampleMints; i++) {
+            vm.broadcast();
             normies.mint(initialOwner, i);
             sampleNormies[i] = i;
         }
 
         if (sampleMints > 0) {
+            vm.broadcast();
             genesis.addSnapshotNormies(initialOwner, sampleNormies);
+
+            vm.broadcast();
             genesis.finalizeSnapshot();
+
+            vm.broadcast();
             genesis.setSeaDrop(seaDrop);
+
+            vm.broadcast();
             genesis.setPhase(NormieGenesisMinter.Phase.Public);
+
+            vm.broadcast();
             genesis.mintPublicFor(initialOwner, sampleMints);
         }
-
-        genesis.transferOwnership(initialOwner);
-
-        vm.stopBroadcast();
 
         console2.log("LocalMockNormies", address(normies));
         console2.log("CubeNFT", address(cubes));
