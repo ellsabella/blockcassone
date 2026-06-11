@@ -286,6 +286,16 @@ The production renderer target is raw WebGL, not Three.js. This preserves long-t
 
 Metadata should use `image` as the canonical static thumbnail field. `image_url` may be duplicated only as a compatibility alias. `animation_url` should contain the interactive self-contained HTML/WebGL cube viewer. The static image should be a deterministic default-view thumbnail of the cube, while `animation_url` should support orbit, zoom, and reset controls.
 
+Current renderer prototypes:
+
+- `viewer/onchain-token-prototype.html`: older standalone experiment for a
+  future compact non-Normie / tonal payload.
+- `viewer/onchain-normie-token-prototype.html`: genesis-focused standalone
+  renderer prototype for the real Normie path. It accepts a 200-byte packed
+  40x40 Normie bitmap, decodes it in browser JavaScript, and renders a raw
+  WebGL cube without depending on `api.normies.art` unless explicitly launched
+  with `?api` for dev comparison.
+
 ## Placement And Randomness
 
 Initial slot assignment should be onchain and collision-free. The final project direction also expects post-mint movement, so placement should be treated as mutable world state rather than only immutable mint data.
