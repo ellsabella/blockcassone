@@ -38,6 +38,9 @@ Optional environment variables:
 
 The viewer reads `data/chain-config.json` and proxies JSON-RPC through
 `/api/chain-rpc`, so browser CORS settings on Anvil do not matter.
+Local genesis deployments also write `normieStorage`, which lets
+`viewer/onchain-normie-token-prototype.html` read packed Normie image bytes
+from the local mock contract instead of the dev Normies API.
 
 For local Anvil testing, leave `BLOCKCASSONE_OWNER` unset unless you are also
 broadcasting from that same address. The setup calls are owner-gated. The

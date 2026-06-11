@@ -57,6 +57,10 @@
       rawImageData: ""
     };
 
+    const SELECTORS = {
+      cubeData: "0xd88ff669",
+      rawImageData: "0x6985bf3c"
+    };
     const GRID = 40;
     const PIXELS = GRID * GRID;
     const RAW_BYTES = PIXELS / 8;
@@ -126,7 +130,33 @@
         return;
       }
 
+      if (!QS.has("sample") && await loadFromContracts()) return;
+
       rawHex = sampleNormieRawHex(TOKEN.sourceTokenId);
+    }
+
+    async function loadFromContracts() {
+      const config = await fetch("/data/chain-config.json")
+        .then(res => res.ok ? res.json() : null)
+        .catch(() => null);
+      const cubeNft = cleanAddress(config && config.cubeNft);
+      if (!config || !config.enabled || !cubeNft) return false;
+
+      const cubeId = intParam("cube", TOKEN.tokenId);
+      const cubeHex = await ethCall(config, cubeNft, calldata(SELECTORS.cubeData, cubeId));
+      const rows = words(cubeHex);
+      if (rows.length < 11) throw new Error(`cubeData(${cubeId}) returned ${rows.length} words`);
+
+      TOKEN.tokenId = cubeId;
+      TOKEN.slot = numberWord(rows[0]);
+      TOKEN.sourceContract = addressWord(rows[8]);
+      TOKEN.sourceTokenId = numberWord(rows[9]);
+
+      const storage = cleanAddress(config.normieStorage) || cleanAddress(config.normies) || TOKEN.sourceContract;
+      const raw = await ethCall(config, storage, calldata(SELECTORS.rawImageData, TOKEN.sourceTokenId));
+      rawHex = decodeAbiBytes(raw);
+      sourceLabel = `contract read: cube ${cubeId} -> Normie #${TOKEN.sourceTokenId}`;
+      return true;
     }
 
     function start() {
@@ -271,6 +301,52 @@
       return out;
     }
 
+    async function ethCall(config, to, data) {
+      const res = await fetch(config.directRpc ? config.rpcUrl : "/api/chain-rpc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "eth_call",
+          params: [{ to, data }, "latest"]
+        })
+      });
+      if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+      return json.result || "0x";
+    }
+
+    function calldata(selector, value) {
+      return selector + BigInt(value).toString(16).padStart(64, "0");
+    }
+
+    function words(hex) {
+      const clean = normalizeHex(hex);
+      const out = [];
+      for (let i = 0; i + 64 <= clean.length; i += 64) out.push(clean.slice(i, i + 64));
+      return out;
+    }
+
+    function numberWord(word) {
+      return Number(BigInt("0x" + (word || "0")));
+    }
+
+    function addressWord(word) {
+      return "0x" + String(word || "").padStart(64, "0").slice(-40);
+    }
+
+    function decodeAbiBytes(hex) {
+      const row = words(hex);
+      if (row.length < 2) throw new Error("dynamic bytes response too short");
+      const offset = numberWord(row[0]);
+      const lengthWordIndex = offset / 32;
+      const length = numberWord(row[lengthWordIndex]);
+      const dataStart = (lengthWordIndex + 1) * 64;
+      return normalizeHex(hex).slice(dataStart, dataStart + length * 2);
+    }
+
     function packApiPixelsMsb(text) {
       if (text.length !== PIXELS) throw new Error(`expected ${PIXELS} API pixels, got ${text.length}`);
       const bytes = new Uint8Array(RAW_BYTES);
@@ -295,6 +371,11 @@
 
     function normalizeHex(value) {
       return String(value || "").trim().replace(/^0x/i, "").replace(/[^0-9a-f]/gi, "").toLowerCase();
+    }
+
+    function cleanAddress(value) {
+      const clean = String(value || "").trim().toLowerCase();
+      return /^0x[0-9a-f]{40}$/.test(clean) ? clean : "";
     }
 
     function get(pix, row, col) {
