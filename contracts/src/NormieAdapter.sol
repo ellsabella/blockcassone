@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import { NormieAddresses } from "./NormieAddresses.sol";
+import { NormieBitmap } from "./NormieBitmap.sol";
 import { INormiesCore } from "./interfaces/INormiesCore.sol";
 import { INormiesStorage } from "./interfaces/INormiesStorage.sol";
 
@@ -99,6 +100,16 @@ contract NormieAdapter {
         bytes memory data =
             INormiesStorage(_contracts.storageContract).getTokenRawImageData(tokenId);
         return keccak256(data);
+    }
+
+    function rawImagePixel(uint256 tokenId, uint256 row, uint256 col)
+        external
+        view
+        returns (bool)
+    {
+        bytes memory data =
+            INormiesStorage(_contracts.storageContract).getTokenRawImageData(tokenId);
+        return NormieBitmap.pixelAt(data, row, col);
     }
 
     function traitsHash(uint256 tokenId) external view returns (bytes32) {

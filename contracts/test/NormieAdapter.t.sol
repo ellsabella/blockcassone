@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import { Test } from "forge-std/Test.sol";
 import { NormieAdapter } from "../src/NormieAdapter.sol";
 import { MainnetNormieAdapter } from "../src/MainnetNormieAdapter.sol";
+import { NormieBitmap } from "../src/NormieBitmap.sol";
 import { NormieAddresses } from "../src/NormieAddresses.sol";
 
 contract MockNormiesCore {
@@ -202,6 +203,17 @@ contract NormieAdapterTest is Test {
         assertEq(data.rawImageDataHash, bytes32(0));
         assertEq(data.traits, bytes8(0));
         assertEq(data.traitsHash, bytes32(0));
+    }
+
+    function testRawImagePixelReadsPackedNormieBitmap() public {
+        bytes memory rawImageData = new bytes(NormieBitmap.RAW_IMAGE_BYTES);
+        uint256 index = 12 * NormieBitmap.GRID_SIZE + 31;
+        rawImageData[index / 8] = bytes1(uint8(1) << uint8(7 - (index % 8)));
+
+        storageContract.setTokenData(99, rawImageData, bytes8(0));
+
+        assertTrue(adapter.rawImagePixel(99, 12, 31));
+        assertFalse(adapter.rawImagePixel(99, 12, 30));
     }
 
     function testConstructorRejectsMissingNormiesContract() public {

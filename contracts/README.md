@@ -49,6 +49,12 @@ Likely production mint contracts:
   owner, reveal/storage flags, raw image data, trait bytes, and renderer-friendly
   hashes so the final token renderer can depend on contract reads rather than
   the dev API.
+- Live Normie inspection currently shows `rawImageDataLength == 200`, matching
+  a packed 40x40 one-bit bitmap (`1600` pixels). `NormieBitmap` provides the
+  contract-side row/column helper for that payload.
+- Some Normie IDs may have storage data while `ownerOf` reverts, so mint
+  eligibility must continue to come from the holder snapshot / claimed-source
+  registry rather than from `isTokenDataSet` alone.
 - The exact Normie pixel-decoding path should be confirmed against mainnet bytes
   with `contracts/script/InspectNormieData.s.sol` before it is frozen into the
   final token HTML.
