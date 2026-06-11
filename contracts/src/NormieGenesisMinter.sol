@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {MerkleProof} from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
-import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
-import {CubeNFT} from "./CubeNFT.sol";
+import { MerkleProof } from "openzeppelin-contracts/contracts/utils/cryptography/MerkleProof.sol";
+import { Ownable } from "openzeppelin-contracts/contracts/access/Ownable.sol";
+import { CubeNFT } from "./CubeNFT.sol";
 
 contract NormieGenesisMinter is Ownable {
     uint32 public constant DEFAULT_TOTAL_SLOTS = 4096;
@@ -20,6 +20,7 @@ contract NormieGenesisMinter is Ownable {
     error InvalidSeaDrop(address seaDrop);
     error InvalidSnapshotProof(address wallet);
     error InvalidSlot(uint32 slot);
+    error InsufficientAllowlistNormies(address minter, uint256 requested, uint256 available);
     error MintClosed();
     error NoAllowlistNormies(address minter);
     error NoPublicNormies();
@@ -215,6 +216,9 @@ contract NormieGenesisMinter is Ownable {
         uint256 mintedNow = 0;
         uint256[] storage rows = _walletNormies[minter];
         uint256 cursor = walletCursor[minter];
+        uint256 available = _remainingUnclaimed(rows, cursor);
+        if (available == 0) revert NoAllowlistNormies(minter);
+        if (available < quantity) revert InsufficientAllowlistNormies(minter, quantity, available);
 
         while (mintedNow < quantity && cursor < rows.length) {
             uint256 normieId = rows[cursor++];
@@ -223,8 +227,7 @@ contract NormieGenesisMinter is Ownable {
         }
 
         walletCursor[minter] = cursor;
-        if (mintedNow == 0) revert NoAllowlistNormies(minter);
-        return _trim(cubeIds, mintedNow);
+        return cubeIds;
     }
 
     function _mintSelectedAllowlist(address minter, uint256 quantity)
@@ -237,6 +240,9 @@ contract NormieGenesisMinter is Ownable {
         uint256 mintedNow = 0;
         uint256[] storage rows = _selectedNormies[minter];
         uint256 cursor = selectionCursor[minter];
+        uint256 available = _remainingUnclaimed(rows, cursor);
+        if (available == 0) revert NoAllowlistNormies(minter);
+        if (available < quantity) revert InsufficientAllowlistNormies(minter, quantity, available);
 
         while (mintedNow < quantity && cursor < rows.length) {
             uint256 normieId = rows[cursor++];
@@ -245,7 +251,6 @@ contract NormieGenesisMinter is Ownable {
         }
 
         selectionCursor[minter] = cursor;
-        if (mintedNow != quantity) revert NoAllowlistNormies(minter);
     }
 
     function _mintPublic(address minter, uint256 quantity)
@@ -257,13 +262,11 @@ contract NormieGenesisMinter is Ownable {
         cubeIds = new uint256[](quantity);
         uint256 mintedNow = 0;
         while (mintedNow < quantity && _publicNormies.length > 0 && mintedCount < totalSlots) {
-            uint256 index = uint256(keccak256(abi.encode(
-                publicSeed,
-                minter,
-                mintedCount,
-                mintedNow,
-                _publicNormies.length
-            ))) % _publicNormies.length;
+            uint256 index = uint256(
+                keccak256(
+                    abi.encode(publicSeed, minter, mintedCount, mintedNow, _publicNormies.length)
+                )
+            ) % _publicNormies.length;
             uint256 normieId = _publicNormies[index];
             cubeIds[mintedNow++] = _consumeAndMint(minter, normieId, Phase.Public);
         }
@@ -278,7 +281,7 @@ contract NormieGenesisMinter is Ownable {
         if (mintedCount >= totalSlots) revert MintClosed();
     }
 
-    function _consumeAndMint(address minter, uint256 normieId, Phase phase)
+    function _consumeAndMint(address minter, uint256 normieId, Phase mintPhase)
         private
         returns (uint256 cubeId)
     {
@@ -287,11 +290,11 @@ contract NormieGenesisMinter is Ownable {
 
         uint32 slot = uint32(mintedCount);
         if (slot >= totalSlots) revert InvalidSlot(slot);
-        bytes32 seed = keccak256(abi.encode(publicSeed, minter, normieId, slot, phase));
+        bytes32 seed = keccak256(abi.encode(publicSeed, minter, normieId, slot, mintPhase));
         mintedCount++;
 
         cubeId = cubes.mintSnapshotNormieCubeFor(minter, normieId, slot, seed);
-        emit GenesisCubeMinted(cubeId, minter, normieId, slot, phase);
+        emit GenesisCubeMinted(cubeId, minter, normieId, slot, mintPhase);
     }
 
     function _removeFromPublicPool(uint256 normieId) private {
@@ -333,6 +336,16 @@ contract NormieGenesisMinter is Ownable {
         return false;
     }
 
+    function _remainingUnclaimed(uint256[] storage values, uint256 cursor)
+        private
+        view
+        returns (uint256 remaining)
+    {
+        for (uint256 i = cursor; i < values.length; i++) {
+            if (!normieClaimed[values[i]]) remaining++;
+        }
+    }
+
     function _trim(uint256[] memory values, uint256 len)
         private
         pure
@@ -340,6 +353,8 @@ contract NormieGenesisMinter is Ownable {
     {
         if (values.length == len) return values;
         trimmed = new uint256[](len);
-        for (uint256 i = 0; i < len; i++) trimmed[i] = values[i];
+        for (uint256 i = 0; i < len; i++) {
+            trimmed[i] = values[i];
+        }
     }
 }
