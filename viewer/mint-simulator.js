@@ -202,23 +202,39 @@ function normieSourceFromId(id) {
   };
 }
 
+function hashText(value) {
+  const text = String(value || '');
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function rankedNormieSources(ids, seedText) {
+  const seed = hashText(seedText);
+  return ids
+    .filter(id => Number.isInteger(id) && !mintedNormieIds.has(id))
+    .map(id => ({
+      id,
+      rank: hash1(seed, id, mintedNormieIds.size),
+    }))
+    .sort((a, b) => a.rank - b.rank || a.id - b.id)
+    .map(row => normieSourceFromId(row.id));
+}
+
 async function allowlistNormieSources(wallet) {
   const snapshotIds = await snapshotNormieIdsForWallet(wallet.address);
   const ids = snapshotIds.length || snapshotHasEntries()
     ? snapshotIds
     : wallet.normies.map(nft => nft.normieId);
-  return ids
-    .filter(id => Number.isInteger(id) && !mintedNormieIds.has(id))
-    .sort((a, b) => a - b)
-    .map(normieSourceFromId);
+  return rankedNormieSources(ids, `allowlist:${wallet.address || ''}`);
 }
 
 async function publicNormieSources() {
   const snapshotIds = await snapshotAllNormieIds();
-  return snapshotIds
-    .filter(id => Number.isInteger(id) && !mintedNormieIds.has(id))
-    .sort((a, b) => a - b)
-    .map(normieSourceFromId);
+  return rankedNormieSources(snapshotIds, 'public:normies');
 }
 
 async function compactArtForMint(nft) {
@@ -271,6 +287,14 @@ export async function simulateMintBatch(count, allSlots, options = {}) {
   const availableSources = phase === 'public'
     ? await publicNormieSources()
     : await allowlistNormieSources(wallet);
+
+  if (phase === 'allowlist' && requested > availableSources.length) {
+    const noun = availableSources.length === 1 ? 'cube' : 'cubes';
+    throw new Error(
+      `Allowlist mint limit is ${availableSources.length} remaining Normie ${noun} for this wallet`
+    );
+  }
+
   const sources = availableSources.slice(0, requested);
 
   const records = [];
