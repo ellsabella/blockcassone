@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {NormieAddresses} from "./NormieAddresses.sol";
-import {INormiesCore} from "./interfaces/INormiesCore.sol";
-import {INormiesStorage} from "./interfaces/INormiesStorage.sol";
+import { NormieAddresses } from "./NormieAddresses.sol";
+import { INormiesCore } from "./interfaces/INormiesCore.sol";
+import { INormiesStorage } from "./interfaces/INormiesStorage.sol";
 
 contract NormieAdapter {
     struct NormieContracts {
@@ -26,6 +26,17 @@ contract NormieAdapter {
         address owner;
         bytes rawImageData;
         bytes8 traits;
+    }
+
+    struct RenderData {
+        bool exists;
+        bool storageDataSet;
+        bool revealed;
+        address owner;
+        uint256 rawImageDataLength;
+        bytes32 rawImageDataHash;
+        bytes8 traits;
+        bytes32 traitsHash;
     }
 
     error InvalidNormiesContract();
@@ -84,6 +95,18 @@ contract NormieAdapter {
         return INormiesStorage(_contracts.storageContract).getTokenTraits(tokenId);
     }
 
+    function rawImageDataHash(uint256 tokenId) external view returns (bytes32) {
+        bytes memory data =
+            INormiesStorage(_contracts.storageContract).getTokenRawImageData(tokenId);
+        return keccak256(data);
+    }
+
+    function traitsHash(uint256 tokenId) external view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(INormiesStorage(_contracts.storageContract).getTokenTraits(tokenId))
+        );
+    }
+
     function normieData(uint256 tokenId) external view returns (NormieData memory data) {
         data.revealed = INormiesStorage(_contracts.storageContract).isRevealed();
         data.storageDataSet = INormiesStorage(_contracts.storageContract).isTokenDataSet(tokenId);
@@ -97,10 +120,31 @@ contract NormieAdapter {
         }
 
         if (data.storageDataSet) {
-            data.rawImageData = INormiesStorage(_contracts.storageContract).getTokenRawImageData(
-                tokenId
-            );
+            data.rawImageData =
+                INormiesStorage(_contracts.storageContract).getTokenRawImageData(tokenId);
             data.traits = INormiesStorage(_contracts.storageContract).getTokenTraits(tokenId);
+        }
+    }
+
+    function renderData(uint256 tokenId) external view returns (RenderData memory data) {
+        data.revealed = INormiesStorage(_contracts.storageContract).isRevealed();
+        data.storageDataSet = INormiesStorage(_contracts.storageContract).isTokenDataSet(tokenId);
+
+        try INormiesCore(_contracts.normies).ownerOf(tokenId) returns (address owner) {
+            data.exists = true;
+            data.owner = owner;
+        } catch {
+            data.exists = false;
+            data.owner = address(0);
+        }
+
+        if (data.storageDataSet) {
+            bytes memory raw =
+                INormiesStorage(_contracts.storageContract).getTokenRawImageData(tokenId);
+            data.rawImageDataLength = raw.length;
+            data.rawImageDataHash = keccak256(raw);
+            data.traits = INormiesStorage(_contracts.storageContract).getTokenTraits(tokenId);
+            data.traitsHash = keccak256(abi.encodePacked(data.traits));
         }
     }
 

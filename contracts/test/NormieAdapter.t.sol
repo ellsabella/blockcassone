@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {Test} from "forge-std/Test.sol";
-import {NormieAdapter} from "../src/NormieAdapter.sol";
-import {MainnetNormieAdapter} from "../src/MainnetNormieAdapter.sol";
-import {NormieAddresses} from "../src/NormieAddresses.sol";
+import { Test } from "forge-std/Test.sol";
+import { NormieAdapter } from "../src/NormieAdapter.sol";
+import { MainnetNormieAdapter } from "../src/MainnetNormieAdapter.sol";
+import { NormieAddresses } from "../src/NormieAddresses.sol";
 
 contract MockNormiesCore {
     address public storageContract;
@@ -167,6 +167,41 @@ contract NormieAdapterTest is Test {
         assertEq(data.owner, OWNER);
         assertEq(data.rawImageData.length, 0);
         assertEq(data.traits, bytes8(0));
+    }
+
+    function testRenderDataExposesRendererFriendlySummary() public {
+        bytes memory rawImageData = hex"010203040506";
+        bytes8 traits = bytes8(hex"0102030405060708");
+
+        normies.setOwner(77, OWNER);
+        storageContract.setRevealed(true);
+        storageContract.setTokenData(77, rawImageData, traits);
+
+        NormieAdapter.RenderData memory data = adapter.renderData(77);
+        assertTrue(data.exists);
+        assertTrue(data.storageDataSet);
+        assertTrue(data.revealed);
+        assertEq(data.owner, OWNER);
+        assertEq(data.rawImageDataLength, rawImageData.length);
+        assertEq(data.rawImageDataHash, keccak256(rawImageData));
+        assertEq(data.traits, traits);
+        assertEq(data.traitsHash, keccak256(abi.encodePacked(traits)));
+
+        assertEq(adapter.rawImageDataHash(77), keccak256(rawImageData));
+        assertEq(adapter.traitsHash(77), keccak256(abi.encodePacked(traits)));
+    }
+
+    function testRenderDataSkipsStorageReadsWhenStorageMissing() public {
+        normies.setOwner(88, OWNER);
+
+        NormieAdapter.RenderData memory data = adapter.renderData(88);
+        assertTrue(data.exists);
+        assertFalse(data.storageDataSet);
+        assertEq(data.owner, OWNER);
+        assertEq(data.rawImageDataLength, 0);
+        assertEq(data.rawImageDataHash, bytes32(0));
+        assertEq(data.traits, bytes8(0));
+        assertEq(data.traitsHash, bytes32(0));
     }
 
     function testConstructorRejectsMissingNormiesContract() public {

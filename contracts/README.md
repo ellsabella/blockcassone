@@ -44,6 +44,14 @@ Likely production mint contracts:
   and consolidation.
 - Future update contracts may add an approved CC0/owned-art payload registry,
   but that is not a genesis mint dependency.
+- `NormieAdapter` / `MainnetNormieAdapter` are the onchain boundary for reading
+  Normie source data directly from the canonical contracts. The adapter exposes
+  owner, reveal/storage flags, raw image data, trait bytes, and renderer-friendly
+  hashes so the final token renderer can depend on contract reads rather than
+  the dev API.
+- The exact Normie pixel-decoding path should be confirmed against mainnet bytes
+  with `contracts/script/InspectNormieData.s.sol` before it is frozen into the
+  final token HTML.
 
 Indexer / UI boundary:
 

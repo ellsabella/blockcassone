@@ -43,3 +43,18 @@ For local Anvil testing, leave `BLOCKCASSONE_OWNER` unset unless you are also
 broadcasting from that same address. The setup calls are owner-gated. The
 sender/private key above are Anvil's first default account; do not use them
 outside local development.
+
+## Mainnet Normie Data Inspection
+
+Before locking the final onchain renderer around Normie storage bytes, inspect
+the live contracts through a mainnet fork/RPC:
+
+```bash
+forge script contracts/script/InspectNormieData.s.sol:InspectNormieData \
+  --fork-url "$ETH_RPC_URL"
+```
+
+This prints renderer-facing facts from `MainnetNormieAdapter`: token existence,
+owner, storage/reveal status, raw image byte length/hash, and trait bytes/hash.
+Use this to confirm the Solidity reads match the dev pipeline before porting any
+Normie pixel decoding into the final HTML renderer.
