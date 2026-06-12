@@ -11,7 +11,7 @@ import {
   fetchNormieBurnedInfo,
   fetchAgentBinding,
 } from '../normies-api.js';
-import { isAssignedNormieCube, normieIdFromAssignedNft, walletInventoryLoaded } from '../wallet-nfts.js';
+import { isAssignedNormieCube, normieIdFromAssignedNft } from '../wallet-nfts.js';
 import { inflateNormieArt } from '../art-snapshot.js';
 
 // ---------------------------------------------------------------------------
@@ -182,7 +182,8 @@ export function getPlanePixelArray(plane, allPlanes = allPlanes_) {
 // Internal: resolve normie ID for a motif without importing from status.js
 // (avoids circular dep — status.js imports from us).
 function normieIdForCube_internal(motifIdx, planes) {
-  if (walletInventoryLoaded()) return normieIdFromAssignedNft(motifIdx);
+  const assignedId = normieIdFromAssignedNft(motifIdx);
+  if (assignedId !== null && assignedId !== undefined) return assignedId;
   // Inline the hash check to avoid importing isNormieCube.
   let h = Math.imul((motifIdx + 1) >>> 0, 0x9e3779b1) >>> 0;
   h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0; h ^= h >>> 13;

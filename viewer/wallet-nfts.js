@@ -398,12 +398,11 @@ export function walletInventoryLoaded() {
 }
 
 export function getWalletAssignmentForCube(motifIdx) {
-  if (!walletInventoryLoaded()) return null;
   if (window.__PIPELINE_MINT_SOURCE_FOR_SLOT__) {
     const mintedSource = window.__PIPELINE_MINT_SOURCE_FOR_SLOT__(motifIdx);
-    if (!mintedSource) return null;
-    return mintedSource;
+    if (mintedSource) return mintedSource;
   }
+  if (!walletInventoryLoaded()) return null;
   const idx = Math.abs(Number(motifIdx) || 0) % walletState.nfts.length;
   const nft = walletState.nfts[idx];
   const logKey = `${motifIdx}:${nftKey(nft)}`;

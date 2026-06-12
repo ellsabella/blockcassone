@@ -18,7 +18,14 @@ For local viewer testing, run Anvil in WSL:
 anvil
 ```
 
-Then deploy a sample genesis world and write `data/chain-config.json`:
+Then deploy a sample genesis world and write `data/chain-config.json`.
+The local script deploys:
+
+- `LocalMockNormies`
+- `CubeNFT`
+- `RendererAssetStore`
+- `CubeRendererV2`
+- `NormieGenesisMinter`
 
 ```bash
 forge script contracts/script/DeployLocalGenesis.s.sol:DeployLocalGenesis \
@@ -38,14 +45,22 @@ Optional environment variables:
 
 The viewer reads `data/chain-config.json` and proxies JSON-RPC through
 `/api/chain-rpc`, so browser CORS settings on Anvil do not matter.
-Local genesis deployments also write `normieStorage`, which lets
-`viewer/onchain-normie-token-prototype.html` read packed Normie image bytes
-from the local mock contract instead of the dev Normies API.
+Local genesis deployments also write `renderer`, `rendererAssetStore`, and
+`normieStorage`. The viewer can hydrate minted cube art from the local mock
+storage contract, and `CubeRendererV2.tokenURI` embeds packed Normie image bytes
+directly into the token HTML without calling the dev Normies API.
 
 For local Anvil testing, leave `BLOCKCASSONE_OWNER` unset unless you are also
 broadcasting from that same address. The setup calls are owner-gated. The
 sender/private key above are Anvil's first default account; do not use them
 outside local development.
+
+Quick tokenURI smoke test after deployment:
+
+```bash
+cast call "$CUBE_NFT" "tokenURI(uint256)(string)" 1 \
+  --rpc-url http://127.0.0.1:8545
+```
 
 ## Mainnet Normie Data Inspection
 

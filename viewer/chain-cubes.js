@@ -1,10 +1,15 @@
 import { NORMIES_CONTRACT } from './wallet-nfts.js';
+import { compactNormieArt } from './art-snapshot.js';
 
 const SELECTORS = {
   nextCubeId: '0xfee34352',
   cubeData: '0xd88ff669',
   ownerOf: '0x6352211e',
+  rawImageData: '0x6985bf3c',
 };
+
+const NORMIE_PIXEL_COUNT = 1600;
+const NORMIE_RAW_BYTES = NORMIE_PIXEL_COUNT / 8;
 
 let configCache = null;
 
@@ -41,6 +46,44 @@ function bytes32Word(word) {
   return `0x${String(word || '').padStart(64, '0')}`;
 }
 
+function decodeAbiBytes(hex) {
+  const row = words(hex);
+  if (row.length < 2) return new Uint8Array();
+  const offset = numberWord(row[0]);
+  const lengthWordIndex = Math.floor(offset / 32);
+  const length = numberWord(row[lengthWordIndex]);
+  const dataStart = lengthWordIndex + 1;
+  const clean = row.slice(dataStart).join('').slice(0, length * 2);
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2) || '00', 16);
+  }
+  return out;
+}
+
+function rawNormieBytesToPixels(raw) {
+  if (!raw || raw.length !== NORMIE_RAW_BYTES) return null;
+  const pixels = new Uint8Array(NORMIE_PIXEL_COUNT);
+  for (let i = 0; i < NORMIE_PIXEL_COUNT; i++) {
+    pixels[i] = (raw[i >> 3] >> (7 - (i & 7))) & 1;
+  }
+  return pixels;
+}
+
+function compactNormieArtFromRaw(id, raw, record) {
+  const current = rawNormieBytesToPixels(raw);
+  if (!current) return null;
+  return compactNormieArt({
+    id,
+    current,
+    original: current,
+    canvas: new Uint8Array(NORMIE_PIXEL_COUNT),
+    traits: null,
+    agentic: Boolean(record?.agentic),
+    agentId: record?.agentId || '',
+  });
+}
+
 async function loadChainConfig() {
   if (configCache) return configCache;
   configCache = fetch('/data/chain-config.json')
@@ -54,6 +97,7 @@ async function loadChainConfig() {
         cubeNft,
         genesisMinter: normalizeAddress(raw?.genesisMinter),
         normies: normalizeAddress(raw?.normies) || NORMIES_CONTRACT,
+        normieStorage: normalizeAddress(raw?.normieStorage) || normalizeAddress(raw?.normies) || NORMIES_CONTRACT,
         maxCubes: Math.max(1, Math.min(4096, Number(raw?.maxCubes || 4096))),
         directRpc: Boolean(raw?.directRpc),
       };
@@ -155,10 +199,34 @@ export async function loadChainMintRecords() {
       batchCall(config, ownerCalls),
     ]);
 
+    const recordStart = records.length;
     for (let i = 0; i < chunk.length; i++) {
       const owner = addressWord(words(ownerRows[i])[0]);
       const record = recordFromChain(config, chunk[i], owner, dataRows[i]);
       if (record) records.push(record);
+    }
+
+    const chunkRecords = records.slice(recordStart);
+    const normieRecords = chunkRecords.filter(record =>
+      record.sourceKind === 'normie' && Number.isInteger(Number(record.source.tokenId))
+    );
+
+    if (normieRecords.length) {
+      const rawCalls = normieRecords.map(record => ({
+        to: config.normieStorage,
+        data: calldata(SELECTORS.rawImageData, record.source.tokenId),
+      }));
+
+      try {
+        const rawRows = await batchCall(config, rawCalls);
+        for (let i = 0; i < normieRecords.length; i++) {
+          const id = Number(normieRecords[i].source.tokenId);
+          const raw = decodeAbiBytes(rawRows[i]);
+          normieRecords[i].art = compactNormieArtFromRaw(id, raw, normieRecords[i]);
+        }
+      } catch (err) {
+        console.warn('[chain-cubes] Normie raw art hydration failed; falling back to API fetches', err);
+      }
     }
   }
 

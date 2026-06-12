@@ -1,6 +1,6 @@
 // Normie identity — cube-to-normie-ID mapping and normie/non-normie classification.
 
-import { isAssignedNormieCube, normieIdFromAssignedNft, walletInventoryLoaded } from '../wallet-nfts.js';
+import { isAssignedNormieCube, normieIdFromAssignedNft } from '../wallet-nfts.js';
 import { getAllPlanes } from './api.js';
 
 export function isNormieCube(motifIdx) {
@@ -22,7 +22,8 @@ function normieIdForPlane(plane) {
 }
 
 export function normieIdForCube(motifIdx) {
-  if (walletInventoryLoaded()) return normieIdFromAssignedNft(motifIdx);
+  const assignedId = normieIdFromAssignedNft(motifIdx);
+  if (assignedId !== null && assignedId !== undefined) return assignedId;
   if (!isNormieCube(motifIdx)) return null;
   const allPlanes = getAllPlanes();
   if (!allPlanes) return 0;

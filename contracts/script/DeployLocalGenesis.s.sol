@@ -3,8 +3,9 @@ pragma solidity ^0.8.26;
 
 import { Script, console2 } from "forge-std/Script.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
-import { CubeRendererV1 } from "../src/CubeRendererV1.sol";
+import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
+import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
 contract LocalMockNormies {
     mapping(uint256 tokenId => address owner) public ownerOf;
@@ -78,7 +79,10 @@ contract DeployLocalGenesis is Script {
             new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), totalSlots, initialOwner);
 
         vm.broadcast();
-        CubeRendererV1 renderer = new CubeRendererV1(cubes);
+        RendererAssetStore assetStore = new RendererAssetStore(initialOwner);
+
+        vm.broadcast();
+        CubeRendererV2 renderer = new CubeRendererV2(cubes, assetStore, address(normies));
 
         vm.broadcast();
         NormieGenesisMinter genesis = new NormieGenesisMinter(cubes, publicSeed, initialOwner);
@@ -115,7 +119,8 @@ contract DeployLocalGenesis is Script {
 
         console2.log("LocalMockNormies", address(normies));
         console2.log("CubeNFT", address(cubes));
-        console2.log("CubeRendererV1", address(renderer));
+        console2.log("RendererAssetStore", address(assetStore));
+        console2.log("CubeRendererV2", address(renderer));
         console2.log("NormieGenesisMinter", address(genesis));
         console2.log("SeaDrop", seaDrop);
         console2.log("Sample mints", sampleMints);
@@ -125,6 +130,8 @@ contract DeployLocalGenesis is Script {
             block.chainid,
             address(cubes),
             address(genesis),
+            address(renderer),
+            address(assetStore),
             address(normies),
             address(normies)
         );
@@ -135,6 +142,8 @@ contract DeployLocalGenesis is Script {
         uint256 chainId,
         address cubes,
         address genesis,
+        address renderer,
+        address assetStore,
         address normies,
         address normieStorage
     ) private {
@@ -144,6 +153,8 @@ contract DeployLocalGenesis is Script {
         vm.serializeString(root, "rpcUrl", "http://127.0.0.1:8545");
         vm.serializeAddress(root, "cubeNft", cubes);
         vm.serializeAddress(root, "genesisMinter", genesis);
+        vm.serializeAddress(root, "renderer", renderer);
+        vm.serializeAddress(root, "rendererAssetStore", assetStore);
         vm.serializeAddress(root, "normies", normies);
         string memory json = vm.serializeAddress(root, "normieStorage", normieStorage);
         vm.writeJson(json, outPath);
