@@ -62,6 +62,23 @@ cast call "$CUBE_NFT" "tokenURI(uint256)(string)" 1 \
   --rpc-url http://127.0.0.1:8545
 ```
 
+To export the exact buyer-facing `animation_url` HTML from `tokenURI` into a
+temporary preview folder:
+
+```bash
+npm run export:token-html -- --token-id=1
+```
+
+By default this reads `data/chain-config.json`, calls `CubeNFT.tokenURI(1)`,
+and writes:
+
+- `cube-1.html`: decoded `animation_url` HTML
+- `cube-1.metadata.json`: decoded metadata JSON
+- `cube-1.image.svg`: decoded static `image`
+
+The script also scans the HTML for obvious offchain dependencies such as
+`fetch()`, `/api/normies`, `api.normies.art`, and remote `http(s)` URLs.
+
 ## Mainnet Normie Data Inspection
 
 Before locking the final onchain renderer around Normie storage bytes, inspect
