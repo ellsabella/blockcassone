@@ -1,9 +1,11 @@
 {
-  "enabled": false,
-  "chainId": 31337,
-  "rpcUrl": "http://127.0.0.1:8545",
-  "cubeNft": "",
-  "genesisMinter": "",
-  "normies": "",
-  "maxCubes": 4096
+  "chainId": 1,
+  "cubeNft": "0xd36EE95255233E25Bb615Fc1917d6E7ACF1Dc99D",
+  "enabled": true,
+  "genesisMinter": "0xEb74f01591173b3D68b656dFD28E32246C39ea38",
+  "normieStorage": "0x1B976bAf51cF51F0e369C070d47FBc47A706e602",
+  "normies": "0x9Eb6E2025B64f340691e424b7fe7022fFDE12438",
+  "renderer": "0xD7c8423296a6E2Dd36466AC0e41884846a27cdE9",
+  "rendererAssetStore": "0x281Bc70c9Df4a277E00de788E66E1574aB0E687E",
+  "rpcUrl": "http://127.0.0.1:8545"
 }

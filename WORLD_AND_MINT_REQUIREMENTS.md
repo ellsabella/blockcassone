@@ -149,6 +149,12 @@ Traits already required:
 - `Source Contract`.
 - `Source Token ID`.
 
+`Agentic` and `Agent ID` are dynamic source-derived traits. They are captured at
+mint but may change if the source Normie later receives an agent binding. The
+token renderer must read the current onchain agent-status registry when
+available, falling back to the mint-time snapshot only when no current status
+has been set.
+
 New dynamic or world-derived traits under consideration:
 
 - `Environment`
@@ -260,11 +266,25 @@ performance and ergonomics:
 - population and agent counts
 - consolidation eligibility
 - cross-chain source/provenance summaries
+- post-mint Normie agent-binding checks
 
 The UI should be designed so indexer data can be rebuilt from contract state and
 events. Direct contract reads should remain possible for correctness checks and
 small views, but the full city-scale experience may rely on indexed reads for
 speed.
+
+For agentic status specifically, the indexer should watch the upstream
+Normie/OpenSea/agent-binding source and submit updates to an onchain
+agent-status registry. Once the update transaction is mined, token metadata and
+the token HTML renderer read the new state from contracts. The indexer can help
+discover the change, but it must not be a runtime dependency of the token.
+
+The Current Block tab should expose agent-status freshness so we can see:
+
+- mint-time agent status
+- current onchain agent status
+- last registry update block or timestamp
+- any detected offchain change waiting to be written onchain
 
 ## Dev Pipeline Priorities
 

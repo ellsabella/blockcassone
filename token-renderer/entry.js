@@ -17,6 +17,7 @@ import {
 } from '../renderer/src/math.js';
 import { loadMaterialFromSource } from '../renderer/src/materials.js';
 import { buildCubeDetailScene } from '../viewer/detail-scene-builder.js';
+import { buildEdgePointDebug } from '../viewer/materials/debug-edge-points.js';
 import { setCubeAssignmentResolver } from '../viewer/assignment.js';
 import { hydrateNormieRawBytes, initNormiesManager } from '../viewer/normies-manager.js';
 import { grayscaleColor } from '../viewer/scene/styling.js';
@@ -363,8 +364,18 @@ async function main() {
     gl,
     meshes,
     cubeCtx: { motifIdx, focused: true },
-    showCubeGlass: true,
-    showEdgePoints: false,
+    showCubeGlass: false,
+    showEdgePoints: true,
+    showStoneWalker: true,
+    showVoxels: true,
+    showHilbertLines: true,
+    showCardioid: true,
+    showForest: true,
+    showNormieOutline: true,
+    showNormieIdLabel: true,
+    showNormieTraitsBanner: true,
+    showPlaneOutline: false,
+    buildEdgePointDebug,
     isAgenticNonNormieCube: () => false,
     categoryForMotif: () => TOKEN.agentic ? 3 : 1,
   });

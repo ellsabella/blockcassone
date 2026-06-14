@@ -6,6 +6,13 @@ import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import {IERC721} from "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import {ICubeRenderer} from "./interfaces/ICubeRenderer.sol";
 
+interface IAgentStatusRegistry {
+    function currentAgentBinding(address sourceContract, uint256 sourceTokenId)
+        external
+        view
+        returns (bool hasBinding, bool agentic, uint256 agentId, uint64 updatedAt);
+}
+
 contract CubeNFT is ERC721, Ownable {
     uint8 public constant SOURCE_KIND_NORMIE = 1;
     uint8 public constant SOURCE_KIND_EXTERNAL_ERC721 = 2;
@@ -61,12 +68,14 @@ contract CubeNFT is ERC721, Ownable {
         bytes32 seed
     );
     event RendererUpdated(address indexed oldRenderer, address indexed newRenderer);
+    event AgentStatusRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
 
     address public immutable normieContract;
     uint32 public immutable totalSlots;
     address public renderer;
 
     uint256 private _nextCubeId = 1;
+    address public agentStatusRegistry;
 
     mapping(uint256 cubeId => CubeData data) private _cubeData;
     mapping(uint32 slot => uint256 cubeId) public cubeForSlot;
@@ -173,6 +182,32 @@ contract CubeNFT is ERC721, Ownable {
             0,
             false,
             0
+        ));
+        cubeForNormieId[normieId] = cubeId;
+    }
+
+    function mintSnapshotNormieCubeForWithAgent(
+        address minter,
+        uint256 normieId,
+        uint32 slot,
+        bytes32 seed,
+        uint256 agentId
+    ) external onlyOwner returns (uint256 cubeId) {
+        uint256 existingCubeId = cubeForNormieId[normieId];
+        if (existingCubeId != 0) revert NormieAlreadyCubed(normieId, existingCubeId);
+
+        bytes32 key = sourceKey(block.chainid, normieContract, normieId);
+        cubeId = _mintCube(_mintParams(
+            minter,
+            slot,
+            SOURCE_KIND_NORMIE,
+            normieContract,
+            normieId,
+            key,
+            seed,
+            0,
+            true,
+            agentId
         ));
         cubeForNormieId[normieId] = cubeId;
     }
@@ -291,10 +326,27 @@ contract CubeNFT is ERC721, Ownable {
         return _cubeData[cubeId];
     }
 
+    function resolvedCubeData(uint256 cubeId) external view returns (CubeData memory data) {
+        if (_ownerOf(cubeId) == address(0)) revert NonexistentCube(cubeId);
+        data = _cubeData[cubeId];
+        (bool hasBinding, bool agentic, uint256 agentId,) =
+            _currentAgentBinding(data.sourceContract, data.sourceTokenId);
+        if (hasBinding) {
+            data.agentic = agentic;
+            data.agentId = agentId;
+        }
+    }
+
     function setRenderer(address newRenderer) external onlyOwner {
         address oldRenderer = renderer;
         renderer = newRenderer;
         emit RendererUpdated(oldRenderer, newRenderer);
+    }
+
+    function setAgentStatusRegistry(address newRegistry) external onlyOwner {
+        address oldRegistry = agentStatusRegistry;
+        agentStatusRegistry = newRegistry;
+        emit AgentStatusRegistryUpdated(oldRegistry, newRegistry);
     }
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
@@ -395,5 +447,15 @@ contract CubeNFT is ERC721, Ownable {
         if (actualOwner != expectedOwner) {
             revert NotSourceOwner(sourceContract, sourceTokenId, expectedOwner);
         }
+    }
+
+    function _currentAgentBinding(address sourceContract, uint256 sourceTokenId)
+        private
+        view
+        returns (bool hasBinding, bool agentic, uint256 agentId, uint64 updatedAt)
+    {
+        address registry = agentStatusRegistry;
+        if (registry == address(0)) return (false, false, 0, 0);
+        return IAgentStatusRegistry(registry).currentAgentBinding(sourceContract, sourceTokenId);
     }
 }

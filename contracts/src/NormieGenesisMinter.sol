@@ -17,6 +17,7 @@ contract NormieGenesisMinter is Ownable {
     error EmptySnapshot();
     error DuplicateNormie(uint256 normieId);
     error InvalidQuantity();
+    error InvalidAgentBindingList();
     error InvalidSeaDrop(address seaDrop);
     error InvalidSnapshotProof(address wallet);
     error InvalidSlot(uint32 slot);
@@ -31,6 +32,7 @@ contract NormieGenesisMinter is Ownable {
     error UnauthorizedSeaDrop(address caller);
 
     event SnapshotNormiesAdded(address indexed wallet, uint256 count);
+    event SnapshotAgentBindingUpdated(uint256 indexed normieId, uint256 agentId);
     event SnapshotFinalized(uint256 normieCount, uint32 totalSlots, bytes32 publicSeed);
     event SnapshotRootUpdated(bytes32 oldRoot, bytes32 newRoot);
     event AllowlistSelectionUpdated(address indexed wallet, uint256 count);
@@ -61,6 +63,7 @@ contract NormieGenesisMinter is Ownable {
     mapping(uint256 normieId => bool registered) public normieRegistered;
     mapping(uint256 normieId => bool claimed) public normieClaimed;
     mapping(uint256 normieId => uint256 indexPlusOne) public publicIndexPlusOne;
+    mapping(uint256 normieId => uint256 agentId) public normieAgentId;
 
     uint256[] private _publicNormies;
 
@@ -95,6 +98,24 @@ contract NormieGenesisMinter is Ownable {
         if (_publicNormies.length == 0) revert EmptySnapshot();
         finalized = true;
         emit SnapshotFinalized(_publicNormies.length, totalSlots, publicSeed);
+    }
+
+    function setSnapshotAgentBinding(uint256 normieId, uint256 agentId) external onlyOwner {
+        if (!normieRegistered[normieId]) revert NormieNotInSnapshot(normieId);
+        normieAgentId[normieId] = agentId;
+        emit SnapshotAgentBindingUpdated(normieId, agentId);
+    }
+
+    function setSnapshotAgentBindings(uint256[] calldata normieIds, uint256[] calldata agentIds)
+        external
+        onlyOwner
+    {
+        if (normieIds.length != agentIds.length) revert InvalidAgentBindingList();
+        for (uint256 i = 0; i < normieIds.length; i++) {
+            if (!normieRegistered[normieIds[i]]) revert NormieNotInSnapshot(normieIds[i]);
+            normieAgentId[normieIds[i]] = agentIds[i];
+            emit SnapshotAgentBindingUpdated(normieIds[i], agentIds[i]);
+        }
     }
 
     function setSnapshotRoot(bytes32 newRoot) external onlyOwner {
@@ -293,7 +314,10 @@ contract NormieGenesisMinter is Ownable {
         bytes32 seed = keccak256(abi.encode(publicSeed, minter, normieId, slot, mintPhase));
         mintedCount++;
 
-        cubeId = cubes.mintSnapshotNormieCubeFor(minter, normieId, slot, seed);
+        uint256 agentId = normieAgentId[normieId];
+        cubeId = agentId == 0
+            ? cubes.mintSnapshotNormieCubeFor(minter, normieId, slot, seed)
+            : cubes.mintSnapshotNormieCubeForWithAgent(minter, normieId, slot, seed, agentId);
         emit GenesisCubeMinted(cubeId, minter, normieId, slot, mintPhase);
     }
 

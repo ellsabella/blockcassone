@@ -130,6 +130,34 @@ contract NormieGenesisMinterTest is Test {
         assertFalse(sequential);
     }
 
+    function testSnapshotAgentBindingIsAppliedToAllowlistMint() public {
+        vm.prank(OWNER);
+        genesis.setSnapshotAgentBinding(101, 5025);
+
+        vm.prank(ALICE);
+        uint256[] memory cubeIds = genesis.mintAllowlist(1);
+
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeIds[0]);
+        assertEq(data.sourceTokenId, 101);
+        assertTrue(data.agentic);
+        assertEq(data.agentId, 5025);
+    }
+
+    function testSnapshotAgentBindingIsAppliedToPublicMint() public {
+        uint256 expected = _expectedPublicPick(PUBLIC_MINTER, 0, 0, 5);
+
+        vm.prank(OWNER);
+        genesis.setSnapshotAgentBinding(expected, 5025);
+
+        vm.prank(PUBLIC_MINTER);
+        uint256[] memory cubeIds = genesis.mintPublic(1);
+
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeIds[0]);
+        assertEq(data.sourceTokenId, expected);
+        assertTrue(data.agentic);
+        assertEq(data.agentId, 5025);
+    }
+
     function testPublicMintConsumesRemainingUnclaimedNormies() public {
         vm.prank(ALICE);
         genesis.mintAllowlist(3);

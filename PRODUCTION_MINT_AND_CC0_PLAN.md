@@ -233,6 +233,68 @@ Genesis Normie cube traits:
 Normie. It describes where the cube lives in the Big Cube, not a placeholder art
 source.
 
+## Dynamic Agent Status
+
+Normies can become agentic after a Blockcassone cube has already minted. The
+project therefore needs to separate:
+
+- mint-time source facts, which are permanent
+- current agent binding, which may change after mint
+
+At mint time, the cube stores the current snapshot value:
+
+```text
+sourceContract
+sourceTokenId
+raw Normie art payload
+Normie trait bytes
+mint-time agentic flag
+mint-time agent ID
+```
+
+After launch, an onchain agent-status registry should hold the current binding:
+
+```solidity
+sourceContract + sourceTokenId -> agentic, agentId, updatedAt
+```
+
+The renderer and metadata should prefer the current registry value when one has
+been set. If there is no current override, they should fall back to the
+mint-time snapshot value. This keeps already-minted tokens responsive to later
+Normie awakening while preserving the fully-onchain rule: the indexer may
+discover the change, but the token only depends on contract state after the
+update transaction is mined.
+
+The indexer/web service role is:
+
+1. Watch the Normie/OpenSea/agent-binding source for changes.
+2. Detect transitions such as non-agentic -> agentic.
+3. Submit or prepare a transaction to update the onchain agent-status registry.
+4. Rebuild UI caches from contract events.
+
+The indexer must not be required to render the token. It is a watcher and cache,
+not the source of truth.
+
+Initial production-friendly contract shape:
+
+```solidity
+function setAgentBinding(
+    address sourceContract,
+    uint256 sourceTokenId,
+    bool agentic,
+    uint256 agentId
+) external onlyAgentUpdater;
+
+function currentAgentBinding(
+    address sourceContract,
+    uint256 sourceTokenId
+) external view returns (bool agentic, uint256 agentId, uint64 updatedAt);
+```
+
+Early versions can use an owner-controlled or multisig-controlled updater. A
+later version can move to signer-attested batches or permissionless verification
+if the upstream agent binding becomes independently provable onchain.
+
 ## Onchain Renderer Direction
 
 The individual token should use self-contained HTML for `animation_url`.
@@ -326,3 +388,7 @@ taken from marketplace metadata.
 4. Design the SeaDrop-compatible mint hook around `minter` and `quantity`.
 5. Build the HTML/WebGL `animation_url` renderer path.
 6. Keep CC0/owned-art update planning separate from genesis mint readiness.
+7. Add an onchain agent-status registry and wire token metadata/rendering to
+   prefer current agent state over the mint-time snapshot.
+8. Add indexer tasks for detecting post-mint agent-binding changes and
+   submitting registry updates.

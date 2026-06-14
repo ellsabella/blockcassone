@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import { Script, console2 } from "forge-std/Script.sol";
+import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
@@ -82,6 +83,9 @@ contract DeployLocalGenesis is Script {
         RendererAssetStore assetStore = new RendererAssetStore(initialOwner);
 
         vm.broadcast();
+        AgentStatusRegistry agentRegistry = new AgentStatusRegistry(initialOwner);
+
+        vm.broadcast();
         CubeRendererV2 renderer = new CubeRendererV2(cubes, assetStore, address(normies));
 
         vm.broadcast();
@@ -89,6 +93,9 @@ contract DeployLocalGenesis is Script {
 
         vm.broadcast();
         cubes.setRenderer(address(renderer));
+
+        vm.broadcast();
+        cubes.setAgentStatusRegistry(address(agentRegistry));
 
         vm.broadcast();
         cubes.transferOwnership(address(genesis));
@@ -120,6 +127,7 @@ contract DeployLocalGenesis is Script {
         console2.log("LocalMockNormies", address(normies));
         console2.log("CubeNFT", address(cubes));
         console2.log("RendererAssetStore", address(assetStore));
+        console2.log("AgentStatusRegistry", address(agentRegistry));
         console2.log("CubeRendererV2", address(renderer));
         console2.log("NormieGenesisMinter", address(genesis));
         console2.log("SeaDrop", seaDrop);
@@ -132,6 +140,7 @@ contract DeployLocalGenesis is Script {
             address(genesis),
             address(renderer),
             address(assetStore),
+            address(agentRegistry),
             address(normies),
             address(normies)
         );
@@ -144,6 +153,7 @@ contract DeployLocalGenesis is Script {
         address genesis,
         address renderer,
         address assetStore,
+        address agentRegistry,
         address normies,
         address normieStorage
     ) private {
@@ -155,6 +165,7 @@ contract DeployLocalGenesis is Script {
         vm.serializeAddress(root, "genesisMinter", genesis);
         vm.serializeAddress(root, "renderer", renderer);
         vm.serializeAddress(root, "rendererAssetStore", assetStore);
+        vm.serializeAddress(root, "agentStatusRegistry", agentRegistry);
         vm.serializeAddress(root, "normies", normies);
         string memory json = vm.serializeAddress(root, "normieStorage", normieStorage);
         vm.writeJson(json, outPath);

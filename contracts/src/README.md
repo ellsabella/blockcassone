@@ -10,13 +10,19 @@ Implemented / current contracts:
 - `FlatteningAttestation.sol`
 - `CubeMintController.sol`
 - `CubeRendererV1.sol`
+- `CubeRendererV2.sol`
+- `RendererAssetStore.sol`
+- `AgentStatusRegistry.sol`
 - `NormieAdapter.sol`
 - `MainnetNormieAdapter.sol`
 
 Important current direction:
 
-- `CubeNFT` currently stores early plot/source/agent facts.
-- `agentic` and numeric `agentId` are permanent metadata fields for now.
+- `CubeNFT` stores plot/source facts and the mint-time agent snapshot.
+- `AgentStatusRegistry` stores current source-agent bindings so already-minted
+  cubes can awaken after a source Normie becomes agentic.
+- Renderer-facing data should resolve agent state as current registry value
+  when present, otherwise mint-time snapshot.
 - Non-Normie flattened art payloads are prototype/future-update infrastructure,
   not the genesis production mint path.
 - Placement is currently simple slot occupancy, with plot, street, neighbourhood, and region derived from the slot. Final placement is expected to become mutable world state.

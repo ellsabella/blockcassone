@@ -8,7 +8,8 @@
     "upload:token-renderer": "node scripts/upload-renderer-chunks.mjs",
     "export:token-html": "node scripts/export-token-html.mjs",
     "snapshot:normies": "node scripts/take-normie-snapshot.mjs",
-    "snapshot:merkle": "node scripts/build-normie-merkle.mjs"
+    "snapshot:merkle": "node scripts/build-normie-merkle.mjs",
+    "agents:check": "node scripts/check-normie-agent-bindings.mjs"
   },
   "author": "",
   "license": "ISC",

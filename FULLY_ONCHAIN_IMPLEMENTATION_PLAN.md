@@ -385,19 +385,20 @@ Population traits under consideration:
 
 These traits are dynamic and may change when cubes mint, move, or consolidate.
 
-The conceptual model is a city-like big block inhabited by the NFT entities that compose it. Source NFTs are not only visual inputs; they may represent agents, characters, tools, identities, or other entity-like contracts. At mint time, the offchain mint pipeline should capture any source-agent binding data exposed by OpenSea or source contracts and commit the relevant stable fields onchain.
+The conceptual model is a city-like big block inhabited by the NFT entities that compose it. Source NFTs are not only visual inputs; they may represent agents, characters, tools, identities, or other entity-like contracts. At mint time, the offchain mint pipeline should capture any source-agent binding data exposed by OpenSea or source contracts and commit the observed fields onchain as a mint-time snapshot. Because Normies can become agentic after Blockcassone mint, current agent binding must also be updatable through onchain state.
 
 Agentic metadata requirements:
 
 - `Agentic`: binary `Y` / `N` trait.
 - `Agent ID`: stable agent binding identifier when available.
-- Agent data must be captured at mint time and stored or attested onchain if it affects permanent token traits or art.
+- Agent data must be captured at mint time and stored or attested onchain if it affects token traits or art.
+- Current agent status should be read from an onchain agent-status registry when available, with mint-time snapshot values used as fallback.
 - Agentic status may affect the token renderer visually, especially in the city/big-block viewer.
 - Agentic non-Normies may inherit awakened Normie-style visual behavior: moving lights, higher motion, forest strands, and particles.
 
-OpenSea API data may be used by the mint UI to discover agentic details, but the token must not depend on OpenSea after mint. Any OpenSea-derived agent fields used by the final NFT must be included in the signed mint payload and stored onchain, or be independently recoverable from source contracts.
+OpenSea API data may be used by the mint UI to discover agentic details, but the token must not depend on OpenSea after mint. Any OpenSea-derived agent fields used by the final NFT must be included in the signed mint payload and stored onchain, written to an onchain current-status registry, or be independently recoverable from source contracts.
 
-The current contract boundary stores the stable `agentic` boolean and numeric `agentId` in `CubeNFT.CubeData`, binds both fields into the non-Normie flattening attestation, and renders them as `Agentic` and `Agent ID` metadata traits.
+The current contract boundary stores the mint-time `agentic` boolean and numeric `agentId` in `CubeNFT.CubeData`, binds both fields into the non-Normie flattening attestation, and renders them as `Agentic` and `Agent ID` metadata traits. Production should add an `AgentStatusRegistry` so token metadata and the HTML renderer can prefer current onchain source-agent state over the mint-time snapshot.
 
 Initial OpenSea API probing shows that the account NFT list response does not currently include agent data, while the single-NFT detail response includes an `agent_binding` field. A positive Normies sample returned `agent_binding.agent_id` as a numeric string, with matching `agent.token_id`, so the current onchain representation uses `uint256 agentId` and `0` as the non-agent sentinel. The mint UI should fetch per-token details for the selected source NFT before minting, preserve the raw `agent_binding` payload for inspection, and derive permanent `Agentic` / `Agent ID` values from that detail response.
 

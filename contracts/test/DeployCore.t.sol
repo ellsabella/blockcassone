@@ -36,7 +36,9 @@ contract DeployCoreTest is Test {
 
         assertEq(deployment.cubes.normieContract(), address(normies));
         assertEq(deployment.cubes.totalSlots(), 4096);
+        assertEq(deployment.cubes.agentStatusRegistry(), address(deployment.agentRegistry));
         assertEq(deployment.cubes.owner(), address(deployment.controller));
+        assertEq(deployment.agentRegistry.owner(), OWNER);
         assertEq(deployment.artStore.owner(), address(deployment.controller));
         assertEq(deployment.attestation.owner(), OWNER);
         assertEq(deployment.attestation.attestationSigner(), SIGNER);

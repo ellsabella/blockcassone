@@ -24,6 +24,7 @@ The local script deploys:
 - `LocalMockNormies`
 - `CubeNFT`
 - `RendererAssetStore`
+- `AgentStatusRegistry`
 - `CubeRendererV2`
 - `NormieGenesisMinter`
 
@@ -46,9 +47,10 @@ Optional environment variables:
 The viewer reads `data/chain-config.json` and proxies JSON-RPC through
 `/api/chain-rpc`, so browser CORS settings on Anvil do not matter.
 Local genesis deployments also write `renderer`, `rendererAssetStore`, and
-`normieStorage`. The viewer can hydrate minted cube art from the local mock
-storage contract, and `CubeRendererV2.tokenURI` embeds packed Normie image bytes
-directly into the token HTML without calling the dev Normies API.
+`agentStatusRegistry` to `data/chain-config.json`. The viewer can hydrate minted
+cube art from the local mock storage contract, and `CubeRendererV2.tokenURI`
+embeds packed Normie image bytes directly into the token HTML without calling
+the dev Normies API.
 
 For local Anvil testing, leave `BLOCKCASSONE_OWNER` unset unless you are also
 broadcasting from that same address. The setup calls are owner-gated. The
@@ -109,6 +111,10 @@ Optional environment variables:
 - `BLOCKCASSONE_SAMPLE_MINTS`: number of preview cubes to mint, default `3`.
 - `BLOCKCASSONE_SAMPLE_NORMIE_START`: first real Normie ID to preview, default
   `1`.
+- `BLOCKCASSONE_SAMPLE_AGENT_NORMIE_ID`: optional real Normie ID to mark
+  agentic in the mint snapshot and current agent registry.
+- `BLOCKCASSONE_SAMPLE_AGENT_ID`: optional current agent ID for
+  `BLOCKCASSONE_SAMPLE_AGENT_NORMIE_ID`.
 - `BLOCKCASSONE_PREVIEW_RECIPIENT`: address that receives the preview cubes.
   Use this if the default fork sender collides with a mainnet contract address.
 
@@ -121,6 +127,34 @@ npm run export:token-html -- --token-id=1 --source=token-uri
 
 The exported HTML should now be generated from real NormiesStorage raw bytes,
 not the synthetic local mock pattern.
+
+## Agent Binding Maintenance
+
+Normies may become agentic after Blockcassone mint. The token renderer does not
+read OpenSea directly; it reads `AgentStatusRegistry` through `CubeNFT`.
+
+To inspect current OpenSea agent binding for known Normie IDs and generate
+operator transaction calldata:
+
+```bash
+npm run agents:check -- --ids=5025,6722
+```
+
+Requirements:
+
+- `OPENSEA_API_KEY` in `.env` or the shell.
+- `data/chain-config.json` with `agentStatusRegistry` if you want ready-to-run
+  `cast send` command output.
+
+The script writes:
+
+```text
+data/agent-status-updates.json
+```
+
+The generated `cast send` commands are an operator aid, not a runtime token
+dependency. Once the registry transaction is mined, token metadata and
+`animation_url` resolve the current agent state from contracts.
 
 ## Mainnet Normie Data Inspection
 

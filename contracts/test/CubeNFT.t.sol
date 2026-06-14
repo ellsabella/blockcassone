@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
+import {AgentStatusRegistry} from "../src/AgentStatusRegistry.sol";
 import {CubeNFT} from "../src/CubeNFT.sol";
 
 contract MockERC721 is ERC721 {
@@ -34,12 +35,14 @@ contract CubeNFTTest is Test {
     MockERC721 private normies;
     MockERC721 private externalNft;
     MockCubeRenderer private renderer;
+    AgentStatusRegistry private agentRegistry;
     CubeNFT private cubes;
 
     function setUp() public {
         normies = new MockERC721("Normies", "NORM");
         externalNft = new MockERC721("External", "EXT");
         renderer = new MockCubeRenderer();
+        agentRegistry = new AgentStatusRegistry(OWNER);
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 64, OWNER);
 
         normies.mint(MINTER, 101);
@@ -130,6 +133,99 @@ contract CubeNFTTest is Test {
         assertTrue(data.agentic);
         assertEq(data.agentId, 32813);
         assertEq(cubes.cubeForNormieId(101), cubeId);
+    }
+
+    function testOwnerCanMintSnapshotNormieCubeWithAgentId() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintSnapshotNormieCubeForWithAgent(
+            MINTER,
+            101,
+            12,
+            bytes32("seed"),
+            32813
+        );
+
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
+        assertTrue(data.agentic);
+        assertEq(data.agentId, 32813);
+        assertEq(cubes.cubeForNormieId(101), cubeId);
+    }
+
+    function testResolvedCubeDataFallsBackToMintSnapshotAgentStatus() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintSnapshotNormieCubeForWithAgent(
+            MINTER,
+            101,
+            12,
+            bytes32("seed"),
+            32813
+        );
+
+        CubeNFT.CubeData memory data = cubes.resolvedCubeData(cubeId);
+        assertTrue(data.agentic);
+        assertEq(data.agentId, 32813);
+    }
+
+    function testResolvedCubeDataUsesCurrentAgentRegistryOverride() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintSnapshotNormieCubeFor(MINTER, 101, 12, bytes32("seed"));
+
+        CubeNFT.CubeData memory mintData = cubes.cubeData(cubeId);
+        assertFalse(mintData.agentic);
+        assertEq(mintData.agentId, 0);
+
+        vm.prank(OWNER);
+        cubes.setAgentStatusRegistry(address(agentRegistry));
+
+        vm.prank(OWNER);
+        agentRegistry.setAgentBinding(address(normies), 101, true, 5025);
+
+        CubeNFT.CubeData memory resolved = cubes.resolvedCubeData(cubeId);
+        assertTrue(resolved.agentic);
+        assertEq(resolved.agentId, 5025);
+
+        CubeNFT.CubeData memory stillSnapshot = cubes.cubeData(cubeId);
+        assertFalse(stillSnapshot.agentic);
+        assertEq(stillSnapshot.agentId, 0);
+    }
+
+    function testResolvedCubeDataCanOverrideAgenticSnapshotToCurrentNonAgentic() public {
+        vm.prank(OWNER);
+        uint256 cubeId = cubes.mintSnapshotNormieCubeForWithAgent(
+            MINTER,
+            101,
+            12,
+            bytes32("seed"),
+            32813
+        );
+
+        vm.prank(OWNER);
+        cubes.setAgentStatusRegistry(address(agentRegistry));
+
+        vm.prank(OWNER);
+        agentRegistry.setAgentBinding(address(normies), 101, false, 0);
+
+        CubeNFT.CubeData memory resolved = cubes.resolvedCubeData(cubeId);
+        assertFalse(resolved.agentic);
+        assertEq(resolved.agentId, 0);
+    }
+
+    function testOwnerCanSetAgentStatusRegistry() public {
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.AgentStatusRegistryUpdated(address(0), address(agentRegistry));
+
+        vm.prank(OWNER);
+        cubes.setAgentStatusRegistry(address(agentRegistry));
+
+        assertEq(cubes.agentStatusRegistry(), address(agentRegistry));
+    }
+
+    function testNonOwnerCannotSetAgentStatusRegistry() public {
+        vm.prank(OTHER);
+        vm.expectRevert(
+            abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, OTHER)
+        );
+        cubes.setAgentStatusRegistry(address(agentRegistry));
     }
 
     function testCannotMintAgenticCubeWithoutAgentId() public {

@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import { Test } from "forge-std/Test.sol";
 import { Base64 } from "openzeppelin-contracts/contracts/utils/Base64.sol";
 import { ERC721 } from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
+import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
@@ -29,12 +30,14 @@ contract CubeRendererV2Test is Test {
 
     RendererV2MockNormies private normies;
     CubeNFT private cubes;
+    AgentStatusRegistry private agentRegistry;
     RendererAssetStore private assets;
     CubeRendererV2 private renderer;
 
     function setUp() public {
         normies = new RendererV2MockNormies();
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
+        agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
         renderer = new CubeRendererV2(cubes, assets, address(normies));
 
@@ -79,6 +82,24 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(html, Base64.encode(raw)));
         assertFalse(_contains(html, "api.normies.art"));
         assertFalse(_contains(html, "/api/normies"));
+    }
+
+    function testRendererUsesCurrentAgentRegistryState() public {
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
+
+        vm.startPrank(OWNER);
+        cubes.setAgentStatusRegistry(address(agentRegistry));
+        agentRegistry.setAgentBinding(address(normies), 6722, true, 5025);
+        vm.stopPrank();
+
+        string memory json = renderer.metadataJSON(cubeId);
+        string memory html = renderer.animationHTML(cubeId);
+
+        assertTrue(_contains(json, '"trait_type":"Agentic","value":"Y"'));
+        assertTrue(_contains(json, '"trait_type":"Agent ID","value":"5025"'));
+        assertTrue(_contains(html, "agentic:true"));
+        assertTrue(_contains(html, "agentId:5025"));
     }
 
     function testCubeNFTTokenURIDelegatesToRendererV2() public {

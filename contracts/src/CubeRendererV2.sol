@@ -33,7 +33,7 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function metadataJSON(uint256 tokenId) public view returns (string memory) {
-        CubeNFT.CubeData memory data = cubes.cubeData(tokenId);
+        CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
         string memory image = imageURI(tokenId);
         return string.concat(
             "{",
@@ -54,7 +54,7 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function imageURI(uint256 tokenId) public view returns (string memory) {
-        CubeNFT.CubeData memory data = cubes.cubeData(tokenId);
+        CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
         string memory svg = string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
@@ -88,7 +88,7 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function animationHTML(uint256 tokenId) public view returns (string memory) {
-        CubeNFT.CubeData memory data = cubes.cubeData(tokenId);
+        CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
         return string.concat(
             _chunkOrDefault(HTML_HEAD_CHUNK, _defaultHTMLHead()),
             _tokenConfig(tokenId, data),

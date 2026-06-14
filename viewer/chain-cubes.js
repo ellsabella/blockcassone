@@ -4,6 +4,7 @@ import { compactNormieArtFromRaw } from './art-snapshot.js';
 const SELECTORS = {
   nextCubeId: '0xfee34352',
   cubeData: '0xd88ff669',
+  resolvedCubeData: '0xc7f1b0a2',
   ownerOf: '0x6352211e',
   rawImageData: '0x6985bf3c',
 };
@@ -74,6 +75,7 @@ async function loadChainConfig() {
         normieStorage: normalizeAddress(raw?.normieStorage) || normalizeAddress(raw?.normies) || NORMIES_CONTRACT,
         maxCubes: Math.max(1, Math.min(4096, Number(raw?.maxCubes || 4096))),
         directRpc: Boolean(raw?.directRpc),
+        agentStatusRegistry: normalizeAddress(raw?.agentStatusRegistry),
       };
     })
     .catch(() => ({ enabled: false }));
@@ -166,7 +168,10 @@ export async function loadChainMintRecords() {
   const chunkSize = 100;
   for (let offset = 0; offset < cubeIds.length; offset += chunkSize) {
     const chunk = cubeIds.slice(offset, offset + chunkSize);
-    const dataCalls = chunk.map(cubeId => ({ to: config.cubeNft, data: calldata(SELECTORS.cubeData, cubeId) }));
+    const dataCalls = chunk.map(cubeId => ({
+      to: config.cubeNft,
+      data: calldata(SELECTORS.resolvedCubeData, cubeId),
+    }));
     const ownerCalls = chunk.map(cubeId => ({ to: config.cubeNft, data: calldata(SELECTORS.ownerOf, cubeId) }));
     const [dataRows, ownerRows] = await Promise.all([
       batchCall(config, dataCalls),

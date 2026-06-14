@@ -44,6 +44,10 @@ Likely production mint contracts:
   and consolidation.
 - Future update contracts may add an approved CC0/owned-art payload registry,
   but that is not a genesis mint dependency.
+- `AgentStatusRegistry`: current source-agent binding state. Genesis cubes keep
+  their mint-time agent snapshot, but metadata/renderers should prefer the
+  registry value once a current binding has been written onchain. This supports
+  Normies becoming agentic after Blockcassone mint.
 - `NormieAdapter` / `MainnetNormieAdapter` are the onchain boundary for reading
   Normie source data directly from the canonical contracts. The adapter exposes
   owner, reveal/storage flags, raw image data, trait bytes, and renderer-friendly
@@ -69,5 +73,21 @@ Indexer / UI boundary:
   recoverable from contracts
 - L2 source NFTs and OpenSea agent data require an attestation/proof path if
   they affect permanent token traits or art
+- post-mint agent-binding changes should be handled by the indexer as a watcher:
+  it detects upstream changes and submits updates to `AgentStatusRegistry`; the
+  token then renders from the updated contract state, not from the indexer
+
+Agent-status implementation path:
+
+1. Add `AgentStatusRegistry` with source-keyed current binding storage,
+   updater permissions, and update events.
+2. Add a read helper on `CubeNFT` or the renderer-facing data path that resolves
+   current agent status as `registry value if set, otherwise mint snapshot`.
+3. Update `CubeRendererV2` token config generation so `agentic` and `agentId`
+   use that resolved current status.
+4. Add Foundry tests for mint-time fallback, post-mint awakening, agent ID
+   changes, and non-updater rejection.
+5. Extend the offchain indexer/scripts to detect Normie agent-binding changes
+   and submit registry transactions.
 
 See `../WORLD_AND_MINT_REQUIREMENTS.md` for the current world and mint requirements.

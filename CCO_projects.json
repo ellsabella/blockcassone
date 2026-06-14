@@ -1,0 +1,44 @@
+{
+    "projects": [
+      {
+        "name": "CC0Mon",
+        "CA": "0xeeb036dbbd3039429c430657ed9836568da79d5f",
+        "num": "9999"
+      },
+      {
+        "name": "Chonks",
+        "description": "0x07152bfde079b5319e5308c43fb1dbc9c76cb4f9",
+        "status": "83298"
+      },
+      {
+        "name": "CrypToadz",
+        "description": "0x1cb1a5e65610aeff2551a50f76a87a7d3fb649c6",
+        "status": "7015"
+      },
+      {
+        "name": "Nouns",
+        "description": "0x9c8ff314c9bc7f6e59a9d9225fb22946427edc03",
+        "status": "1897"
+      },
+      {
+        "name": "Grifters",
+        "description": "0xc143bbfcdbdbed6d454803804752a064a622c1f3",
+        "status": "666"
+      },
+      {
+        "name": "Remnants",
+        "description": "0xdfea2b364db868b1d2601d6b833d74db4de94460",
+        "status": "250"
+      },
+      {
+        "name": "ChainRunners",
+        "description": "0x97597002980134bea46250aa0510c9b90d87a587",
+        "status": "9999"
+      },
+      {
+        "name": "1337Skulls",
+        "description": "0x9251dec8df720c2adf3b6f46d968107cbbadf4d4",
+        "status": "7331"
+      }
+    ]
+}

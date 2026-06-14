@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {AgentStatusRegistry} from "../src/AgentStatusRegistry.sol";
 import {CubeMintController} from "../src/CubeMintController.sol";
 import {CubeNFT} from "../src/CubeNFT.sol";
 import {FlatteningAttestation} from "../src/FlatteningAttestation.sol";
@@ -14,6 +15,7 @@ contract DeployCore is Script {
         NonNormieArtStore artStore;
         FlatteningAttestation attestation;
         CubeMintController controller;
+        AgentStatusRegistry agentRegistry;
     }
 
     uint32 internal constant DEFAULT_TOTAL_SLOTS = 4096;
@@ -45,9 +47,11 @@ contract DeployCore is Script {
         );
         deployment.artStore = new NonNormieArtStore(address(this));
         deployment.attestation = new FlatteningAttestation(address(this), attestationSigner);
+        deployment.agentRegistry = new AgentStatusRegistry(initialOwner);
         deployment.controller =
             new CubeMintController(deployment.cubes, deployment.artStore, deployment.attestation);
 
+        deployment.cubes.setAgentStatusRegistry(address(deployment.agentRegistry));
         deployment.cubes.transferOwnership(address(deployment.controller));
         deployment.artStore.transferOwnership(address(deployment.controller));
         deployment.attestation.setAuthorizedConsumer(address(deployment.controller));
@@ -59,6 +63,7 @@ contract DeployCore is Script {
         console2.log("NonNormieArtStore", address(deployment.artStore));
         console2.log("FlatteningAttestation", address(deployment.attestation));
         console2.log("CubeMintController", address(deployment.controller));
+        console2.log("AgentStatusRegistry", address(deployment.agentRegistry));
         console2.log("CubeNFT owner", deployment.cubes.owner());
         console2.log("ArtStore owner", deployment.artStore.owner());
         console2.log("Authorized consumer", deployment.attestation.authorizedConsumer());
