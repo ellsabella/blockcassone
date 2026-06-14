@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const DEFAULT_RPC_URL = 'http://127.0.0.1:8545';
 const DEFAULT_SENDER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+const DEFAULT_PREVIEW_RECIPIENT = '0x000000000000000000000000000000000000bEEF';
 const DEFAULT_PRIVATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
@@ -55,6 +56,10 @@ async function main() {
   );
   const rpcUrl = argValue('rpc-url', process.env.BLOCKCASSONE_RPC_URL || DEFAULT_RPC_URL);
   const sender = argValue('sender', process.env.BLOCKCASSONE_SENDER || DEFAULT_SENDER);
+  const recipient = argValue(
+    'recipient',
+    process.env.BLOCKCASSONE_PREVIEW_RECIPIENT || DEFAULT_PREVIEW_RECIPIENT
+  );
   const privateKey = argValue('private-key', process.env.BLOCKCASSONE_PRIVATE_KEY || DEFAULT_PRIVATE_KEY);
   const forge = process.env.FORGE || 'forge';
   const tokenId = 1;
@@ -71,7 +76,7 @@ async function main() {
   const deployEnv = {
     BLOCKCASSONE_SAMPLE_MINTS: '1',
     BLOCKCASSONE_SAMPLE_NORMIE_START: String(normieId),
-    BLOCKCASSONE_PREVIEW_RECIPIENT: sender,
+    BLOCKCASSONE_PREVIEW_RECIPIENT: recipient,
   };
   if (agentId) {
     deployEnv.BLOCKCASSONE_SAMPLE_AGENT_NORMIE_ID = String(normieId);
