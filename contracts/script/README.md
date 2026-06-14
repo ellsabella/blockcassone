@@ -128,6 +128,32 @@ npm run export:token-html -- --token-id=1 --source=token-uri
 The exported HTML should now be generated from real NormiesStorage raw bytes,
 not the synthetic local mock pattern.
 
+For the common one-Normie preview loop, use the wrapper instead. It deploys a
+fresh one-token preview, builds and uploads renderer chunks, and exports token
+`#1` to a dedicated temp folder:
+
+```bash
+npm run preview:normie -- --normie-id=5025
+```
+
+To force the preview token to render as currently agentic:
+
+```bash
+npm run preview:normie -- --normie-id=5025 --agentic
+```
+
+or with a specific agent ID:
+
+```bash
+npm run preview:normie -- --normie-id=5025 --agent-id=5025
+```
+
+The default output folder is:
+
+```text
+/tmp/blockcassone-token-previews/normie-<id>/
+```
+
 ## Agent Binding Maintenance
 
 Normies may become agentic after Blockcassone mint. The token renderer does not

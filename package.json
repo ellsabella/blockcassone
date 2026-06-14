@@ -9,7 +9,8 @@
     "export:token-html": "node scripts/export-token-html.mjs",
     "snapshot:normies": "node scripts/take-normie-snapshot.mjs",
     "snapshot:merkle": "node scripts/build-normie-merkle.mjs",
-    "agents:check": "node scripts/check-normie-agent-bindings.mjs"
+    "agents:check": "node scripts/check-normie-agent-bindings.mjs",
+    "preview:normie": "node scripts/preview-normie-token.mjs"
   },
   "author": "",
   "license": "ISC",
