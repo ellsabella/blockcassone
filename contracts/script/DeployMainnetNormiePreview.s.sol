@@ -13,6 +13,7 @@ contract DeployMainnetNormiePreview is Script {
 
     function run() external {
         address initialOwner = vm.envOr("BLOCKCASSONE_OWNER", msg.sender);
+        address previewRecipient = vm.envOr("BLOCKCASSONE_PREVIEW_RECIPIENT", initialOwner);
         address seaDrop = vm.envOr("BLOCKCASSONE_SEADROP", initialOwner);
         uint32 totalSlots =
             uint32(vm.envOr("BLOCKCASSONE_TOTAL_SLOTS", uint256(DEFAULT_TOTAL_SLOTS)));
@@ -55,7 +56,7 @@ contract DeployMainnetNormiePreview is Script {
 
         if (sampleMints > 0) {
             vm.broadcast();
-            genesis.addSnapshotNormies(initialOwner, sampleNormies);
+            genesis.addSnapshotNormies(previewRecipient, sampleNormies);
 
             vm.broadcast();
             genesis.finalizeSnapshot();
@@ -67,7 +68,7 @@ contract DeployMainnetNormiePreview is Script {
             genesis.setPhase(NormieGenesisMinter.Phase.Public);
 
             vm.broadcast();
-            genesis.mintPublicFor(initialOwner, sampleMints);
+            genesis.mintPublicFor(previewRecipient, sampleMints);
         }
 
         console2.log("Mainnet Normies", NormieAddresses.NORMIES);
@@ -77,6 +78,7 @@ contract DeployMainnetNormiePreview is Script {
         console2.log("CubeRendererV2", address(renderer));
         console2.log("NormieGenesisMinter", address(genesis));
         console2.log("SeaDrop", seaDrop);
+        console2.log("Preview recipient", previewRecipient);
         console2.log("Sample mints", sampleMints);
         console2.log("First Normie ID", firstNormieId);
 

@@ -109,6 +109,8 @@ Optional environment variables:
 - `BLOCKCASSONE_SAMPLE_MINTS`: number of preview cubes to mint, default `3`.
 - `BLOCKCASSONE_SAMPLE_NORMIE_START`: first real Normie ID to preview, default
   `1`.
+- `BLOCKCASSONE_PREVIEW_RECIPIENT`: address that receives the preview cubes.
+  Use this if the default fork sender collides with a mainnet contract address.
 
 After deployment, upload the renderer chunks and export the token HTML:
 
