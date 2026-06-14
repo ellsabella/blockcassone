@@ -12,105 +12,147 @@ import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 contract DeployMainnetNormiePreview is Script {
     uint32 internal constant DEFAULT_TOTAL_SLOTS = 4096;
 
-    function run() external {
-        address initialOwner = vm.envOr("BLOCKCASSONE_OWNER", msg.sender);
-        address previewRecipient = vm.envOr("BLOCKCASSONE_PREVIEW_RECIPIENT", initialOwner);
-        address seaDrop = vm.envOr("BLOCKCASSONE_SEADROP", initialOwner);
-        uint32 totalSlots =
-            uint32(vm.envOr("BLOCKCASSONE_TOTAL_SLOTS", uint256(DEFAULT_TOTAL_SLOTS)));
-        uint256 sampleMints = vm.envOr("BLOCKCASSONE_SAMPLE_MINTS", uint256(3));
-        uint256 firstNormieId = vm.envOr("BLOCKCASSONE_SAMPLE_NORMIE_START", uint256(1));
-        uint256 agentNormieId = vm.envOr("BLOCKCASSONE_SAMPLE_AGENT_NORMIE_ID", uint256(0));
-        uint256 agentId = vm.envOr("BLOCKCASSONE_SAMPLE_AGENT_ID", uint256(0));
-        bytes32 publicSeed =
-            vm.envOr("BLOCKCASSONE_PUBLIC_SEED", keccak256("blockcassone-mainnet-preview"));
-        string memory configOut =
-            vm.envOr("BLOCKCASSONE_CHAIN_CONFIG_OUT", string("data/chain-config.json"));
+    struct PreviewConfig {
+        address initialOwner;
+        address previewRecipient;
+        address seaDrop;
+        uint32 totalSlots;
+        uint256 sampleMints;
+        uint256 firstNormieId;
+        uint256 agentNormieId;
+        uint256 agentId;
+        bytes32 publicSeed;
+        string configOut;
+    }
 
+    struct Deployment {
+        CubeNFT cubes;
+        RendererAssetStore assetStore;
+        AgentStatusRegistry agentRegistry;
+        CubeRendererV2 renderer;
+        NormieGenesisMinter genesis;
+    }
+
+    function run() external {
+        PreviewConfig memory config = _previewConfig();
+        Deployment memory deployment = _deploy(config);
+
+        _mintSamples(config, deployment);
+        _logDeployment(config, deployment);
+
+        _writeViewerConfig(
+            config.configOut,
+            block.chainid,
+            address(deployment.cubes),
+            address(deployment.genesis),
+            address(deployment.renderer),
+            address(deployment.assetStore),
+            address(deployment.agentRegistry)
+        );
+    }
+
+    function _previewConfig() private view returns (PreviewConfig memory config) {
+        config.initialOwner = vm.envOr("BLOCKCASSONE_OWNER", msg.sender);
+        config.previewRecipient =
+            vm.envOr("BLOCKCASSONE_PREVIEW_RECIPIENT", config.initialOwner);
+        config.seaDrop = vm.envOr("BLOCKCASSONE_SEADROP", config.initialOwner);
+        config.totalSlots =
+            uint32(vm.envOr("BLOCKCASSONE_TOTAL_SLOTS", uint256(DEFAULT_TOTAL_SLOTS)));
+        config.sampleMints = vm.envOr("BLOCKCASSONE_SAMPLE_MINTS", uint256(3));
+        config.firstNormieId = vm.envOr("BLOCKCASSONE_SAMPLE_NORMIE_START", uint256(1));
+        config.agentNormieId = vm.envOr("BLOCKCASSONE_SAMPLE_AGENT_NORMIE_ID", uint256(0));
+        config.agentId = vm.envOr("BLOCKCASSONE_SAMPLE_AGENT_ID", uint256(0));
+        config.publicSeed =
+            vm.envOr("BLOCKCASSONE_PUBLIC_SEED", keccak256("blockcassone-mainnet-preview"));
+        config.configOut =
+            vm.envOr("BLOCKCASSONE_CHAIN_CONFIG_OUT", string("data/chain-config.json"));
+    }
+
+    function _deploy(PreviewConfig memory config) private returns (Deployment memory deployment) {
         vm.broadcast();
-        CubeNFT cubes = new CubeNFT(
+        deployment.cubes = new CubeNFT(
             "Blockcassone Cubes",
             "CUBE",
             NormieAddresses.NORMIES,
-            totalSlots,
-            initialOwner
+            config.totalSlots,
+            config.initialOwner
         );
 
         vm.broadcast();
-        RendererAssetStore assetStore = new RendererAssetStore(initialOwner);
+        deployment.assetStore = new RendererAssetStore(config.initialOwner);
 
         vm.broadcast();
-        AgentStatusRegistry agentRegistry = new AgentStatusRegistry(initialOwner);
+        deployment.agentRegistry = new AgentStatusRegistry(config.initialOwner);
 
         vm.broadcast();
-        CubeRendererV2 renderer =
-            new CubeRendererV2(cubes, assetStore, NormieAddresses.NORMIES_STORAGE);
+        deployment.renderer =
+            new CubeRendererV2(deployment.cubes, deployment.assetStore, NormieAddresses.NORMIES_STORAGE);
 
         vm.broadcast();
-        NormieGenesisMinter genesis = new NormieGenesisMinter(cubes, publicSeed, initialOwner);
+        deployment.genesis =
+            new NormieGenesisMinter(deployment.cubes, config.publicSeed, config.initialOwner);
 
         vm.broadcast();
-        cubes.setRenderer(address(renderer));
+        deployment.cubes.setRenderer(address(deployment.renderer));
 
         vm.broadcast();
-        cubes.setAgentStatusRegistry(address(agentRegistry));
+        deployment.cubes.setAgentStatusRegistry(address(deployment.agentRegistry));
 
         vm.broadcast();
-        cubes.transferOwnership(address(genesis));
+        deployment.cubes.transferOwnership(address(deployment.genesis));
+    }
 
-        uint256[] memory sampleNormies = new uint256[](sampleMints);
-        for (uint256 i = 0; i < sampleMints; i++) {
-            sampleNormies[i] = firstNormieId + i;
+    function _mintSamples(PreviewConfig memory config, Deployment memory deployment) private {
+        if (config.sampleMints == 0) return;
+
+        uint256[] memory sampleNormies = new uint256[](config.sampleMints);
+        for (uint256 i = 0; i < config.sampleMints; i++) {
+            sampleNormies[i] = config.firstNormieId + i;
         }
 
-        if (sampleMints > 0) {
+        vm.broadcast();
+        deployment.genesis.addSnapshotNormies(config.previewRecipient, sampleNormies);
+
+        if (config.agentNormieId != 0 && config.agentId != 0) {
             vm.broadcast();
-            genesis.addSnapshotNormies(previewRecipient, sampleNormies);
-
-            if (agentNormieId != 0 && agentId != 0) {
-                vm.broadcast();
-                genesis.setSnapshotAgentBinding(agentNormieId, agentId);
-
-                vm.broadcast();
-                agentRegistry.setAgentBinding(NormieAddresses.NORMIES, agentNormieId, true, agentId);
-            }
+            deployment.genesis.setSnapshotAgentBinding(config.agentNormieId, config.agentId);
 
             vm.broadcast();
-            genesis.finalizeSnapshot();
-
-            vm.broadcast();
-            genesis.setSeaDrop(seaDrop);
-
-            vm.broadcast();
-            genesis.setPhase(NormieGenesisMinter.Phase.Public);
-
-            vm.broadcast();
-            genesis.mintPublicFor(previewRecipient, sampleMints);
+            deployment.agentRegistry.setAgentBinding(
+                NormieAddresses.NORMIES,
+                config.agentNormieId,
+                true,
+                config.agentId
+            );
         }
 
+        vm.broadcast();
+        deployment.genesis.finalizeSnapshot();
+
+        vm.broadcast();
+        deployment.genesis.setSeaDrop(config.seaDrop);
+
+        vm.broadcast();
+        deployment.genesis.setPhase(NormieGenesisMinter.Phase.Public);
+
+        vm.broadcast();
+        deployment.genesis.mintPublicFor(config.previewRecipient, config.sampleMints);
+    }
+
+    function _logDeployment(PreviewConfig memory config, Deployment memory deployment) private pure {
         console2.log("Mainnet Normies", NormieAddresses.NORMIES);
         console2.log("Mainnet NormiesStorage", NormieAddresses.NORMIES_STORAGE);
-        console2.log("CubeNFT", address(cubes));
-        console2.log("RendererAssetStore", address(assetStore));
-        console2.log("AgentStatusRegistry", address(agentRegistry));
-        console2.log("CubeRendererV2", address(renderer));
-        console2.log("NormieGenesisMinter", address(genesis));
-        console2.log("SeaDrop", seaDrop);
-        console2.log("Preview recipient", previewRecipient);
-        console2.log("Sample mints", sampleMints);
-        console2.log("First Normie ID", firstNormieId);
-        console2.log("Sample agent Normie ID", agentNormieId);
-        console2.log("Sample agent ID", agentId);
-
-        _writeViewerConfig(
-            configOut,
-            block.chainid,
-            address(cubes),
-            address(genesis),
-            address(renderer),
-            address(assetStore),
-            address(agentRegistry)
-        );
+        console2.log("CubeNFT", address(deployment.cubes));
+        console2.log("RendererAssetStore", address(deployment.assetStore));
+        console2.log("AgentStatusRegistry", address(deployment.agentRegistry));
+        console2.log("CubeRendererV2", address(deployment.renderer));
+        console2.log("NormieGenesisMinter", address(deployment.genesis));
+        console2.log("SeaDrop", config.seaDrop);
+        console2.log("Preview recipient", config.previewRecipient);
+        console2.log("Sample mints", config.sampleMints);
+        console2.log("First Normie ID", config.firstNormieId);
+        console2.log("Sample agent Normie ID", config.agentNormieId);
+        console2.log("Sample agent ID", config.agentId);
     }
 
     function _writeViewerConfig(
