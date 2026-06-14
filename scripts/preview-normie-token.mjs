@@ -112,11 +112,24 @@ async function main() {
   const sourceToken = metadata.attributes?.find(a => a.trait_type === 'Source Token ID')?.value;
   const agentic = metadata.attributes?.find(a => a.trait_type === 'Agentic')?.value;
   const agent = metadata.attributes?.find(a => a.trait_type === 'Agent ID')?.value;
+  if (String(sourceToken) !== String(normieId)) {
+    throw new Error(
+      `Preview exported Normie ${sourceToken || 'unknown'}, expected ${normieId}. ` +
+      'The deploy/export state is stale; restart Anvil and rerun the preview command.'
+    );
+  }
+
+  const htmlPath = path.join(outDir, `cube-${tokenId}.html`);
+  const namedHtmlPath = path.join(outDir, `normie-${normieId}.html`);
+  const namedMetadataPath = path.join(outDir, `normie-${normieId}.metadata.json`);
+  await fs.copyFile(htmlPath, namedHtmlPath);
+  await fs.copyFile(metadataPath, namedMetadataPath);
 
   console.log('\nPreview ready');
   console.log(`Normie:   ${sourceToken}`);
   console.log(`Agentic:  ${agentic || 'N'}${agent && agent !== '0' ? ` / ${agent}` : ''}`);
-  console.log(`HTML:     ${path.join(outDir, `cube-${tokenId}.html`)}`);
+  console.log(`HTML:     ${namedHtmlPath}`);
+  console.log(`Cube HTML:${htmlPath}`);
   console.log(`Metadata: ${metadataPath}`);
 }
 
