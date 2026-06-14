@@ -86,7 +86,7 @@ contract CubeRendererV2Test is Test {
         uint256 cubeId = cubes.mintNormieCube(6722, 8, bytes32("seed"));
 
         string memory uri = cubes.tokenURI(cubeId);
-        assertTrue(_startsWith(uri, "data:application/json;base64,"));
+        assertTrue(_startsWith(uri, "data:application/json;utf8,"));
     }
 
     function testAssetStoreChunksOverrideDefaultHTMLShell() public {
@@ -106,10 +106,42 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(html, "window.BLOCKCASSONE_TOKEN"));
     }
 
+    function testAssetStoreAssemblesMultipleScriptChunks() public {
+        vm.startPrank(OWNER);
+        assets.setChunk(renderer.HTML_HEAD_CHUNK(), "<html><body>custom-head");
+        assets.setChunk(renderer.HTML_SCRIPT_START_CHUNK(), "<script>");
+        assets.setChunk(renderer.HTML_SCRIPT_START_CHUNK() + 1, "partA();");
+        assets.setChunk(renderer.HTML_SCRIPT_START_CHUNK() + 2, "partB();</script></body></html>");
+        vm.stopPrank();
+
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(6722, 64, bytes32("seed"));
+
+        string memory html = renderer.animationHTML(cubeId);
+        assertTrue(_contains(html, "custom-head"));
+        assertTrue(_contains(html, "window.BLOCKCASSONE_TOKEN"));
+        assertTrue(_contains(html, "<script>partA();partB();</script></body></html>"));
+    }
+
+    function testOwnerCanTrimAssetChunkCount() public {
+        vm.startPrank(OWNER);
+        assets.setChunk(7, "later");
+        assertEq(assets.chunkCount(), 8);
+        assets.setChunkCount(2);
+        assertEq(assets.chunkCount(), 2);
+        vm.stopPrank();
+    }
+
     function testNonOwnerCannotSetAssetChunk() public {
         vm.prank(MINTER);
         vm.expectRevert();
         assets.setChunk(0, "nope");
+    }
+
+    function testNonOwnerCannotSetAssetChunkCount() public {
+        vm.prank(MINTER);
+        vm.expectRevert();
+        assets.setChunkCount(0);
     }
 
     function _startsWith(string memory value, string memory prefix) private pure returns (bool) {

@@ -1,18 +1,8 @@
 // Normie data layer — fetch cache, pixel arrays, texture cache.
 // Owns all shared mutable state; other normie modules import accessors from here.
 
-import {
-  fetchNormiePixels,
-  fetchNormieOriginalPixels,
-  fetchNormieCanvasPixels,
-  fetchNormieCanvasDiff,
-  fetchNormieCanvasInfo,
-  fetchNormieTraits,
-  fetchNormieBurnedInfo,
-  fetchAgentBinding,
-} from '../normies-api.js';
-import { isAssignedNormieCube, normieIdFromAssignedNft } from '../wallet-nfts.js';
-import { inflateNormieArt } from '../art-snapshot.js';
+import { normieIdFromAssignedNft } from '../assignment.js';
+import { compactNormieArtFromRaw, inflateNormieArt } from '../art-snapshot.js';
 
 // ---------------------------------------------------------------------------
 // Module-level state
@@ -27,6 +17,14 @@ const statusFetchCache = new Map();
 const pixelCache       = new Map();
 export const normieCache = new Map();
 const texCache         = new Map();
+
+let normiesApiPromise = null;
+function loadNormiesApi() {
+  if (!normiesApiPromise) {
+    normiesApiPromise = import('../' + 'normies-api.js');
+  }
+  return normiesApiPromise;
+}
 
 export function initNormiesManager(gl, planes) {
   gl_ = gl;
@@ -89,14 +87,14 @@ function pixelArrayForRole(data, role) {
 export function ensureFetched(id) {
   if (id === null || id === undefined) return;
   if (fetchCache.has(id)) return;
-  const p = Promise.all([
-    fetchNormiePixels(id),
-    fetchNormieOriginalPixels(id),
-    fetchNormieCanvasPixels(id),
-    fetchNormieCanvasDiff(id).catch(err => { logOptionalFetchFailure('canvas diff', id, err); return null; }),
-    fetchNormieCanvasInfo(id).catch(err => { logOptionalFetchFailure('canvas info', id, err); return null; }),
-    fetchNormieTraits(id).catch(err => { logOptionalFetchFailure('traits', id, err); return null; }),
-  ]).then(([current, original, canvas, diff, info, traits]) => {
+  const p = loadNormiesApi().then(api => Promise.all([
+    api.fetchNormiePixels(id),
+    api.fetchNormieOriginalPixels(id),
+    api.fetchNormieCanvasPixels(id),
+    api.fetchNormieCanvasDiff(id).catch(err => { logOptionalFetchFailure('canvas diff', id, err); return null; }),
+    api.fetchNormieCanvasInfo(id).catch(err => { logOptionalFetchFailure('canvas info', id, err); return null; }),
+    api.fetchNormieTraits(id).catch(err => { logOptionalFetchFailure('traits', id, err); return null; }),
+  ])).then(([current, original, canvas, diff, info, traits]) => {
     const prev   = normieCache.get(id) || {};
     const edited = Boolean(info?.customized) || canvas.some(v => v !== 0);
     normieCache.set(id, { ...prev, current, original, canvas, diff, info, traits, edited, category: classifyNormie({ ...prev, edited }) });
@@ -130,14 +128,19 @@ export function hydrateNormieArtSnapshot(snapshot) {
   if (gl_ && !texCache.has(data.id)) texCache.set(data.id, makeNormieTexture(gl_, data.current));
 }
 
+export function hydrateNormieRawBytes({ id, raw, traits = null, agentic = false, agentId = '' }) {
+  const snapshot = compactNormieArtFromRaw({ id, raw, traits, agentic, agentId });
+  if (snapshot) hydrateNormieArtSnapshot(snapshot);
+}
+
 export function ensureNormieStatusFetched(id) {
   if (id === null || id === undefined) return;
   ensureFetched(id);
   if (statusFetchCache.has(id)) return;
-  const p = Promise.all([
-    fetchNormieBurnedInfo(id).catch(err => { if (err?.message && !err.message.includes('404')) console.warn(`[normies] burned info failed ${id}:`, err); return null; }),
-    fetchAgentBinding(id).catch(err => { logOptionalFetchFailure('agent binding', id, err); return null; }),
-  ]).then(([burnedInfo, bindingInfo]) => {
+  const p = loadNormiesApi().then(api => Promise.all([
+    api.fetchNormieBurnedInfo(id).catch(err => { if (err?.message && !err.message.includes('404')) console.warn(`[normies] burned info failed ${id}:`, err); return null; }),
+    api.fetchAgentBinding(id).catch(err => { logOptionalFetchFailure('agent binding', id, err); return null; }),
+  ])).then(([burnedInfo, bindingInfo]) => {
     const prev = normieCache.get(id) || {};
     const next = { ...prev, burnedInfo, bindingInfo, burned: isBurnedPayload(burnedInfo), awakened: Boolean(bindingInfo?.binding) };
     next.category = classifyNormie(next);

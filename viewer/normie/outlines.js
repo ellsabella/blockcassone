@@ -1,6 +1,6 @@
 // Normie outline meshes — 2D silhouette and plane-edge outlines.
 
-import { mat4, identity } from '/renderer/src/math.js';
+import { mat4, identity } from '../../renderer/src/math.js';
 import { uvToWorld, planeBasis } from '../materials/plane-2d.js';
 import { buildCoreLineMesh, buildGlowLineMesh, planePerpFn } from '../materials/line-mesh.js';
 import { normieIdForCube } from './status.js';

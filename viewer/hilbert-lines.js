@@ -6,7 +6,7 @@
 //   core pass  → 'lines' material (thin bright strip)
 //   glow pass  → 'normie-glow' material (wide capsule-SDF Gaussian, smooth round caps)
 
-import { mat4, identity } from '/renderer/src/math.js';
+import { mat4, identity } from '../renderer/src/math.js';
 import { worldPerp, buildCoreLineMesh, buildGlowLineMesh } from './materials/line-mesh.js';
 
 const GREEN        = new Float32Array([0.0, 1.0, 0.2]);

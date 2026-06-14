@@ -130,6 +130,29 @@ export function compactNormieArt({ id, current, original, canvas, traits, agenti
   return art;
 }
 
+export function rawNormieBytesToPixels(raw) {
+  if (!raw || raw.length !== 200) return null;
+  const pixels = new Uint8Array(1600);
+  for (let i = 0; i < 1600; i++) {
+    pixels[i] = (raw[i >> 3] >> (7 - (i & 7))) & 1;
+  }
+  return pixels;
+}
+
+export function compactNormieArtFromRaw({ id, raw, traits, agentic, agentId }) {
+  const current = rawNormieBytesToPixels(raw);
+  if (!current) return null;
+  return compactNormieArt({
+    id,
+    current,
+    original: current,
+    canvas: new Uint8Array(1600),
+    traits,
+    agentic,
+    agentId,
+  });
+}
+
 export function inflateNormieArt(art) {
   if (!art || art.k !== 'n') return null;
   const current = unpackBits(art.p, 1600);

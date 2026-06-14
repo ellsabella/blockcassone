@@ -4,6 +4,8 @@
   "description": "On-chain generative art — Hilbert cubes + swappable SDF materials.",
   "scripts": {
     "start": "node renderer/server.js",
+    "build:token-renderer": "node scripts/build-token-renderer.mjs",
+    "upload:token-renderer": "node scripts/upload-renderer-chunks.mjs",
     "export:token-html": "node scripts/export-token-html.mjs",
     "snapshot:normies": "node scripts/take-normie-snapshot.mjs",
     "snapshot:merkle": "node scripts/build-normie-merkle.mjs"

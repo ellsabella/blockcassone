@@ -1,4 +1,4 @@
-import { createMeshGL } from '/renderer/src/geometry.js';
+import { createMeshGL } from '../../renderer/src/geometry.js';
 
 // Robust world-space perpendicular for any segment direction.
 export function worldPerp(ddx, ddy, ddz) {

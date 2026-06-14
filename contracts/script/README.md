@@ -79,6 +79,47 @@ and writes:
 The script also scans the HTML for obvious offchain dependencies such as
 `fetch()`, `/api/normies`, `api.normies.art`, and remote `http(s)` URLs.
 
+## Mainnet-Fork Token Preview
+
+`DeployLocalGenesis` uses synthetic `LocalMockNormies` bitmap data. It proves
+the renderer/chunk/tokenURI pipeline, but it is not suitable for judging whether
+the cube looks like a real Normie.
+
+To preview against real Normie art, run Anvil as a mainnet fork:
+
+```bash
+anvil --fork-url "$ETH_RPC_URL"
+```
+
+Then deploy the preview stack. This script points `CubeNFT.normieContract` at
+the real Normies contract and points `CubeRendererV2.normieStorage` at the real
+NormiesStorage contract, while still deploying the Blockcassone contracts
+locally on the fork:
+
+```bash
+forge script contracts/script/DeployMainnetNormiePreview.s.sol:DeployMainnetNormiePreview \
+  --rpc-url http://127.0.0.1:8545 \
+  --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+  --broadcast
+```
+
+Optional environment variables:
+
+- `BLOCKCASSONE_SAMPLE_MINTS`: number of preview cubes to mint, default `3`.
+- `BLOCKCASSONE_SAMPLE_NORMIE_START`: first real Normie ID to preview, default
+  `1`.
+
+After deployment, upload the renderer chunks and export the token HTML:
+
+```bash
+npm run upload:token-renderer
+npm run export:token-html -- --token-id=1 --source=token-uri
+```
+
+The exported HTML should now be generated from real NormiesStorage raw bytes,
+not the synthetic local mock pattern.
+
 ## Mainnet Normie Data Inspection
 
 Before locking the final onchain renderer around Normie storage bytes, inspect

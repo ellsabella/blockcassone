@@ -1,19 +1,15 @@
 // Blockcassone viewer — dev tool for previewing artwork.
 
-import { mat4, identity, v3Normalize, vec3, multiply, invert } from '/renderer/src/math.js';
-import { createBox, createWireframeBox, createMeshGL }         from '/renderer/src/geometry.js';
-import { loadMaterial }                                        from '/renderer/src/materials.js';
+import { mat4, identity, v3Normalize, vec3, multiply, invert } from '../renderer/src/math.js';
+import { createBox, createWireframeBox, createMeshGL }         from '../renderer/src/geometry.js';
+import { loadMaterial }                                        from '../renderer/src/materials.js';
 import { faceOnCamera }                                        from './camera.js';
 import { createOrbitCamera }                                   from './orbit-camera.js';
 import { createLights, MAX_POINT_LIGHTS }                      from './lights.js';
-import { buildForestPlane }                                    from './materials/forest.js';
 import { buildEdgePointDebug }                                 from './materials/debug-edge-points.js';
-import { buildCubeGlass }                                      from './cube-glass.js';
 import { computeMirrorSlices }                                 from './internal-planes.js';
 import {
   initNormiesManager, setDataReadyCallback, setBannerDataReadyCallback,
-  build2DOutline, build3DVoxels, buildPlaneOutline, buildNormieIdLabel,
-  buildNormieTraitsBanner, isNormieCube,
 } from './normies-manager.js';
 import { buildHilbertLines, buildFullHilbertPath, buildHilbertPathRange } from './hilbert-lines.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
@@ -38,9 +34,9 @@ import {
   sourceNftForSlot,
 } from './mint-simulator.js';
 import {
-  applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor, applyBannerGlitch,
-  applyAgenticAwakening, applyAgenticBannerPulse,
+  applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor,
 } from './scene/styling.js';
+import { pushDetailMotifItems, pushDetailPlaneItems } from './detail-scene-builder.js';
 import { buildEmptySlotItems, environmentNameForStreet } from './environments.js';
 import {
   ensureMotifCategory, visibleMotifs, visiblePlanes, categoryCounts,
@@ -1716,8 +1712,6 @@ window.addEventListener('keydown', (e) => {
 initNormiesManager(gl, serializedPlanes);
 
 // Plane-material → scene-item builders. First matching builder wins.
-const BUILDERS = [buildForestPlane];
-
 // ---------- Orbit camera + debug lights ----------
 function eventInCubeDetail(e) {
   if (!cubeDetailOpen || !cubeDetailEl) return false;
@@ -2092,128 +2086,41 @@ let lastCamPos = null;
 // applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor imported from scene/styling.js
 
 function pushMotifItems(itemsOut, motifIdx, renderMode, dim) {
-  if (renderMode === 'BIG') {
-    const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
-    const cubePlanes = planesForMotif(motifIdx);
-
-    const hlItems = buildHilbertLines(motifIdx, hilbert, gl, meshes);
-    if (agenticNonNormie) applyAgenticAwakening(hlItems);
-    applyDim(hlItems, dim);
-    if (hlItems?.length) itemsOut.push(...hlItems);
-
-    const cardItems = buildCubeCardioid(motifIdx, hilbert, cubePlanes, gl, meshes);
-    if (agenticNonNormie) applyAgenticAwakening(cardItems);
-    applyDim(cardItems, dim);
-    if (cardItems?.length) itemsOut.push(...cardItems);
-    return;
-  }
-
-  const cat = ensureMotifCategory(motifIdx);
-  const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
-
-  if (showCubeGlass && renderMode === '3D') {
-    const glassItems = buildCubeGlass(motifIdx, hilbert, gl, meshes, renderMode);
-    applyMotifStyle(glassItems, cat, motifIdx);
-    if (agenticNonNormie) applyAgenticAwakening(glassItems);
-    if (glassItems?.length) itemsOut.push(...glassItems);
-  }
-
-  const walkerItems = buildStoneWalker(motifIdx, hilbert, serializedPlanes, gl, meshes);
-  applyMotifStyle(walkerItems, cat, motifIdx);
-  if (agenticNonNormie) applyAgenticAwakening(walkerItems);
-  applyDim(walkerItems, dim);
-  if (walkerItems?.length) itemsOut.push(...walkerItems);
-
-  const voxelItems = build3DVoxels(motifIdx, hilbert, serializedPlanes, gl, meshes);
-  applyMotifStyle(voxelItems, cat, motifIdx);
-  if (agenticNonNormie) applyAgenticAwakening(voxelItems);
-  applyDim(voxelItems, dim);
-  if (voxelItems?.length) itemsOut.push(...voxelItems);
-
-  const hlItems = buildHilbertLines(motifIdx, hilbert, gl, meshes);
-  applyMotifStyle(hlItems, cat, motifIdx);
-  if (agenticNonNormie) applyAgenticAwakening(hlItems);
-  applyDim(hlItems, dim);
-  if (hlItems?.length) itemsOut.push(...hlItems);
-
-  const cardItems = buildCubeCardioid(motifIdx, hilbert, serializedPlanes, gl, meshes);
-  applyMotifStyle(cardItems, cat, motifIdx);
-  if (agenticNonNormie) applyAgenticAwakening(cardItems);
-  applyDim(cardItems, dim);
-  if (cardItems?.length) itemsOut.push(...cardItems);
+  pushDetailMotifItems({
+    itemsOut,
+    motifIdx,
+    renderMode,
+    dim,
+    hilbert,
+    serializedPlanes,
+    planesForMotif,
+    gl,
+    meshes,
+    showCubeGlass,
+    isAgenticNonNormieCube,
+    categoryForMotif: ensureMotifCategory,
+  });
 }
 
 function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
-  const motifIdx = plane.hierarchy.motifIndex;
-  const cat = ensureMotifCategory(motifIdx);
-  const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
-
-  if (isNormieCube(motifIdx)) {
-    for (const builder of BUILDERS) {
-      const result = builder(plane, hilbert, gl, meshes, renderMode, cubeCtx);
-      if (!result) continue;
-      const items = Array.isArray(result) ? result : [result];
-      applyMotifStyle(items, cat, motifIdx);
-      applyDim(items, dim);
-      itemsOut.push(...items);
-      break;
-    }
-  } else {
-    const artItems = buildNonNormieArtworkPlane(plane, serializedPlanes, gl, meshes);
-    if (agenticNonNormie) applyAgenticAwakening(artItems);
-    applyDim(artItems, dim);
-    if (artItems?.length) itemsOut.push(...artItems);
-
-    const nonNormieWalkerItems = buildNonNormieWalker(plane, serializedPlanes, gl, meshes);
-    if (agenticNonNormie) applyAgenticAwakening(nonNormieWalkerItems);
-    applyDim(nonNormieWalkerItems, dim);
-    if (nonNormieWalkerItems?.length) itemsOut.push(...nonNormieWalkerItems);
-
-    const bannerItems = buildNonNormieBanner(plane, serializedPlanes, gl, meshes);
-    applyBannerGlitch(bannerItems, null);
-    if (agenticNonNormie) applyAgenticBannerPulse(bannerItems);
-    applyDim(bannerItems, dim);
-    if (bannerItems?.length) itemsOut.push(...bannerItems);
-
-    if (agenticNonNormie) {
-      const forestItems = buildForestPlane(plane, hilbert, gl, meshes, renderMode, cubeCtx);
-      const items = Array.isArray(forestItems) ? forestItems : (forestItems ? [forestItems] : []);
-      applyAgenticAwakening(items);
-      applyDim(items, dim);
-      if (items.length) itemsOut.push(...items);
-    }
-  }
-
-  const outlineItems = build2DOutline(plane, gl, meshes);
-  applyMotifStyle(outlineItems, cat, motifIdx);
-  applyDim(outlineItems, dim);
-  if (outlineItems?.length) itemsOut.push(...outlineItems);
-
-  if (isNormieCube(motifIdx)) {
-    const idLabelItems = buildNormieIdLabel(plane, gl, meshes);
-    applyMotifStyle(idLabelItems, cat, motifIdx);
-    applyDim(idLabelItems, dim);
-    if (idLabelItems?.length) itemsOut.push(...idLabelItems);
-
-    const traitsBannerItems = buildNormieTraitsBanner(plane, hilbert, gl, meshes);
-    applyMotifStyle(traitsBannerItems, cat, motifIdx);
-    applyBannerGlitch(traitsBannerItems, cat);
-    applyDim(traitsBannerItems, dim);
-    if (traitsBannerItems?.length) itemsOut.push(...traitsBannerItems);
-  }
-
-  const hilbertEdgeItems = buildPlaneOutline(plane, gl, meshes);
-  applyMotifStyle(hilbertEdgeItems, cat, motifIdx);
-  applyDim(hilbertEdgeItems, dim);
-  if (hilbertEdgeItems?.length) itemsOut.push(...hilbertEdgeItems);
-
-  if (showEdgePoints) {
-    const dbg = buildEdgePointDebug(plane, gl, meshes);
-    const items = Array.isArray(dbg) ? dbg.filter(Boolean) : (dbg ? [dbg] : []);
-    applyMotifStyle(items, cat, motifIdx);
-    applyDim(items, dim);
-    itemsOut.push(...items);
-  }
+  pushDetailPlaneItems({
+    itemsOut,
+    plane,
+    renderMode,
+    cubeCtx,
+    dim,
+    hilbert,
+    serializedPlanes,
+    gl,
+    meshes,
+    showEdgePoints,
+    buildEdgePointDebug,
+    buildNonNormieArtworkPlane,
+    buildNonNormieWalker,
+    buildNonNormieBanner,
+    isAgenticNonNormieCube,
+    categoryForMotif: ensureMotifCategory,
+  });
 }
 
 function bigModeDimForMotif(motifIdx) {

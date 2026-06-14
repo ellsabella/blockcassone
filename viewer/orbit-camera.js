@@ -7,7 +7,7 @@
 // Replaces the fixed `isoCubeCamera` in 3D mode so we can inspect the glass
 // shader from any angle. The 2D face-on camera still uses `faceOnCamera`.
 
-import { mat4, vec3, lookAt, perspective } from '/renderer/src/math.js';
+import { mat4, vec3, lookAt, perspective } from '../renderer/src/math.js';
 
 export function createOrbitCamera(canvas, opts = {}) {
   const shouldHandleEvent = opts.shouldHandleEvent || (() => true);

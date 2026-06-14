@@ -3,8 +3,8 @@
 import { isNormieCube, normieIdForCube } from './status.js';
 import { ensureFetched, getPlanePixelArray, makePlanePixelFn } from './api.js';
 import { otsuRecursiveBands } from '../nft-art-grid.js';
-import { createMeshGL } from '/renderer/src/geometry.js';
-import { mat4, identity } from '/renderer/src/math.js';
+import { createMeshGL } from '../../renderer/src/geometry.js';
+import { mat4, identity } from '../../renderer/src/math.js';
 
 const VOXEL_RED            = new Float32Array([1.0, 0.08, 0.04]);
 const VOXEL_SHRINK         = 0.46;

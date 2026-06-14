@@ -16,6 +16,7 @@ contract CubeRendererV2 is ICubeRenderer {
 
     uint256 public constant HTML_HEAD_CHUNK = 0;
     uint256 public constant HTML_SCRIPT_CHUNK = 1;
+    uint256 public constant HTML_SCRIPT_START_CHUNK = 1;
 
     CubeNFT public immutable cubes;
     RendererAssetStore public immutable assets;
@@ -28,9 +29,7 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function tokenURI(uint256 tokenId) external view returns (string memory) {
-        return string.concat(
-            "data:application/json;base64,", Base64.encode(bytes(metadataJSON(tokenId)))
-        );
+        return string.concat("data:application/json;utf8,", metadataJSON(tokenId));
     }
 
     function metadataJSON(uint256 tokenId) public view returns (string memory) {
@@ -93,7 +92,7 @@ contract CubeRendererV2 is ICubeRenderer {
         return string.concat(
             _chunkOrDefault(HTML_HEAD_CHUNK, _defaultHTMLHead()),
             _tokenConfig(tokenId, data),
-            _chunkOrDefault(HTML_SCRIPT_CHUNK, _defaultHTMLScript())
+            _scriptChunksOrDefault()
         );
     }
 
@@ -195,6 +194,19 @@ contract CubeRendererV2 is ICubeRenderer {
         return bytes(content).length == 0 ? fallbackContent : content;
     }
 
+    function _scriptChunksOrDefault() private view returns (string memory) {
+        uint256 count = assets.chunkCount();
+        if (count <= HTML_SCRIPT_START_CHUNK) {
+            return _chunkOrDefault(HTML_SCRIPT_CHUNK, _defaultHTMLScript());
+        }
+
+        string memory out = "";
+        for (uint256 i = HTML_SCRIPT_START_CHUNK; i < count; i++) {
+            out = string.concat(out, assets.chunk(i));
+        }
+        return bytes(out).length == 0 ? _defaultHTMLScript() : out;
+    }
+
     function _defaultHTMLHead() private pure returns (string memory) {
         return
         "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020203;color:#ff98d9;font:13px monospace}canvas{width:100vw;height:100vh;display:block}.h{position:fixed;left:14px;bottom:12px;padding:9px 11px;border:2px solid #ff3ab8;background:#070208cc;text-shadow:0 0 10px #ff3ab8}</style></head><body><canvas id=c></canvas><div class=h id=h>Blockcassone</div>";
@@ -202,6 +214,6 @@ contract CubeRendererV2 is ICubeRenderer {
 
     function _defaultHTMLScript() private pure returns (string memory) {
         return
-        "<script>(()=>{const T=window.BLOCKCASSONE_TOKEN,G=40,P=1600,C=document.getElementById('c'),H=document.getElementById('h'),gl=C.getContext('webgl');if(!gl){H.textContent='WebGL unavailable';return}function bytes(b){let s=atob(b||''),o=new Uint8Array(P);for(let i=0;i<P;i++)o[i]=(s.charCodeAt(i>>3)>>(7-(i&7)))&1;return o}let pix=bytes(T.raw),on=pix.reduce((a,b)=>a+b,0),yaw=.8,pit=-.35,dis=3.3,drag=0,lx=0,ly=0;C.onpointerdown=e=>{drag=1;lx=e.clientX;ly=e.clientY;C.setPointerCapture(e.pointerId)};C.onpointerup=e=>{drag=0;C.releasePointerCapture(e.pointerId)};C.onpointermove=e=>{if(!drag)return;yaw+=(e.clientX-lx)*.007;pit=Math.max(-1.3,Math.min(1.3,pit+(e.clientY-ly)*.006));lx=e.clientX;ly=e.clientY};C.onwheel=e=>{e.preventDefault();dis=Math.max(1.7,Math.min(7,dis*Math.exp(e.deltaY*.0012)))};let vs='attribute vec3 p,c;uniform mat4 m;varying vec3 v;void main(){v=c;gl_Position=m*vec4(p,1.);gl_PointSize=4.;}',fs='precision mediump float;varying vec3 v;void main(){gl_FragColor=vec4(v,1.);}';function sh(t,s){let x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);return x}let pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);let a=[],v=(p,c)=>a.push(p[0],p[1],p[2],c[0],c[1],c[2]),sg=(a0,b,c)=>{v(a0,c);v(b,c)},cell=x=>x/G*2-1,get=(r,c)=>r<0||r>=G||c<0||c>=G?0:pix[r*G+c];for(let r=0;r<G;r++)for(let c=0;c<G;c++)if(get(r,c)){let x=cell(c+.5),y=-cell(r+.5),z=1;if(!get(r-1,c))sg([cell(c),-cell(r),z],[cell(c+1),-cell(r),z],[1.4,.02,.05]);if(!get(r+1,c))sg([cell(c),-cell(r+1),z],[cell(c+1),-cell(r+1),z],[1.4,.02,.05]);if(!get(r,c-1))sg([cell(c),-cell(r),z],[cell(c),-cell(r+1),z],[1.4,.02,.05]);if(!get(r,c+1))sg([cell(c+1),-cell(r),z],[cell(c+1),-cell(r+1),z],[1.4,.02,.05]);v([x,y,.4],[.2,1.2,.2])}let s=1.02,ed=[[-s,-s,-s],[s,-s,-s],[s,s,-s],[-s,s,-s],[-s,-s,s],[s,-s,s],[s,s,s],[-s,s,s]],ei=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];ei.forEach(e=>sg(ed[e[0]],ed[e[1]],[1,.1,.7]));let buf=gl.createBuffer(),arr=new Float32Array(a);gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,arr,gl.STATIC_DRAW);function mat(){return new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1])}function frame(){let d=Math.min(2,devicePixelRatio||1),w=C.clientWidth*d,h=C.clientHeight*d;if(C.width!=w||C.height!=h){C.width=w;C.height=h}gl.viewport(0,0,C.width,C.height);gl.clearColor(.006,.006,.008,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(pr);let m=mat();m[0]=Math.cos(yaw)/1.5;m[2]=Math.sin(yaw)/1.5;m[5]=Math.cos(pit)/1.5;m[10]=1/dis;gl.uniformMatrix4fv(gl.getUniformLocation(pr,'m'),0,m);gl.bindBuffer(gl.ARRAY_BUFFER,buf);let P0=gl.getAttribLocation(pr,'p'),C0=gl.getAttribLocation(pr,'c');gl.enableVertexAttribArray(P0);gl.enableVertexAttribArray(C0);gl.vertexAttribPointer(P0,3,gl.FLOAT,0,24,0);gl.vertexAttribPointer(C0,3,gl.FLOAT,0,24,12);gl.drawArrays(gl.LINES,0,arr.length/6);H.textContent='Cube #'+T.tokenId+' / Normie #'+T.sourceTokenId+' / plot '+T.slot+' / '+on+' lit pixels';requestAnimationFrame(frame)}frame()})();</script></body></html>";
+        "<script>(()=>{const T=window.BLOCKCASSONE_TOKEN,H=document.getElementById('h'),C=document.getElementById('c'),x=C.getContext('2d');C.width=innerWidth;C.height=innerHeight;x.fillStyle='#020203';x.fillRect(0,0,C.width,C.height);x.fillStyle='#ff98d9';x.font='700 18px monospace';x.fillText('Renderer asset chunks are not installed.',32,54);x.fillStyle='#aaffb2';x.font='14px monospace';x.fillText('Cube #'+T.tokenId+' / Normie #'+T.sourceTokenId+' / plot '+T.slot,32,84);H.textContent='Blockcassone renderer fallback';})();</script></body></html>";
     }
 }

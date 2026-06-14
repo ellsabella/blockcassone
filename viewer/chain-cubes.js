@@ -1,5 +1,5 @@
 import { NORMIES_CONTRACT } from './wallet-nfts.js';
-import { compactNormieArt } from './art-snapshot.js';
+import { compactNormieArtFromRaw } from './art-snapshot.js';
 
 const SELECTORS = {
   nextCubeId: '0xfee34352',
@@ -7,9 +7,6 @@ const SELECTORS = {
   ownerOf: '0x6352211e',
   rawImageData: '0x6985bf3c',
 };
-
-const NORMIE_PIXEL_COUNT = 1600;
-const NORMIE_RAW_BYTES = NORMIE_PIXEL_COUNT / 8;
 
 let configCache = null;
 
@@ -59,29 +56,6 @@ function decodeAbiBytes(hex) {
     out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2) || '00', 16);
   }
   return out;
-}
-
-function rawNormieBytesToPixels(raw) {
-  if (!raw || raw.length !== NORMIE_RAW_BYTES) return null;
-  const pixels = new Uint8Array(NORMIE_PIXEL_COUNT);
-  for (let i = 0; i < NORMIE_PIXEL_COUNT; i++) {
-    pixels[i] = (raw[i >> 3] >> (7 - (i & 7))) & 1;
-  }
-  return pixels;
-}
-
-function compactNormieArtFromRaw(id, raw, record) {
-  const current = rawNormieBytesToPixels(raw);
-  if (!current) return null;
-  return compactNormieArt({
-    id,
-    current,
-    original: current,
-    canvas: new Uint8Array(NORMIE_PIXEL_COUNT),
-    traits: null,
-    agentic: Boolean(record?.agentic),
-    agentId: record?.agentId || '',
-  });
 }
 
 async function loadChainConfig() {
@@ -222,7 +196,13 @@ export async function loadChainMintRecords() {
         for (let i = 0; i < normieRecords.length; i++) {
           const id = Number(normieRecords[i].source.tokenId);
           const raw = decodeAbiBytes(rawRows[i]);
-          normieRecords[i].art = compactNormieArtFromRaw(id, raw, normieRecords[i]);
+          normieRecords[i].art = compactNormieArtFromRaw({
+            id,
+            raw,
+            traits: null,
+            agentic: Boolean(normieRecords[i]?.agentic),
+            agentId: normieRecords[i]?.agentId || '',
+          });
         }
       } catch (err) {
         console.warn('[chain-cubes] Normie raw art hydration failed; falling back to API fetches', err);

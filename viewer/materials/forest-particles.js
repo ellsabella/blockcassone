@@ -4,7 +4,7 @@
 
 import { hash1, V }                       from '../tree-walker.js';
 import { createInstancedBillboardMesh }   from '../instanced-mesh.js';
-import { mat4, identity }                 from '/renderer/src/math.js';
+import { mat4, identity }                 from '../../renderer/src/math.js';
 import { generateForestSegments } from './forest-grow.js';
 
 // --- Tuning ---

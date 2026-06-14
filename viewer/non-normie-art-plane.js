@@ -1,5 +1,5 @@
-import { createMeshGL } from '/renderer/src/geometry.js';
-import { mat4, identity } from '/renderer/src/math.js';
+import { createMeshGL } from '../renderer/src/geometry.js';
+import { mat4, identity } from '../renderer/src/math.js';
 import { hash1, V } from './tree-walker.js';
 import { getNonNormieGridForCube, getWalletAssignmentForCube } from './wallet-nfts.js';
 import { makePlanePixelFn, buildVoxelMesh, ensureBannerFont, renderBannerTexture } from './normies-manager.js';

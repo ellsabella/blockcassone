@@ -3,8 +3,8 @@
 // N jittered cubic-bezier strands rendered as additive GL_LINES.
 
 import { hash1, V }                    from '../tree-walker.js';
-import { createMeshGL }                from '/renderer/src/geometry.js';
-import { mat4, identity }              from '/renderer/src/math.js';
+import { createMeshGL }                from '../../renderer/src/geometry.js';
+import { mat4, identity }              from '../../renderer/src/math.js';
 import { generateForestSegments }      from './forest-grow.js';
 
 // --- Tuning ---

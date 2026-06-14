@@ -1,6 +1,6 @@
 // Normie ID label — "#NNNN" pixel-font glyphs in the bottom-right of each plane.
 
-import { mat4, identity } from '/renderer/src/math.js';
+import { mat4, identity } from '../../renderer/src/math.js';
 import { uvToWorld, planeBasis } from '../materials/plane-2d.js';
 import { buildCoreLineMesh, buildGlowLineMesh, planePerpFn } from '../materials/line-mesh.js';
 import { normieIdForCube } from './status.js';

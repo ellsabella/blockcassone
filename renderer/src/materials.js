@@ -147,6 +147,20 @@ export async function loadMaterial(gl, def) {
   };
 }
 
+export function loadMaterialFromSource(gl, def) {
+  const prog = compileProgram(gl, def.vertSource, def.fragSource, def.name);
+  if (!prog) throw new Error(`compile failed: ${def.name}`);
+  return {
+    name:      def.name,
+    phase:     def.phase,
+    vertPath:  def.vertPath || '',
+    fragPath:  def.fragPath || '',
+    uniforms:  def.uniforms || {},
+    program:   prog,
+    locations: cacheLocations(gl, prog, Object.keys(def.uniforms || {})),
+  };
+}
+
 // Recompile in place and swap the program pointer; keeps the material
 // reference stable so callers don't need to re-lookup.
 export async function reloadMaterial(gl, mat) {

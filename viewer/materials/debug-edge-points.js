@@ -5,7 +5,7 @@
 // cached separately so each plane contributes two scene items.
 
 import { createInstancedBillboardMesh } from '../instanced-mesh.js';
-import { mat4, identity } from '/renderer/src/math.js';
+import { mat4, identity } from '../../renderer/src/math.js';
 
 const BIT_SIZE    = 0.045;
 const CORNER_SIZE = 0.0825;

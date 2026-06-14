@@ -15,9 +15,9 @@
 // All randomness derives from motifIndex so a given cube always looks the
 // same. Caching is keyed by motifIndex.
 
-import { createMeshGL } from '/renderer/src/geometry.js';
+import { createMeshGL } from '../renderer/src/geometry.js';
 import { createInstancedBillboardMesh } from './instanced-mesh.js';
-import { mat4, identity } from '/renderer/src/math.js';
+import { mat4, identity } from '../renderer/src/math.js';
 import { hash1 } from './tree-walker.js';
 
 // --- Tuning ---

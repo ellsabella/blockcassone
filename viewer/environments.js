@@ -10,7 +10,7 @@
 // has Y as the unique axis, so the Y plane is the floor). Accents grow from
 // the plane inward toward the cube interior, never outward.
 
-import { createMeshGL, createPlane } from '/renderer/src/geometry.js';
+import { createMeshGL, createPlane } from '../renderer/src/geometry.js';
 import { createInstancedBillboardMesh } from './instanced-mesh.js';
 import { hash1, walkTree, V } from './tree-walker.js';
 import { worldPerp } from './materials/line-mesh.js';

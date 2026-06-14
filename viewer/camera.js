@@ -2,7 +2,7 @@
 // Float32Array matrices + a Float32Array camera position. The renderer
 // consumes these via the pipeline's shared frame uniforms.
 
-import { mat4, vec3, lookAt, ortho, multiply } from '/renderer/src/math.js';
+import { mat4, vec3, lookAt, ortho, multiply } from '../renderer/src/math.js';
 
 // Face-on orthographic camera, perpendicular to a plane's normal, framed
 // to the plane's four vertices. Used for 2D mode.

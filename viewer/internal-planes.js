@@ -15,8 +15,8 @@
 // asymmetric patterns get few or no slices and symmetric cubes get rich
 // internal articulation.
 
-import { createMeshGL } from '/renderer/src/geometry.js';
-import { mat4, identity } from '/renderer/src/math.js';
+import { createMeshGL } from '../renderer/src/geometry.js';
+import { mat4, identity } from '../renderer/src/math.js';
 
 const SLICE_EPS         = 1e-4;
 const MIN_MIRROR_COUNT  = 2;     // bump to 3/4 for stricter mirroring

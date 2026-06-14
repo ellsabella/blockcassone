@@ -8,7 +8,7 @@
 // termination works across stone planes.
 
 import { hash1 }      from '../tree-walker.js';
-import { mat4, identity } from '/renderer/src/math.js';
+import { mat4, identity } from '../../renderer/src/math.js';
 import { buildCoreLineMesh, buildGlowLineMesh, planePerpFn } from './line-mesh.js';
 import {
   normieIdForCube,

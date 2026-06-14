@@ -13,8 +13,8 @@
 // This is the same cross(segDir, faceNormal) trick used by buildCoreLineMesh —
 // half the quad extends outside the opaque surface and passes depth test.
 
-import { createMeshGL }   from '/renderer/src/geometry.js';
-import { mat4, identity } from '/renderer/src/math.js';
+import { createMeshGL }   from '../renderer/src/geometry.js';
+import { mat4, identity } from '../renderer/src/math.js';
 
 const CORE_WIDTH    = 0.0045;
 const GLOW_WIDTH    = 0.0375;

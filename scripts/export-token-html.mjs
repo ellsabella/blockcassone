@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import sha3 from 'js-sha3';
 
 const TOKEN_URI_SELECTOR = '0xc87b56dd';
+const { keccak_256 } = sha3;
 const DEFAULT_CONFIG = 'data/chain-config.json';
 const DEFAULT_TOKEN_ID = 1n;
 
@@ -31,6 +33,10 @@ function hexWord(value) {
 
 function calldata(selector, tokenId) {
   return `${selector}${hexWord(tokenId)}`;
+}
+
+function selector(signature) {
+  return `0x${keccak_256(signature).slice(0, 8)}`;
 }
 
 function words(hex) {
@@ -66,6 +72,21 @@ function parseDataUri(uri, expectedPrefix) {
   return Buffer.from(text.slice(comma + 1), 'base64');
 }
 
+function parseJsonDataUri(uri) {
+  const text = String(uri || '');
+  const comma = text.indexOf(',');
+  if (comma < 0) throw new Error('Missing comma in JSON data URI');
+  const header = text.slice(0, comma);
+  const body = text.slice(comma + 1);
+  if (header === 'data:application/json;base64') {
+    return JSON.parse(Buffer.from(body, 'base64').toString('utf8'));
+  }
+  if (header === 'data:application/json;utf8' || header === 'data:application/json') {
+    return JSON.parse(body);
+  }
+  throw new Error(`Expected application/json data URI, got ${header}`);
+}
+
 async function rpc(rpcUrl, payload) {
   const res = await fetch(rpcUrl, {
     method: 'POST',
@@ -76,6 +97,42 @@ async function rpc(rpcUrl, payload) {
   const data = await res.json();
   if (data?.error) throw new Error(data.error.message || JSON.stringify(data.error));
   return data.result;
+}
+
+async function ethCallString(rpcUrl, to, signature, tokenId) {
+  return decodeAbiString(await rpc(rpcUrl, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'eth_call',
+    params: [{
+      to,
+      data: calldata(selector(signature), tokenId),
+      // The production renderer can return a large HTML string. Local Anvil
+      // tolerates this higher ceiling for inspection.
+      gas: '0x5f5e100',
+    }, 'latest'],
+  }));
+}
+
+async function loadMetadataFromCubeTokenURI(rpcUrl, cubeNft, tokenId) {
+  const tokenURIResult = await rpc(rpcUrl, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'eth_call',
+    params: [{
+      to: cubeNft,
+      data: calldata(TOKEN_URI_SELECTOR, tokenId),
+      gas: '0x5f5e100',
+    }, 'latest'],
+  });
+
+  const tokenURI = stripQuotes(decodeAbiString(tokenURIResult));
+  return parseJsonDataUri(tokenURI);
+}
+
+async function loadMetadataFromRenderer(rpcUrl, renderer, tokenId) {
+  const json = stripQuotes(await ethCallString(rpcUrl, renderer, 'metadataJSON(uint256)', tokenId));
+  return JSON.parse(json);
 }
 
 function validateHtml(html) {
@@ -93,6 +150,8 @@ async function main() {
   const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
   const rpcUrl = argValue('--rpc-url', process.env.RPC_URL || config.rpcUrl || 'http://127.0.0.1:8545');
   const cubeNft = argValue('--cube-nft', process.env.CUBE_NFT || config.cubeNft || '');
+  const renderer = argValue('--renderer', process.env.CUBE_RENDERER || config.renderer || '');
+  const source = argValue('--source', 'auto');
   const tokenId = BigInt(argValue('--token-id', String(DEFAULT_TOKEN_ID)));
   const outDir = path.resolve(argValue(
     '--out-dir',
@@ -102,16 +161,26 @@ async function main() {
   if (!/^0x[0-9a-fA-F]{40}$/.test(cubeNft)) {
     throw new Error('Missing or invalid cube NFT address. Pass --cube-nft=0x...');
   }
+  if (source !== 'token-uri' && !/^0x[0-9a-fA-F]{40}$/.test(renderer)) {
+    throw new Error('Missing or invalid renderer address. Pass --renderer=0x...');
+  }
 
-  const tokenURIResult = await rpc(rpcUrl, {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'eth_call',
-    params: [{ to: cubeNft, data: calldata(TOKEN_URI_SELECTOR, tokenId) }, 'latest'],
-  });
+  let metadata;
+  let metadataSource = 'token-uri';
+  if (source === 'renderer') {
+    metadata = await loadMetadataFromRenderer(rpcUrl, renderer, tokenId);
+    metadataSource = 'renderer';
+  } else {
+    try {
+      metadata = await loadMetadataFromCubeTokenURI(rpcUrl, cubeNft, tokenId);
+    } catch (err) {
+      if (source === 'token-uri') throw err;
+      console.warn(`tokenURI export failed, falling back to renderer.metadataJSON: ${err?.message || err}`);
+      metadata = await loadMetadataFromRenderer(rpcUrl, renderer, tokenId);
+      metadataSource = 'renderer';
+    }
+  }
 
-  const tokenURI = stripQuotes(decodeAbiString(tokenURIResult));
-  const metadata = JSON.parse(parseDataUri(tokenURI, 'data:application/json').toString('utf8'));
   const html = parseDataUri(metadata.animation_url, 'data:text/html').toString('utf8');
   const svg = parseDataUri(metadata.image, 'data:image/svg+xml').toString('utf8');
 
@@ -127,6 +196,7 @@ async function main() {
   console.log(`html:     ${path.join(outDir, `cube-${tokenId}.html`)}`);
   console.log(`metadata: ${path.join(outDir, `cube-${tokenId}.metadata.json`)}`);
   console.log(`image:    ${path.join(outDir, `cube-${tokenId}.image.svg`)}`);
+  console.log(`metadata source: ${metadataSource}`);
   console.log(`raw bytes embedded: ${rawMatch?.[1] ? 'yes' : 'no'}`);
   console.log(`offchain dependency scan: ${dependencyWarnings.length ? dependencyWarnings.join(', ') : 'clean'}`);
 }

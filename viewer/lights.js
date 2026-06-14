@@ -9,7 +9,7 @@
 // position change.
 
 import { createInstancedBillboardMesh } from './instanced-mesh.js';
-import { mat4, identity }               from '/renderer/src/math.js';
+import { mat4, identity }               from '../renderer/src/math.js';
 
 export const MAX_POINT_LIGHTS = 8;
 

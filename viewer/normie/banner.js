@@ -1,7 +1,7 @@
 // Normie traits banner — per-plane perpendicular quad with NormiesFont texture.
 
-import { createMeshGL } from '/renderer/src/geometry.js';
-import { mat4, identity } from '/renderer/src/math.js';
+import { createMeshGL } from '../../renderer/src/geometry.js';
+import { mat4, identity } from '../../renderer/src/math.js';
 import { uvToWorld } from '../materials/plane-2d.js';
 import { hash1 } from '../tree-walker.js';
 import { isNormieCube, normieIdForCube } from './status.js';
