@@ -93,8 +93,9 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(svg, '<path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/>'));
         assertTrue(_contains(svg, '<path id="o" d='));
         assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#ff1919"'));
-        assertTrue(_contains(svg, "main plane / x-axis"));
-        assertTrue(_contains(svg, "Normie #6722"));
+        assertTrue(_contains(svg, '<circle cx="100" cy="85" r="13"'));
+        assertFalse(_contains(svg, "Normie #6722"));
+        assertFalse(_contains(svg, "cube #1"));
     }
 
     function testRendererUsesCurrentAgentRegistryState() public {

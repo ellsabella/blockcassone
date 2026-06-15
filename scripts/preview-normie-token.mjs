@@ -72,6 +72,7 @@ async function main() {
       path.join(os.tmpdir(), 'blockcassone-token-previews', `normie-${normieId}`)
     )
   );
+  await fs.rm(outDir, { recursive: true, force: true });
 
   const deployEnv = {
     BLOCKCASSONE_SAMPLE_MINTS: '1',
@@ -120,15 +121,19 @@ async function main() {
   }
 
   const htmlPath = path.join(outDir, `cube-${tokenId}.html`);
+  const imagePath = path.join(outDir, `cube-${tokenId}.image.svg`);
   const namedHtmlPath = path.join(outDir, `normie-${normieId}.html`);
   const namedMetadataPath = path.join(outDir, `normie-${normieId}.metadata.json`);
+  const namedImagePath = path.join(outDir, `normie-${normieId}.image.svg`);
   await fs.copyFile(htmlPath, namedHtmlPath);
   await fs.copyFile(metadataPath, namedMetadataPath);
+  await fs.copyFile(imagePath, namedImagePath);
 
   console.log('\nPreview ready');
   console.log(`Normie:   ${sourceToken}`);
   console.log(`Agentic:  ${agentic || 'N'}${agent && agent !== '0' ? ` / ${agent}` : ''}`);
   console.log(`HTML:     ${namedHtmlPath}`);
+  console.log(`Image:    ${namedImagePath}`);
   console.log(`Cube HTML:${htmlPath}`);
   console.log(`Metadata: ${metadataPath}`);
 }

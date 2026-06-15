@@ -66,22 +66,9 @@ contract CubeRendererV2 is ICubeRenderer {
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
             _thumbnailDefs(bitmapPath, outlinePath),
-            _thumbnailPlaneFrame(data),
+            _thumbnailPlaneFrame(),
             _thumbnailBitmap(bitmapPath, outlinePath),
-            '<text x="70" y="1078" fill="#ff98d9" font-family="monospace" font-size="42">cube #',
-            tokenId.toString(),
-            " / plot ",
-            uint256(data.slot).toString(),
-            "</text>",
-            '<text x="70" y="1132" fill="#aaffb2" font-family="monospace" font-size="28">Normie #',
-            data.sourceTokenId.toString(),
-            " / region ",
-            regionForSlot(data.slot).toString(),
-            " / neighbourhood ",
-            neighbourhoodForSlot(data.slot).toString(),
-            " / street ",
-            streetForSlot(data.slot).toString(),
-            "</text></svg>"
+            "</svg>"
         );
     }
 
@@ -162,8 +149,12 @@ contract CubeRendererV2 is ICubeRenderer {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
         return string.concat(
             '<defs>',
-            '<filter id="g" x="-20%" y="-20%" width="140%" height="140%">',
+            '<filter id="g" x="-30%" y="-30%" width="160%" height="160%">',
             '<feGaussianBlur stdDeviation="2.8" result="b"/>',
+            '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
+            "</filter>",
+            '<filter id="p" x="-40%" y="-40%" width="180%" height="180%">',
+            '<feGaussianBlur stdDeviation="7.5" result="b"/>',
             '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<path id="n" d="',
@@ -191,34 +182,29 @@ contract CubeRendererV2 is ICubeRenderer {
         }
 
         return string.concat(
-            '<g transform="translate(180 132) scale(21)">',
-            '<use href="#n" fill="#ff174d" opacity=".10"/>',
-            '<use href="#o" fill="none" stroke="#ff1919" stroke-width=".34" opacity=".95" filter="url(#g)"/>',
-            '<use href="#o" fill="none" stroke="#ffffff" stroke-width=".08" opacity=".72"/>',
+            '<g transform="translate(210 170) scale(19.5)">',
+            '<use href="#n" fill="#ff174d" opacity=".055"/>',
+            '<use href="#o" fill="none" stroke="#ff1919" stroke-width=".48" opacity=".72" filter="url(#p)"/>',
+            '<use href="#o" fill="none" stroke="#ff1919" stroke-width=".28" opacity=".98" filter="url(#g)"/>',
+            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".06" opacity=".86"/>',
             "</g>"
         );
     }
 
-    function _thumbnailPlaneFrame(CubeNFT.CubeData memory data) private pure returns (string memory) {
-        string memory axis = _slotAxis(data.slot);
+    function _thumbnailPlaneFrame() private pure returns (string memory) {
         return string.concat(
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
-            '<rect x="150" y="100" width="900" height="900" stroke="#ff3ab8" stroke-width="10" opacity=".95"/>',
-            '<rect x="166" y="116" width="868" height="868" stroke="#ffffff" stroke-width="2" opacity=".42"/>',
-            '<path d="M150 100h900M150 100v900M1050 100v900M150 100l900 900M1050 100 150 1000" stroke="#38ff4d" stroke-width="3" opacity=".26"/>',
-            '<path d="M150 100h900M150 100v900" stroke="#ffffff" stroke-width="2" opacity=".64"/>',
-            "</g>",
-            '<text x="178" y="85" fill="#aaffb2" font-family="monospace" font-size="24">main plane / ',
-            axis,
-            "-axis</text>"
+            '<rect x="95" y="80" width="1010" height="1010" stroke="#ff3ab8" stroke-width="11" opacity=".96" filter="url(#p)"/>',
+            '<rect x="100" y="85" width="1000" height="1000" stroke="#ff3ab8" stroke-width="7" opacity=".98"/>',
+            '<rect x="116" y="101" width="968" height="968" stroke="#ffffff" stroke-width="2" opacity=".5"/>',
+            '<path d="M100 85h1000M100 85v1000M1100 85v1000M100 85l1000 1000M1100 85 100 1085" stroke="#38ff4d" stroke-width="3" opacity=".22"/>',
+            '<path d="M100 85h1000M100 85v1000" stroke="#ffffff" stroke-width="2.4" opacity=".56"/>',
+            '<circle cx="100" cy="85" r="13" fill="#fff" opacity=".92" filter="url(#g)"/>',
+            '<circle cx="1100" cy="85" r="13" fill="#fff" opacity=".92" filter="url(#g)"/>',
+            '<circle cx="100" cy="1085" r="13" fill="#fff" opacity=".92" filter="url(#g)"/>',
+            '<circle cx="1100" cy="1085" r="13" fill="#fff" opacity=".92" filter="url(#g)"/>',
+            "</g>"
         );
-    }
-
-    function _slotAxis(uint32 slot) private pure returns (string memory) {
-        uint256 axis = uint256(slot) % 3;
-        if (axis == 0) return "x";
-        if (axis == 1) return "y";
-        return "z";
     }
 
     function _bitmapPath(bytes memory raw) private pure returns (string memory) {
