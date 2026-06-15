@@ -59,13 +59,15 @@ contract CubeRendererV2 is ICubeRenderer {
 
     function thumbnailSVG(uint256 tokenId) public view returns (string memory) {
         CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
-        string memory bitmapPath = _bitmapPath(_rawImageBytes(data));
+        bytes memory raw = _rawImageBytes(data);
+        string memory bitmapPath = _bitmapPath(raw);
+        string memory outlinePath = _outlinePath(raw);
         return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
-            _thumbnailDefs(bitmapPath),
+            _thumbnailDefs(bitmapPath, outlinePath),
             _thumbnailPlaneFrame(data),
-            _thumbnailBitmap(bitmapPath),
+            _thumbnailBitmap(bitmapPath, outlinePath),
             '<text x="70" y="1078" fill="#ff98d9" font-family="monospace" font-size="42">cube #',
             tokenId.toString(),
             " / plot ",
@@ -152,13 +154,34 @@ contract CubeRendererV2 is ICubeRenderer {
         }
     }
 
-    function _thumbnailDefs(string memory bitmapPath) private pure returns (string memory) {
-        if (bytes(bitmapPath).length == 0) return "";
-        return string.concat('<defs><path id="n" d="', bitmapPath, '"/></defs>');
+    function _thumbnailDefs(string memory bitmapPath, string memory outlinePath)
+        private
+        pure
+        returns (string memory)
+    {
+        if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
+        return string.concat(
+            '<defs>',
+            '<filter id="g" x="-20%" y="-20%" width="140%" height="140%">',
+            '<feGaussianBlur stdDeviation="2.8" result="b"/>',
+            '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
+            "</filter>",
+            '<path id="n" d="',
+            bitmapPath,
+            '"/>',
+            '<path id="o" d="',
+            outlinePath,
+            '"/>',
+            "</defs>"
+        );
     }
 
-    function _thumbnailBitmap(string memory bitmapPath) private pure returns (string memory) {
-        if (bytes(bitmapPath).length == 0) {
+    function _thumbnailBitmap(string memory bitmapPath, string memory outlinePath)
+        private
+        pure
+        returns (string memory)
+    {
+        if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) {
             return string.concat(
                 '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
                 '<path d="M290 290h260v280h260v-170h-114v-198h-286v-122" stroke="#ff1919" stroke-width="22" opacity=".95"/>',
@@ -169,9 +192,9 @@ contract CubeRendererV2 is ICubeRenderer {
 
         return string.concat(
             '<g transform="translate(180 132) scale(21)">',
-            '<use href="#n" fill="#ff174d" opacity=".32" transform="translate(.45 .45)"/>',
-            '<use href="#n" fill="#ff174d" opacity=".95"/>',
-            '<use href="#n" fill="#ffffff" opacity=".22"/>',
+            '<use href="#n" fill="#ff174d" opacity=".10"/>',
+            '<use href="#o" fill="none" stroke="#ff1919" stroke-width=".34" opacity=".95" filter="url(#g)"/>',
+            '<use href="#o" fill="none" stroke="#ffffff" stroke-width=".08" opacity=".72"/>',
             "</g>"
         );
     }
@@ -232,10 +255,45 @@ contract CubeRendererV2 is ICubeRenderer {
         return path;
     }
 
+    function _outlinePath(bytes memory raw) private pure returns (string memory) {
+        if (raw.length != 200) return "";
+
+        string memory path = "";
+        for (uint256 row = 0; row < 40; row++) {
+            for (uint256 col = 0; col < 40; col++) {
+                if (!_bitmapBit(raw, row * 40 + col)) continue;
+                if (!_bitmapBitAt(raw, row, col, 0, -1)) {
+                    path = string.concat(path, "M", col.toString(), " ", row.toString(), "v1");
+                }
+                if (!_bitmapBitAt(raw, row, col, 0, 1)) {
+                    path = string.concat(path, "M", (col + 1).toString(), " ", row.toString(), "v1");
+                }
+                if (!_bitmapBitAt(raw, row, col, -1, 0)) {
+                    path = string.concat(path, "M", col.toString(), " ", row.toString(), "h1");
+                }
+                if (!_bitmapBitAt(raw, row, col, 1, 0)) {
+                    path = string.concat(path, "M", col.toString(), " ", (row + 1).toString(), "h1");
+                }
+            }
+        }
+        return path;
+    }
+
     function _bitmapBit(bytes memory raw, uint256 index) private pure returns (bool) {
         uint256 byteIndex = index / 8;
         uint256 bitIndex = 7 - (index % 8);
         return (uint8(raw[byteIndex]) & (uint8(1) << uint8(bitIndex))) != 0;
+    }
+
+    function _bitmapBitAt(bytes memory raw, uint256 row, uint256 col, int256 rowDelta, int256 colDelta)
+        private
+        pure
+        returns (bool)
+    {
+        int256 nextRow = int256(row) + rowDelta;
+        int256 nextCol = int256(col) + colDelta;
+        if (nextRow < 0 || nextRow >= 40 || nextCol < 0 || nextCol >= 40) return false;
+        return _bitmapBit(raw, uint256(nextRow) * 40 + uint256(nextCol));
     }
 
     function _attributesJSON(CubeNFT.CubeData memory data) private view returns (string memory) {

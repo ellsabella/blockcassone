@@ -90,8 +90,9 @@ contract CubeRendererV2Test is Test {
 
         string memory svg = renderer.thumbnailSVG(cubeId);
 
-        assertTrue(_contains(svg, '<defs><path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/></defs>'));
-        assertTrue(_contains(svg, '<use href="#n" fill="#ff174d" opacity=".95"/>'));
+        assertTrue(_contains(svg, '<path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/>'));
+        assertTrue(_contains(svg, '<path id="o" d='));
+        assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#ff1919"'));
         assertTrue(_contains(svg, "main plane / x-axis"));
         assertTrue(_contains(svg, "Normie #6722"));
     }
