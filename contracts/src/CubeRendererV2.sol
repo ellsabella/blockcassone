@@ -60,14 +60,16 @@ contract CubeRendererV2 is ICubeRenderer {
     function thumbnailSVG(uint256 tokenId) public view returns (string memory) {
         CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
         bytes memory raw = _rawImageBytes(data);
+        string memory labelPath = _labelPath(data.sourceTokenId);
         string memory bitmapPath = _bitmapPath(raw);
-        string memory outlinePath = _outlinePath(raw);
+        string memory outlinePath = _outlinePath(raw, data.sourceTokenId);
         return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
-            _thumbnailDefs(bitmapPath, outlinePath),
-            _thumbnailPlaneFrame(),
-            _thumbnailBitmap(bitmapPath, outlinePath),
+            _thumbnailDefs(bitmapPath, outlinePath, labelPath),
+            _forestLayer(data),
+            _thumbnailBitmap(bitmapPath, outlinePath, labelPath),
+            _thumbnailPlaneFrame(data),
             "</svg>"
         );
     }
@@ -141,7 +143,7 @@ contract CubeRendererV2 is ICubeRenderer {
         }
     }
 
-    function _thumbnailDefs(string memory bitmapPath, string memory outlinePath)
+    function _thumbnailDefs(string memory bitmapPath, string memory outlinePath, string memory labelPath)
         private
         pure
         returns (string memory)
@@ -163,11 +165,18 @@ contract CubeRendererV2 is ICubeRenderer {
             '<path id="o" d="',
             outlinePath,
             '"/>',
+            '<path id="l" d="',
+            labelPath,
+            '"/>',
             "</defs>"
         );
     }
 
-    function _thumbnailBitmap(string memory bitmapPath, string memory outlinePath)
+    function _thumbnailBitmap(
+        string memory bitmapPath,
+        string memory outlinePath,
+        string memory labelPath
+    )
         private
         pure
         returns (string memory)
@@ -182,29 +191,83 @@ contract CubeRendererV2 is ICubeRenderer {
         }
 
         return string.concat(
-            '<g transform="translate(210 170) scale(19.5)">',
+            '<g transform="translate(100 85) scale(25)">',
             '<use href="#n" fill="#ff174d" opacity=".055"/>',
-            '<use href="#o" fill="none" stroke="#ff1919" stroke-width=".48" opacity=".72" filter="url(#p)"/>',
-            '<use href="#o" fill="none" stroke="#ff1919" stroke-width=".28" opacity=".98" filter="url(#g)"/>',
-            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".06" opacity=".86"/>',
+            '<use href="#o" fill="none" stroke="#ff1919" stroke-width=".42" opacity=".7" filter="url(#p)"/>',
+            '<use href="#o" fill="none" stroke="#ff1919" stroke-width=".24" opacity=".98" filter="url(#g)"/>',
+            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".055" opacity=".86"/>',
+            bytes(labelPath).length == 0
+                ? ""
+                : '<use href="#l" fill="none" stroke="#244cff" stroke-width=".34" opacity=".95" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".07" opacity=".68"/>',
             "</g>"
         );
     }
 
-    function _thumbnailPlaneFrame() private pure returns (string memory) {
+    function _thumbnailPlaneFrame(CubeNFT.CubeData memory data) private pure returns (string memory) {
+        return string.concat(_planeEdges(), _edgePoints(data));
+    }
+
+    function _planeEdges() private pure returns (string memory) {
         return string.concat(
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
-            '<rect x="95" y="80" width="1010" height="1010" stroke="#ff3ab8" stroke-width="11" opacity=".96" filter="url(#p)"/>',
-            '<rect x="100" y="85" width="1000" height="1000" stroke="#ff3ab8" stroke-width="7" opacity=".98"/>',
-            '<rect x="116" y="101" width="968" height="968" stroke="#ffffff" stroke-width="2" opacity=".5"/>',
-            '<path d="M100 85h1000M100 85v1000M1100 85v1000M100 85l1000 1000M1100 85 100 1085" stroke="#38ff4d" stroke-width="3" opacity=".22"/>',
-            '<path d="M100 85h1000M100 85v1000" stroke="#ffffff" stroke-width="2.4" opacity=".56"/>',
-            '<circle cx="100" cy="85" r="13" fill="#fff" opacity=".92" filter="url(#g)"/>',
-            '<circle cx="1100" cy="85" r="13" fill="#fff" opacity=".92" filter="url(#g)"/>',
-            '<circle cx="100" cy="1085" r="13" fill="#fff" opacity=".92" filter="url(#g)"/>',
-            '<circle cx="1100" cy="1085" r="13" fill="#fff" opacity=".92" filter="url(#g)"/>',
+            '<path d="M100 85H1100V1085H100" stroke="#ff3ab8" stroke-width="11" opacity=".82" filter="url(#p)"/>',
+            '<path d="M100 85H1100V1085H100" stroke="#ff3ab8" stroke-width="6" opacity=".98"/>',
+            '<path d="M100 85H1100V1085H100" stroke="#fff" stroke-width="1.8" opacity=".52"/>',
             "</g>"
         );
+    }
+
+    function _edgePoints(CubeNFT.CubeData memory data) private pure returns (string memory) {
+        string memory out = "";
+        for (uint256 edge = 0; edge < 3; edge++) {
+            for (uint256 bit = 0; bit < 7; bit++) {
+                if (!_edgePointActive(data, edge, bit)) continue;
+                (uint256 x, uint256 y) = _edgePointCoord(edge, bit);
+                out = string.concat(out, _edgePoint(x, y, edge == 1 ? "#fff" : "#ff3ab8", edge == 1 ? "13" : "9"));
+            }
+        }
+        return string.concat(
+            '<g>',
+            _edgePoint(100, 85, "#fff", "14"),
+            _edgePoint(1100, 85, "#fff", "14"),
+            _edgePoint(1100, 1085, "#fff", "14"),
+            _edgePoint(100, 1085, "#fff", "14"),
+            out,
+            "</g>"
+        );
+    }
+
+    function _edgePoint(uint256 x, uint256 y, string memory color, string memory radius)
+        private
+        pure
+        returns (string memory)
+    {
+        return string.concat(
+            '<circle cx="',
+            x.toString(),
+            '" cy="',
+            y.toString(),
+            '" r="',
+            radius,
+            '" fill="',
+            color,
+            '" opacity=".92" filter="url(#g)"/>'
+        );
+    }
+
+    function _edgePointCoord(uint256 edge, uint256 bit) private pure returns (uint256 x, uint256 y) {
+        uint256 t = (bit + 1) * 125;
+        if (edge == 0) return (100 + t, 85);
+        if (edge == 1) return (1100, 85 + t);
+        return (1100 - t, 1085);
+    }
+
+    function _edgePointActive(CubeNFT.CubeData memory data, uint256 edge, uint256 bit)
+        private
+        pure
+        returns (bool)
+    {
+        return uint256(keccak256(abi.encodePacked(data.seed, data.sourceTokenId, edge, bit))) % 3 != 0;
     }
 
     function _bitmapPath(bytes memory raw) private pure returns (string memory) {
@@ -241,13 +304,14 @@ contract CubeRendererV2 is ICubeRenderer {
         return path;
     }
 
-    function _outlinePath(bytes memory raw) private pure returns (string memory) {
+    function _outlinePath(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
         string memory path = "";
         for (uint256 row = 0; row < 40; row++) {
             for (uint256 col = 0; col < 40; col++) {
                 if (!_bitmapBit(raw, row * 40 + col)) continue;
+                if (_isLabelCell(normieId, row, col)) continue;
                 if (!_bitmapBitAt(raw, row, col, 0, -1)) {
                     path = string.concat(path, "M", col.toString(), " ", row.toString(), "v1");
                 }
@@ -263,6 +327,151 @@ contract CubeRendererV2 is ICubeRenderer {
             }
         }
         return path;
+    }
+
+    function _labelPath(uint256 normieId) private pure returns (string memory) {
+        bytes memory text = bytes(string.concat("#", _paddedFour(normieId)));
+        uint256 startCol = 20;
+        uint256 startRow = 34;
+        string memory path = "";
+
+        for (uint256 ci = 0; ci < text.length; ci++) {
+            for (uint256 row = 0; row < 5; row++) {
+                for (uint256 col = 0; col < 3; col++) {
+                    if (!_glyphBit(text[ci], row, col)) continue;
+                    uint256 x = startCol + ci * 4 + col;
+                    uint256 y = startRow + row;
+                    if (!_glyphBitAt(text[ci], row, col, 0, -1)) {
+                        path = string.concat(path, "M", x.toString(), " ", y.toString(), "v1");
+                    }
+                    if (!_glyphBitAt(text[ci], row, col, 0, 1)) {
+                        path = string.concat(path, "M", (x + 1).toString(), " ", y.toString(), "v1");
+                    }
+                    if (!_glyphBitAt(text[ci], row, col, -1, 0)) {
+                        path = string.concat(path, "M", x.toString(), " ", y.toString(), "h1");
+                    }
+                    if (!_glyphBitAt(text[ci], row, col, 1, 0)) {
+                        path = string.concat(path, "M", x.toString(), " ", (y + 1).toString(), "h1");
+                    }
+                }
+            }
+        }
+        return path;
+    }
+
+    function _paddedFour(uint256 value) private pure returns (string memory) {
+        uint256 wrapped = value % 10000;
+        if (wrapped < 10) return string.concat("000", wrapped.toString());
+        if (wrapped < 100) return string.concat("00", wrapped.toString());
+        if (wrapped < 1000) return string.concat("0", wrapped.toString());
+        return wrapped.toString();
+    }
+
+    function _isLabelCell(uint256 normieId, uint256 row, uint256 col) private pure returns (bool) {
+        if (row < 34 || row > 38 || col < 20 || col > 38) return false;
+        uint256 localCol = col - 20;
+        if (localCol % 4 == 3) return false;
+        uint256 charIndex = localCol / 4;
+        if (charIndex > 4) return false;
+        bytes memory text = bytes(string.concat("#", _paddedFour(normieId)));
+        return _glyphBit(text[charIndex], row - 34, localCol % 4);
+    }
+
+    function _glyphBitAt(bytes1 glyph, uint256 row, uint256 col, int256 rowDelta, int256 colDelta)
+        private
+        pure
+        returns (bool)
+    {
+        int256 nextRow = int256(row) + rowDelta;
+        int256 nextCol = int256(col) + colDelta;
+        if (nextRow < 0 || nextRow >= 5 || nextCol < 0 || nextCol >= 3) return false;
+        return _glyphBit(glyph, uint256(nextRow), uint256(nextCol));
+    }
+
+    function _glyphBit(bytes1 glyph, uint256 row, uint256 col) private pure returns (bool) {
+        uint16 bits = _glyphBits(glyph);
+        uint256 idx = row * 3 + col;
+        return ((bits >> (14 - idx)) & 1) == 1;
+    }
+
+    function _glyphBits(bytes1 glyph) private pure returns (uint16) {
+        if (glyph == "0") return 0x7B6F;
+        if (glyph == "1") return 0x2C97;
+        if (glyph == "2") return 0x73E7;
+        if (glyph == "3") return 0x72CF;
+        if (glyph == "4") return 0x5BC9;
+        if (glyph == "5") return 0x79CF;
+        if (glyph == "6") return 0x79EF;
+        if (glyph == "7") return 0x7249;
+        if (glyph == "8") return 0x7BEF;
+        if (glyph == "9") return 0x7BCF;
+        return 0x2BAA; // '#'
+    }
+
+    function _forestLayer(CubeNFT.CubeData memory data) private pure returns (string memory) {
+        string memory lines = "";
+        for (uint256 i = 0; i < 7; i++) {
+            uint256 x1 = 130 + _rand(data, i, 920);
+            uint256 y1 = 120 + _rand(data, i + 40, 900);
+            uint256 x2 = 130 + _rand(data, i + 80, 920);
+            uint256 y2 = 120 + _rand(data, i + 120, 900);
+            uint256 cx1 = 130 + _rand(data, i + 160, 920);
+            uint256 cy1 = 120 + _rand(data, i + 200, 900);
+            uint256 cx2 = 130 + _rand(data, i + 240, 920);
+            uint256 cy2 = 120 + _rand(data, i + 280, 900);
+            lines = string.concat(
+                lines,
+                '<path d="M',
+                x1.toString(),
+                " ",
+                y1.toString(),
+                "C",
+                cx1.toString(),
+                " ",
+                cy1.toString(),
+                " ",
+                cx2.toString(),
+                " ",
+                cy2.toString(),
+                " ",
+                x2.toString(),
+                " ",
+                y2.toString(),
+                '"/>'
+            );
+        }
+
+        string memory dots = "";
+        for (uint256 i = 0; i < 22; i++) {
+            dots = string.concat(
+                dots,
+                '<circle cx="',
+                (120 + _rand(data, i + 400, 960)).toString(),
+                '" cy="',
+                (105 + _rand(data, i + 470, 945)).toString(),
+                '" r="',
+                (1 + _rand(data, i + 540, 4)).toString(),
+                '"/>'
+            );
+        }
+
+        return string.concat(
+            '<g fill="none" stroke="#ff1919" stroke-width="1.2" opacity=".16" filter="url(#g)">',
+            lines,
+            "</g>",
+            '<g fill="#ff1919" opacity=".42" filter="url(#g)">',
+            dots,
+            "</g>"
+        );
+    }
+
+    function _rand(CubeNFT.CubeData memory data, uint256 salt, uint256 max)
+        private
+        pure
+        returns (uint256)
+    {
+        if (max == 0) return 0;
+        return uint256(keccak256(abi.encodePacked(data.seed, data.sourceTokenId, salt))) % max;
     }
 
     function _bitmapBit(bytes memory raw, uint256 index) private pure returns (bool) {
