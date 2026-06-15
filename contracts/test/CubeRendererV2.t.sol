@@ -92,6 +92,7 @@ contract CubeRendererV2Test is Test {
 
         assertTrue(_contains(svg, '<defs><path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/></defs>'));
         assertTrue(_contains(svg, '<use href="#n" fill="#ff174d" opacity=".95"/>'));
+        assertTrue(_contains(svg, "main plane / x-axis"));
         assertTrue(_contains(svg, "Normie #6722"));
     }
 

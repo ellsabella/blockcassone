@@ -64,11 +64,7 @@ contract CubeRendererV2 is ICubeRenderer {
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
             _thumbnailDefs(bitmapPath),
-            '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
-            '<path d="M310 325 720 205 960 465 548 598Z" stroke="#ff3ab8" stroke-width="10" opacity=".86"/>',
-            '<path d="M310 325v438l238 262V598Z" stroke="#38ff4d" stroke-width="8" opacity=".58"/>',
-            '<path d="M548 598v427l412-292V465Z" stroke="#38ff4d" stroke-width="8" opacity=".42"/>',
-            "</g>",
+            _thumbnailPlaneFrame(data),
             _thumbnailBitmap(bitmapPath),
             '<text x="70" y="1078" fill="#ff98d9" font-family="monospace" font-size="42">cube #',
             tokenId.toString(),
@@ -165,19 +161,41 @@ contract CubeRendererV2 is ICubeRenderer {
         if (bytes(bitmapPath).length == 0) {
             return string.concat(
                 '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
-                '<path d="M402 460h190v210h192v-128h-84v-150h-210v-94" stroke="#ff1919" stroke-width="18" opacity=".95"/>',
-                '<path d="M402 460h190v210h192v-128h-84v-150h-210v-94" stroke="#ffffff" stroke-width="4" opacity=".72"/>',
+                '<path d="M290 290h260v280h260v-170h-114v-198h-286v-122" stroke="#ff1919" stroke-width="22" opacity=".95"/>',
+                '<path d="M290 290h260v280h260v-170h-114v-198h-286v-122" stroke="#ffffff" stroke-width="5" opacity=".72"/>',
                 "</g>"
             );
         }
 
         return string.concat(
-            '<g transform="translate(360 318) scale(12)">',
+            '<g transform="translate(180 132) scale(21)">',
             '<use href="#n" fill="#ff174d" opacity=".32" transform="translate(.45 .45)"/>',
             '<use href="#n" fill="#ff174d" opacity=".95"/>',
             '<use href="#n" fill="#ffffff" opacity=".22"/>',
             "</g>"
         );
+    }
+
+    function _thumbnailPlaneFrame(CubeNFT.CubeData memory data) private pure returns (string memory) {
+        string memory axis = _slotAxis(data.slot);
+        return string.concat(
+            '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
+            '<rect x="150" y="100" width="900" height="900" stroke="#ff3ab8" stroke-width="10" opacity=".95"/>',
+            '<rect x="166" y="116" width="868" height="868" stroke="#ffffff" stroke-width="2" opacity=".42"/>',
+            '<path d="M150 100h900M150 100v900M1050 100v900M150 100l900 900M1050 100 150 1000" stroke="#38ff4d" stroke-width="3" opacity=".26"/>',
+            '<path d="M150 100h900M150 100v900" stroke="#ffffff" stroke-width="2" opacity=".64"/>',
+            "</g>",
+            '<text x="178" y="85" fill="#aaffb2" font-family="monospace" font-size="24">main plane / ',
+            axis,
+            "-axis</text>"
+        );
+    }
+
+    function _slotAxis(uint32 slot) private pure returns (string memory) {
+        uint256 axis = uint256(slot) % 3;
+        if (axis == 0) return "x";
+        if (axis == 1) return "y";
+        return "z";
     }
 
     function _bitmapPath(bytes memory raw) private pure returns (string memory) {
