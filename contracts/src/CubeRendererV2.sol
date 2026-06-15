@@ -54,17 +54,22 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function imageURI(uint256 tokenId) public view returns (string memory) {
+        return string.concat("data:image/svg+xml;base64,", Base64.encode(bytes(thumbnailSVG(tokenId))));
+    }
+
+    function thumbnailSVG(uint256 tokenId) public view returns (string memory) {
         CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
-        string memory svg = string.concat(
+        string memory bitmapPath = _bitmapPath(_rawImageBytes(data));
+        return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
+            _thumbnailDefs(bitmapPath),
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
             '<path d="M310 325 720 205 960 465 548 598Z" stroke="#ff3ab8" stroke-width="10" opacity=".86"/>',
             '<path d="M310 325v438l238 262V598Z" stroke="#38ff4d" stroke-width="8" opacity=".58"/>',
             '<path d="M548 598v427l412-292V465Z" stroke="#38ff4d" stroke-width="8" opacity=".42"/>',
-            '<path d="M402 460h190v210h192v-128h-84v-150h-210v-94" stroke="#ff1919" stroke-width="18" opacity=".95"/>',
-            '<path d="M402 460h190v210h192v-128h-84v-150h-210v-94" stroke="#ffffff" stroke-width="4" opacity=".72"/>',
             "</g>",
+            _thumbnailBitmap(bitmapPath),
             '<text x="70" y="1078" fill="#ff98d9" font-family="monospace" font-size="42">cube #',
             tokenId.toString(),
             " / plot ",
@@ -80,7 +85,6 @@ contract CubeRendererV2 is ICubeRenderer {
             streetForSlot(data.slot).toString(),
             "</text></svg>"
         );
-        return string.concat("data:image/svg+xml;base64,", Base64.encode(bytes(svg)));
     }
 
     function animationURI(uint256 tokenId) public view returns (string memory) {
@@ -138,14 +142,82 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function _rawImageBase64(CubeNFT.CubeData memory data) private view returns (string memory) {
+        return Base64.encode(_rawImageBytes(data));
+    }
+
+    function _rawImageBytes(CubeNFT.CubeData memory data) private view returns (bytes memory) {
         if (data.sourceKind != cubes.SOURCE_KIND_NORMIE() || normieStorage == address(0)) return "";
         try INormieRawImageStorage(normieStorage).getTokenRawImageData(data.sourceTokenId) returns (
             bytes memory raw
         ) {
-            return Base64.encode(raw);
+            return raw;
         } catch {
             return "";
         }
+    }
+
+    function _thumbnailDefs(string memory bitmapPath) private pure returns (string memory) {
+        if (bytes(bitmapPath).length == 0) return "";
+        return string.concat('<defs><path id="n" d="', bitmapPath, '"/></defs>');
+    }
+
+    function _thumbnailBitmap(string memory bitmapPath) private pure returns (string memory) {
+        if (bytes(bitmapPath).length == 0) {
+            return string.concat(
+                '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
+                '<path d="M402 460h190v210h192v-128h-84v-150h-210v-94" stroke="#ff1919" stroke-width="18" opacity=".95"/>',
+                '<path d="M402 460h190v210h192v-128h-84v-150h-210v-94" stroke="#ffffff" stroke-width="4" opacity=".72"/>',
+                "</g>"
+            );
+        }
+
+        return string.concat(
+            '<g transform="translate(360 318) scale(12)">',
+            '<use href="#n" fill="#ff174d" opacity=".32" transform="translate(.45 .45)"/>',
+            '<use href="#n" fill="#ff174d" opacity=".95"/>',
+            '<use href="#n" fill="#ffffff" opacity=".22"/>',
+            "</g>"
+        );
+    }
+
+    function _bitmapPath(bytes memory raw) private pure returns (string memory) {
+        if (raw.length != 200) return "";
+
+        string memory path = "";
+        for (uint256 row = 0; row < 40; row++) {
+            uint256 col = 0;
+            while (col < 40) {
+                while (col < 40 && !_bitmapBit(raw, row * 40 + col)) {
+                    col++;
+                }
+                if (col >= 40) break;
+
+                uint256 start = col;
+                while (col < 40 && _bitmapBit(raw, row * 40 + col)) {
+                    col++;
+                }
+
+                path = string.concat(
+                    path,
+                    "M",
+                    start.toString(),
+                    " ",
+                    row.toString(),
+                    "h",
+                    (col - start).toString(),
+                    "v1H",
+                    start.toString(),
+                    "z"
+                );
+            }
+        }
+        return path;
+    }
+
+    function _bitmapBit(bytes memory raw, uint256 index) private pure returns (bool) {
+        uint256 byteIndex = index / 8;
+        uint256 bitIndex = 7 - (index % 8);
+        return (uint8(raw[byteIndex]) & (uint8(1) << uint8(bitIndex))) != 0;
     }
 
     function _attributesJSON(CubeNFT.CubeData memory data) private view returns (string memory) {

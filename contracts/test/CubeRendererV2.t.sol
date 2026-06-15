@@ -84,6 +84,17 @@ contract CubeRendererV2Test is Test {
         assertFalse(_contains(html, "/api/normies"));
     }
 
+    function testThumbnailSVGUsesRawNormieBitmapRuns() public {
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
+
+        string memory svg = renderer.thumbnailSVG(cubeId);
+
+        assertTrue(_contains(svg, '<defs><path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/></defs>'));
+        assertTrue(_contains(svg, '<use href="#n" fill="#ff174d" opacity=".95"/>'));
+        assertTrue(_contains(svg, "Normie #6722"));
+    }
+
     function testRendererUsesCurrentAgentRegistryState() public {
         vm.prank(MINTER);
         uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
