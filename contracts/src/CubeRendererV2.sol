@@ -153,12 +153,16 @@ contract CubeRendererV2 is ICubeRenderer {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
         return string.concat(
             '<defs>',
-            '<filter id="g" x="-30%" y="-30%" width="160%" height="160%">',
-            '<feGaussianBlur stdDeviation="2.8" result="b"/>',
+            '<filter id="g" x="-40%" y="-40%" width="180%" height="180%">',
+            '<feGaussianBlur stdDeviation="4.2" result="b"/>',
             '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
-            '<filter id="p" x="-40%" y="-40%" width="180%" height="180%">',
-            '<feGaussianBlur stdDeviation="7.5" result="b"/>',
+            '<filter id="p" x="-65%" y="-65%" width="230%" height="230%">',
+            '<feGaussianBlur stdDeviation="11" result="b"/>',
+            '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
+            "</filter>",
+            '<filter id="h" x="-90%" y="-90%" width="280%" height="280%">',
+            '<feGaussianBlur stdDeviation="22" result="b"/>',
             '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<path id="n" d="',
@@ -231,8 +235,9 @@ contract CubeRendererV2 is ICubeRenderer {
     {
         return string.concat(
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
-            '<path d="M100 85H1100V1085H100" stroke="#38ff4d" stroke-width="3.6" opacity=".82"/>',
-            '<path d="M100 85H1100V1085H100" stroke="#fff" stroke-width=".9" opacity=".34"/>',
+            _svgPath("M100 85H1100V1085H100", "#38ff4d", "10", ".28", "url(#p)"),
+            _svgPath("M100 85H1100V1085H100", "#38ff4d", "4.8", ".88", "url(#g)"),
+            _svgPath("M100 85H1100V1085H100", "#fff", "1.35", ".48", ""),
             _edgeAccents(data, planeColor),
             "</g>"
         );
@@ -289,31 +294,36 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function _edgeAccentH(uint256 x, uint256 y) private pure returns (string memory) {
-        uint256 d = 48;
+        uint256 d = 82;
         uint256 x0 = x > d ? x - d : x;
         uint256 x1 = x + d;
+        string memory path = string.concat("M", x0.toString(), " ", y.toString(), "H", x1.toString());
         return string.concat(
-            _edgeAccentPathH(x0, y, x1, "18", ".62", "url(#p)"),
-            _edgeAccentPathH(x0, y, x1, "8", ".96", "url(#g)"),
-            _edgeAccentWhiteH(x0, y, x1)
+            _svgPath(path, "#ff1ba6", "46", ".28", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "30", ".54", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "17", ".92", "url(#g)"),
+            _svgPath(path, "#ff0f6f", "8", ".98", ""),
+            _svgPath(path, "#fff", "3.2", ".82", "")
         );
     }
 
     function _edgeAccentV(uint256 x, uint256 y) private pure returns (string memory) {
-        uint256 d = 48;
+        uint256 d = 82;
         uint256 y0 = y > d ? y - d : y;
         uint256 y1 = y + d;
+        string memory path = string.concat("M", x.toString(), " ", y0.toString(), "V", y1.toString());
         return string.concat(
-            _edgeAccentPathV(x, y0, y1, "18", ".62", "url(#p)"),
-            _edgeAccentPathV(x, y0, y1, "8", ".96", "url(#g)"),
-            _edgeAccentWhiteV(x, y0, y1)
+            _svgPath(path, "#ff1ba6", "46", ".28", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "30", ".54", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "17", ".92", "url(#g)"),
+            _svgPath(path, "#ff0f6f", "8", ".98", ""),
+            _svgPath(path, "#fff", "3.2", ".82", "")
         );
     }
 
-    function _edgeAccentPathH(
-        uint256 x0,
-        uint256 y,
-        uint256 x1,
+    function _svgPath(
+        string memory d,
+        string memory color,
         string memory width,
         string memory opacity,
         string memory filter
@@ -323,84 +333,42 @@ contract CubeRendererV2 is ICubeRenderer {
         returns (string memory)
     {
         return string.concat(
-            '<path d="M',
-            x0.toString(),
-            " ",
-            y.toString(),
-            "H",
-            x1.toString(),
-            '" stroke="#ff3ab8" stroke-width="',
+            '<path d="',
+            d,
+            '" stroke="',
+            color,
+            '" stroke-width="',
             width,
             '" opacity="',
             opacity,
-            '" filter="',
-            filter,
-            '"/>'
-        );
-    }
-
-    function _edgeAccentPathV(
-        uint256 x,
-        uint256 y0,
-        uint256 y1,
-        string memory width,
-        string memory opacity,
-        string memory filter
-    )
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<path d="M',
-            x.toString(),
-            " ",
-            y0.toString(),
-            "V",
-            y1.toString(),
-            '" stroke="#ff3ab8" stroke-width="',
-            width,
-            '" opacity="',
-            opacity,
-            '" filter="',
-            filter,
-            '"/>'
-        );
-    }
-
-    function _edgeAccentWhiteH(uint256 x0, uint256 y, uint256 x1)
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<path d="M',
-            x0.toString(),
-            " ",
-            y.toString(),
-            "H",
-            x1.toString(),
-            '" stroke="#fff" stroke-width="2" opacity=".72"/>'
-        );
-    }
-
-    function _edgeAccentWhiteV(uint256 x, uint256 y0, uint256 y1)
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<path d="M',
-            x.toString(),
-            " ",
-            y0.toString(),
-            "V",
-            y1.toString(),
-            '" stroke="#fff" stroke-width="2" opacity=".72"/>'
+            '"',
+            bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
+            "/>"
         );
     }
 
     function _edgePoint(uint256 x, uint256 y, string memory color, string memory radius)
+        private
+        pure
+        returns (string memory)
+    {
+        uint256 r = _parseSmallUint(radius);
+        return string.concat(
+            _circle(x, y, (r * 3).toString(), color, ".28", "url(#h)"),
+            _circle(x, y, (r * 2).toString(), color, ".46", "url(#p)"),
+            _circle(x, y, radius, color, ".94", "url(#g)"),
+            _circle(x, y, (r / 2 + 2).toString(), "#fff", ".82", "")
+        );
+    }
+
+    function _circle(
+        uint256 x,
+        uint256 y,
+        string memory radius,
+        string memory color,
+        string memory opacity,
+        string memory filter
+    )
         private
         pure
         returns (string memory)
@@ -414,8 +382,23 @@ contract CubeRendererV2 is ICubeRenderer {
             radius,
             '" fill="',
             color,
-            '" opacity=".92" filter="url(#g)"/>'
+            '" opacity="',
+            opacity,
+            '"',
+            bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
+            "/>"
         );
+    }
+
+    function _parseSmallUint(string memory value) private pure returns (uint256) {
+        bytes memory b = bytes(value);
+        uint256 out = 0;
+        for (uint256 i = 0; i < b.length; i++) {
+            uint8 c = uint8(b[i]);
+            if (c < 48 || c > 57) continue;
+            out = out * 10 + (c - 48);
+        }
+        return out == 0 ? 1 : out;
     }
 
     function _edgePointCoord(uint256 edge, uint256 bit) private pure returns (uint256 x, uint256 y) {
