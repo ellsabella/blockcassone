@@ -153,20 +153,27 @@ contract CubeRendererV2 is ICubeRenderer {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
         return string.concat(
             '<defs>',
-            '<filter id="g" x="-55%" y="-55%" width="210%" height="210%" color-interpolation-filters="sRGB">',
+            '<filter id="g" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
             '<feGaussianBlur stdDeviation="5.5" result="b1"/>',
             '<feGaussianBlur stdDeviation="11" result="b2"/>',
             '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
-            '<filter id="p" x="-85%" y="-85%" width="270%" height="270%" color-interpolation-filters="sRGB">',
+            '<filter id="p" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
             '<feGaussianBlur stdDeviation="13" result="b1"/>',
             '<feGaussianBlur stdDeviation="25" result="b2"/>',
             '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
-            '<filter id="h" x="-130%" y="-130%" width="360%" height="360%" color-interpolation-filters="sRGB">',
+            '<filter id="h" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
             '<feGaussianBlur stdDeviation="24" result="b1"/>',
             '<feGaussianBlur stdDeviation="44" result="b2"/>',
             '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>',
+            "</filter>",
+            '<filter id="t" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
+            '<feMorphology in="SourceGraphic" operator="dilate" radius=".75" result="d"/>',
+            '<feGaussianBlur in="d" stdDeviation="1.5" result="b0"/>',
+            '<feGaussianBlur in="d" stdDeviation="4.5" result="b1"/>',
+            '<feGaussianBlur in="d" stdDeviation="10" result="b2"/>',
+            '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="b0"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<path id="n" d="',
             bitmapPath,
@@ -201,31 +208,31 @@ contract CubeRendererV2 is ICubeRenderer {
         }
 
         return string.concat(
-            '<g transform="translate(100 85) scale(25)">',
+            '<g transform="translate(100 85) scale(25)" stroke-linecap="round" stroke-linejoin="round">',
             '<use href="#n" fill="',
             planeColor,
             '" opacity=".055"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width="1.08" opacity=".34" filter="url(#h)"/>',
+            '" stroke-width="1.18" opacity=".28" filter="url(#h)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".78" opacity=".62" filter="url(#p)"/>',
+            '" stroke-width=".92" opacity=".50" filter="url(#t)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".42" opacity=".98" filter="url(#g)"/>',
+            '" stroke-width=".52" opacity=".96" filter="url(#g)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".22" opacity=".98"/>',
-            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".075" opacity=".92"/>',
+            '" stroke-width=".26" opacity=".98"/>',
+            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".09" opacity=".96"/>',
             bytes(labelPath).length == 0
                 ? ""
                 : string.concat(
                     '<use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".58" opacity=".42" filter="url(#p)"/><use href="#l" fill="none" stroke="',
+                    '" stroke-width=".74" opacity=".36" filter="url(#t)"/><use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".34" opacity=".96" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".08" opacity=".78"/>'
+                    '" stroke-width=".38" opacity=".98" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".1" opacity=".84"/>'
                 ),
             "</g>"
         );
@@ -245,7 +252,7 @@ contract CubeRendererV2 is ICubeRenderer {
         returns (string memory)
     {
         return string.concat(
-            '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
+            '<g fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision">',
             _svgPath("M100 85H1100V1085H100", "#38ff4d", "28", ".18", "url(#h)"),
             _svgPath("M100 85H1100V1085H100", "#38ff4d", "15", ".36", "url(#p)"),
             _svgPath("M100 85H1100V1085H100", "#38ff4d", "7", ".92", "url(#g)"),
