@@ -96,7 +96,8 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(svg, '<path d="M100 85H1100V1085H100"'));
         assertTrue(_contains(svg, '<path id="l" d='));
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="14"'));
-        assertTrue(_contains(svg, '<g fill="none" stroke="#ff1919" stroke-width=".85"'));
+        assertTrue(_contains(svg, '<filter id="h"'));
+        assertTrue(_contains(svg, '<g fill="none" stroke="#ff1919" stroke-width="1.6"'));
         assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#ff1919"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));

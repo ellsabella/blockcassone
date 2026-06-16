@@ -153,17 +153,20 @@ contract CubeRendererV2 is ICubeRenderer {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
         return string.concat(
             '<defs>',
-            '<filter id="g" x="-40%" y="-40%" width="180%" height="180%">',
-            '<feGaussianBlur stdDeviation="4.2" result="b"/>',
-            '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
+            '<filter id="g" x="-55%" y="-55%" width="210%" height="210%" color-interpolation-filters="sRGB">',
+            '<feGaussianBlur stdDeviation="5.5" result="b1"/>',
+            '<feGaussianBlur stdDeviation="11" result="b2"/>',
+            '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
-            '<filter id="p" x="-65%" y="-65%" width="230%" height="230%">',
-            '<feGaussianBlur stdDeviation="11" result="b"/>',
-            '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
+            '<filter id="p" x="-85%" y="-85%" width="270%" height="270%" color-interpolation-filters="sRGB">',
+            '<feGaussianBlur stdDeviation="13" result="b1"/>',
+            '<feGaussianBlur stdDeviation="25" result="b2"/>',
+            '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
-            '<filter id="h" x="-90%" y="-90%" width="280%" height="280%">',
-            '<feGaussianBlur stdDeviation="22" result="b"/>',
-            '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>',
+            '<filter id="h" x="-130%" y="-130%" width="360%" height="360%" color-interpolation-filters="sRGB">',
+            '<feGaussianBlur stdDeviation="24" result="b1"/>',
+            '<feGaussianBlur stdDeviation="44" result="b2"/>',
+            '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<path id="n" d="',
             bitmapPath,
@@ -204,17 +207,25 @@ contract CubeRendererV2 is ICubeRenderer {
             '" opacity=".055"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".56" opacity=".82" filter="url(#p)"/>',
+            '" stroke-width="1.08" opacity=".34" filter="url(#h)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".28" opacity=".99" filter="url(#g)"/>',
-            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".055" opacity=".86"/>',
+            '" stroke-width=".78" opacity=".62" filter="url(#p)"/>',
+            '<use href="#o" fill="none" stroke="',
+            planeColor,
+            '" stroke-width=".42" opacity=".98" filter="url(#g)"/>',
+            '<use href="#o" fill="none" stroke="',
+            planeColor,
+            '" stroke-width=".22" opacity=".98"/>',
+            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".075" opacity=".92"/>',
             bytes(labelPath).length == 0
                 ? ""
                 : string.concat(
                     '<use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".34" opacity=".95" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".07" opacity=".68"/>'
+                    '" stroke-width=".58" opacity=".42" filter="url(#p)"/><use href="#l" fill="none" stroke="',
+                    planeColor,
+                    '" stroke-width=".34" opacity=".96" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".08" opacity=".78"/>'
                 ),
             "</g>"
         );
@@ -235,9 +246,11 @@ contract CubeRendererV2 is ICubeRenderer {
     {
         return string.concat(
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round">',
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "10", ".28", "url(#p)"),
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "4.8", ".88", "url(#g)"),
-            _svgPath("M100 85H1100V1085H100", "#fff", "1.35", ".48", ""),
+            _svgPath("M100 85H1100V1085H100", "#38ff4d", "28", ".18", "url(#h)"),
+            _svgPath("M100 85H1100V1085H100", "#38ff4d", "15", ".36", "url(#p)"),
+            _svgPath("M100 85H1100V1085H100", "#38ff4d", "7", ".92", "url(#g)"),
+            _svgPath("M100 85H1100V1085H100", "#8dff98", "3.4", ".98", ""),
+            _svgPath("M100 85H1100V1085H100", "#fff", "1.65", ".55", ""),
             _edgeAccents(data, planeColor),
             "</g>"
         );
@@ -294,30 +307,30 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function _edgeAccentH(uint256 x, uint256 y) private pure returns (string memory) {
-        uint256 d = 82;
+        uint256 d = 96;
         uint256 x0 = x > d ? x - d : x;
         uint256 x1 = x + d;
         string memory path = string.concat("M", x0.toString(), " ", y.toString(), "H", x1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "46", ".28", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "30", ".54", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "17", ".92", "url(#g)"),
-            _svgPath(path, "#ff0f6f", "8", ".98", ""),
-            _svgPath(path, "#fff", "3.2", ".82", "")
+            _svgPath(path, "#ff1ba6", "70", ".24", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "44", ".48", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "26", ".84", "url(#g)"),
+            _svgPath(path, "#ff0f6f", "13", ".99", ""),
+            _svgPath(path, "#fff", "4.4", ".88", "")
         );
     }
 
     function _edgeAccentV(uint256 x, uint256 y) private pure returns (string memory) {
-        uint256 d = 82;
+        uint256 d = 96;
         uint256 y0 = y > d ? y - d : y;
         uint256 y1 = y + d;
         string memory path = string.concat("M", x.toString(), " ", y0.toString(), "V", y1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "46", ".28", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "30", ".54", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "17", ".92", "url(#g)"),
-            _svgPath(path, "#ff0f6f", "8", ".98", ""),
-            _svgPath(path, "#fff", "3.2", ".82", "")
+            _svgPath(path, "#ff1ba6", "70", ".24", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "44", ".48", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "26", ".84", "url(#g)"),
+            _svgPath(path, "#ff0f6f", "13", ".99", ""),
+            _svgPath(path, "#fff", "4.4", ".88", "")
         );
     }
 
@@ -582,12 +595,22 @@ contract CubeRendererV2 is ICubeRenderer {
         return string.concat(
             '<g fill="none" stroke="',
             planeColor,
-            '" stroke-width=".85" opacity=".28" filter="url(#g)">',
+            '" stroke-width="1.6" opacity=".14" filter="url(#p)">',
+            lines,
+            "</g>",
+            '<g fill="none" stroke="',
+            planeColor,
+            '" stroke-width=".9" opacity=".36" filter="url(#g)">',
             lines,
             "</g>",
             '<g fill="',
             planeColor,
-            '" opacity=".68" filter="url(#g)">',
+            '" opacity=".28" filter="url(#p)">',
+            dots,
+            "</g>",
+            '<g fill="',
+            planeColor,
+            '" opacity=".82" filter="url(#g)">',
             dots,
             "</g>"
         );
@@ -748,10 +771,15 @@ contract CubeRendererV2 is ICubeRenderer {
         return string.concat(
             '<g fill="none" stroke="',
             planeColor,
-            '" stroke-width=".9" opacity=".22" filter="url(#g)">',
+            '" stroke-width="1.5" opacity=".12" filter="url(#p)">',
             paths,
             "</g>",
-            '<g fill="none" stroke="#fff" stroke-width=".45" opacity=".18">',
+            '<g fill="none" stroke="',
+            planeColor,
+            '" stroke-width=".95" opacity=".28" filter="url(#g)">',
+            paths,
+            "</g>",
+            '<g fill="none" stroke="#fff" stroke-width=".5" opacity=".22">',
             paths,
             "</g>"
         );
