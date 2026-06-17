@@ -5,6 +5,7 @@ import { Script, console2 } from "forge-std/Script.sol";
 import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
+import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
@@ -86,7 +87,11 @@ contract DeployLocalGenesis is Script {
         AgentStatusRegistry agentRegistry = new AgentStatusRegistry(initialOwner);
 
         vm.broadcast();
-        CubeRendererV2 renderer = new CubeRendererV2(cubes, assetStore, address(normies));
+        CubeThumbnailRendererV1 thumbnailRenderer = new CubeThumbnailRendererV1(cubes, address(normies));
+
+        vm.broadcast();
+        CubeRendererV2 renderer =
+            new CubeRendererV2(cubes, assetStore, address(normies), address(thumbnailRenderer));
 
         vm.broadcast();
         NormieGenesisMinter genesis = new NormieGenesisMinter(cubes, publicSeed, initialOwner);

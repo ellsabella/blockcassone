@@ -5,6 +5,7 @@ import { Script, console2 } from "forge-std/Script.sol";
 import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
+import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { NormieAddresses } from "../src/NormieAddresses.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
@@ -29,6 +30,7 @@ contract DeployMainnetNormiePreview is Script {
         CubeNFT cubes;
         RendererAssetStore assetStore;
         AgentStatusRegistry agentRegistry;
+        CubeThumbnailRendererV1 thumbnailRenderer;
         CubeRendererV2 renderer;
         NormieGenesisMinter genesis;
     }
@@ -85,8 +87,17 @@ contract DeployMainnetNormiePreview is Script {
         deployment.agentRegistry = new AgentStatusRegistry(config.initialOwner);
 
         vm.broadcast();
+        deployment.thumbnailRenderer =
+            new CubeThumbnailRendererV1(deployment.cubes, NormieAddresses.NORMIES_STORAGE);
+
+        vm.broadcast();
         deployment.renderer =
-            new CubeRendererV2(deployment.cubes, deployment.assetStore, NormieAddresses.NORMIES_STORAGE);
+            new CubeRendererV2(
+                deployment.cubes,
+                deployment.assetStore,
+                NormieAddresses.NORMIES_STORAGE,
+                address(deployment.thumbnailRenderer)
+            );
 
         vm.broadcast();
         deployment.genesis =

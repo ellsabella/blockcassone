@@ -7,6 +7,7 @@ import { ERC721 } from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol
 import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
+import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
 contract RendererV2MockNormies is ERC721 {
@@ -32,6 +33,7 @@ contract CubeRendererV2Test is Test {
     CubeNFT private cubes;
     AgentStatusRegistry private agentRegistry;
     RendererAssetStore private assets;
+    CubeThumbnailRendererV1 private thumbnailRenderer;
     CubeRendererV2 private renderer;
 
     function setUp() public {
@@ -39,7 +41,8 @@ contract CubeRendererV2Test is Test {
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
-        renderer = new CubeRendererV2(cubes, assets, address(normies));
+        thumbnailRenderer = new CubeThumbnailRendererV1(cubes, address(normies));
+        renderer = new CubeRendererV2(cubes, assets, address(normies), address(thumbnailRenderer));
 
         bytes memory raw = new bytes(200);
         raw[0] = hex"80";
