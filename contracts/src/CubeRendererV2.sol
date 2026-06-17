@@ -169,10 +169,9 @@ contract CubeRendererV2 is ICubeRenderer {
             '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
-            '<feMorphology in="SourceGraphic" operator="dilate" radius=".75" result="d"/>',
-            '<feGaussianBlur in="d" stdDeviation="1.5" result="b0"/>',
-            '<feGaussianBlur in="d" stdDeviation="4.5" result="b1"/>',
-            '<feGaussianBlur in="d" stdDeviation="10" result="b2"/>',
+            '<feGaussianBlur stdDeviation="1.4" result="b0"/>',
+            '<feGaussianBlur stdDeviation="5.2" result="b1"/>',
+            '<feGaussianBlur stdDeviation="13" result="b2"/>',
             '<feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="b0"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<path id="n" d="',
@@ -214,13 +213,13 @@ contract CubeRendererV2 is ICubeRenderer {
             '" opacity=".055"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width="1.18" opacity=".28" filter="url(#h)"/>',
+            '" stroke-width=".78" opacity=".12" filter="url(#h)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".92" opacity=".50" filter="url(#t)"/>',
+            '" stroke-width=".66" opacity=".42" filter="url(#t)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".52" opacity=".96" filter="url(#g)"/>',
+            '" stroke-width=".48" opacity=".95" filter="url(#g)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
             '" stroke-width=".26" opacity=".98"/>',
@@ -230,7 +229,7 @@ contract CubeRendererV2 is ICubeRenderer {
                 : string.concat(
                     '<use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".74" opacity=".36" filter="url(#t)"/><use href="#l" fill="none" stroke="',
+                    '" stroke-width=".58" opacity=".34" filter="url(#t)"/><use href="#l" fill="none" stroke="',
                     planeColor,
                     '" stroke-width=".38" opacity=".98" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".1" opacity=".84"/>'
                 ),
@@ -319,9 +318,9 @@ contract CubeRendererV2 is ICubeRenderer {
         uint256 x1 = x + d;
         string memory path = string.concat("M", x0.toString(), " ", y.toString(), "H", x1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "70", ".24", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "44", ".48", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "26", ".84", "url(#g)"),
+            _svgPath(path, "#ff1ba6", "58", ".18", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "36", ".40", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "22", ".82", "url(#g)"),
             _svgPath(path, "#ff0f6f", "13", ".99", ""),
             _svgPath(path, "#fff", "4.4", ".88", "")
         );
@@ -333,9 +332,9 @@ contract CubeRendererV2 is ICubeRenderer {
         uint256 y1 = y + d;
         string memory path = string.concat("M", x.toString(), " ", y0.toString(), "V", y1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "70", ".24", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "44", ".48", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "26", ".84", "url(#g)"),
+            _svgPath(path, "#ff1ba6", "58", ".18", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "36", ".40", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "22", ".82", "url(#g)"),
             _svgPath(path, "#ff0f6f", "13", ".99", ""),
             _svgPath(path, "#fff", "4.4", ".88", "")
         );
