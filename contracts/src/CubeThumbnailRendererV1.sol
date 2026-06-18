@@ -80,12 +80,12 @@ contract CubeThumbnailRendererV1 {
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".55" result="r"/>',
-            '<feColorMatrix in="r" type="matrix" values="8 0 0 0 0 0 8 0 0 0 0 0 8 0 0 0 0 0 1 0" result="rc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".42" result="r"/>',
+            '<feColorMatrix in="r" type="matrix" values="9 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .95 0" result="rc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="1.45" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="6.5 0 0 0 0 0 6.5 0 0 0 0 0 6.5 0 0 0 0 0 .72 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="3.6 0 0 0 0 0 3.6 0 0 0 0 0 3.6 0 0 0 0 0 .22 0" result="mc"/>',
+            '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 2.2 0 0 0 0 0 2.2 0 0 0 0 0 .62 0" result="tc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.6" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 1.2 0 0 0 0 0 1.2 0 0 0 0 0 .16 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
@@ -139,11 +139,11 @@ contract CubeThumbnailRendererV1 {
             '" stroke-width=".42" opacity=".88" filter="url(#nt)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".30" opacity=".98" filter="url(#g)"/>',
+            '" stroke-width=".32" opacity="1" filter="url(#g)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".22" opacity="1"/>',
-            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".045" opacity=".46"/>',
+            '" stroke-width=".24" opacity="1"/>',
+            '<use href="#o" fill="none" stroke="#fff" stroke-width=".032" opacity=".92"/>',
             bytes(labelPath).length == 0
                 ? ""
                 : string.concat(
@@ -151,7 +151,7 @@ contract CubeThumbnailRendererV1 {
                     planeColor,
                     '" stroke-width=".34" opacity=".86" filter="url(#nt)"/><use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".28" opacity=".98" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".045" opacity=".42"/>'
+                    '" stroke-width=".30" opacity="1" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".035" opacity=".84"/>'
                 ),
             "</g>"
         );
