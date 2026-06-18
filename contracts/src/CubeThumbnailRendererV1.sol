@@ -80,12 +80,12 @@ contract CubeThumbnailRendererV1 {
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".62" result="r"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".78" result="r"/>',
             '<feColorMatrix in="r" type="matrix" values="9 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .95 0" result="rc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.95" result="t"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.72" result="t"/>',
             '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 2.2 0 0 0 0 0 2.2 0 0 0 0 0 .58 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.9" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 1.2 0 0 0 0 0 1.2 0 0 0 0 0 .10 0" result="mc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.35" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 1.2 0 0 0 0 0 1.2 0 0 0 0 0 .07 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
@@ -238,11 +238,11 @@ contract CubeThumbnailRendererV1 {
         uint256 x1 = x + d;
         string memory path = string.concat("M", x0.toString(), " ", y.toString(), "H", x1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "24", ".14", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "17", ".34", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "14", ".86", "url(#g)"),
-            _svgPath(path, "#ff0f6f", "13", ".99", ""),
-            _svgPath(path, "#fff", "4.4", ".88", "")
+            _svgPath(path, "#ff1ba6", "12", ".12", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "7.5", ".32", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "5.2", ".92", "url(#g)"),
+            _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
+            _svgPath(path, "#fff", "1.65", ".55", "")
         );
     }
 
@@ -252,11 +252,11 @@ contract CubeThumbnailRendererV1 {
         uint256 y1 = y + d;
         string memory path = string.concat("M", x.toString(), " ", y0.toString(), "V", y1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "24", ".14", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "17", ".34", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "14", ".86", "url(#g)"),
-            _svgPath(path, "#ff0f6f", "13", ".99", ""),
-            _svgPath(path, "#fff", "4.4", ".88", "")
+            _svgPath(path, "#ff1ba6", "12", ".12", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "7.5", ".32", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "5.2", ".92", "url(#g)"),
+            _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
+            _svgPath(path, "#fff", "1.65", ".55", "")
         );
     }
 
@@ -280,7 +280,7 @@ contract CubeThumbnailRendererV1 {
             width,
             '" opacity="',
             opacity,
-            '"',
+            '" stroke-linecap="round" stroke-linejoin="round"',
             bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
             "/>"
         );
@@ -293,10 +293,10 @@ contract CubeThumbnailRendererV1 {
     {
         uint256 r = _parseSmallUint(radius);
         return string.concat(
-            _circle(x, y, (r * 2).toString(), color, ".18", "url(#h)"),
-            _circle(x, y, ((r * 3) / 2).toString(), color, ".34", "url(#p)"),
-            _circle(x, y, radius, color, ".94", "url(#g)"),
-            _circle(x, y, (r / 2 + 2).toString(), "#fff", ".58", "")
+            _circle(x, y, (r * 2).toString(), color, ".12", "url(#h)"),
+            _circle(x, y, ((r * 3) / 2).toString(), color, ".26", "url(#p)"),
+            _circle(x, y, radius, color, ".74", "url(#g)"),
+            _circle(x, y, (r / 3 + 2).toString(), "#fff", ".42", "")
         );
     }
 
