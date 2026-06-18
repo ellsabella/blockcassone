@@ -82,10 +82,10 @@ contract CubeThumbnailRendererV1 {
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".55" result="r"/>',
             '<feColorMatrix in="r" type="matrix" values="8 0 0 0 0 0 8 0 0 0 0 0 8 0 0 0 0 0 1 0" result="rc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="5.5 0 0 0 0 0 5.5 0 0 0 0 0 5.5 0 0 0 0 0 .75 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="4.4" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .34 0" result="mc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.45" result="t"/>',
+            '<feColorMatrix in="t" type="matrix" values="6.5 0 0 0 0 0 6.5 0 0 0 0 0 6.5 0 0 0 0 0 .72 0" result="tc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="3.6 0 0 0 0 0 3.6 0 0 0 0 0 3.6 0 0 0 0 0 .22 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
@@ -133,25 +133,25 @@ contract CubeThumbnailRendererV1 {
             '<g transform="translate(100 85) scale(25)" stroke-linecap="round" stroke-linejoin="round">',
             '<use href="#n" fill="',
             planeColor,
-            '" opacity=".025"/>',
+            '" opacity=".012"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".48" opacity=".78" filter="url(#nt)"/>',
+            '" stroke-width=".42" opacity=".88" filter="url(#nt)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".34" opacity=".92" filter="url(#g)"/>',
+            '" stroke-width=".30" opacity=".98" filter="url(#g)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".26" opacity=".98"/>',
-            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".09" opacity=".96"/>',
+            '" stroke-width=".22" opacity="1"/>',
+            '<use href="#o" fill="none" stroke="#fff5f5" stroke-width=".045" opacity=".46"/>',
             bytes(labelPath).length == 0
                 ? ""
                 : string.concat(
                     '<use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".38" opacity=".80" filter="url(#nt)"/><use href="#l" fill="none" stroke="',
+                    '" stroke-width=".34" opacity=".86" filter="url(#nt)"/><use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".30" opacity=".98" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".09" opacity=".84"/>'
+                    '" stroke-width=".28" opacity=".98" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".045" opacity=".42"/>'
                 ),
             "</g>"
         );
@@ -172,9 +172,9 @@ contract CubeThumbnailRendererV1 {
     {
         return string.concat(
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision">',
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "16", ".16", "url(#h)"),
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "9", ".38", "url(#p)"),
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "5.8", ".88", "url(#g)"),
+            _svgPath("M100 85H1100V1085H100", "#38ff4d", "12", ".12", "url(#h)"),
+            _svgPath("M100 85H1100V1085H100", "#38ff4d", "7.5", ".32", "url(#p)"),
+            _svgPath("M100 85H1100V1085H100", "#38ff4d", "5.2", ".92", "url(#g)"),
             _svgPath("M100 85H1100V1085H100", "#8dff98", "3.4", ".98", ""),
             _svgPath("M100 85H1100V1085H100", "#fff", "1.65", ".55", ""),
             _edgeAccents(data, planeColor),
@@ -238,9 +238,9 @@ contract CubeThumbnailRendererV1 {
         uint256 x1 = x + d;
         string memory path = string.concat("M", x0.toString(), " ", y.toString(), "H", x1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "34", ".18", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "22", ".40", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "16", ".82", "url(#g)"),
+            _svgPath(path, "#ff1ba6", "24", ".14", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "17", ".34", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "14", ".86", "url(#g)"),
             _svgPath(path, "#ff0f6f", "13", ".99", ""),
             _svgPath(path, "#fff", "4.4", ".88", "")
         );
@@ -252,9 +252,9 @@ contract CubeThumbnailRendererV1 {
         uint256 y1 = y + d;
         string memory path = string.concat("M", x.toString(), " ", y0.toString(), "V", y1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "34", ".18", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "22", ".40", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "16", ".82", "url(#g)"),
+            _svgPath(path, "#ff1ba6", "24", ".14", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "17", ".34", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "14", ".86", "url(#g)"),
             _svgPath(path, "#ff0f6f", "13", ".99", ""),
             _svgPath(path, "#fff", "4.4", ".88", "")
         );
@@ -293,10 +293,10 @@ contract CubeThumbnailRendererV1 {
     {
         uint256 r = _parseSmallUint(radius);
         return string.concat(
-            _circle(x, y, (r * 3).toString(), color, ".28", "url(#h)"),
-            _circle(x, y, (r * 2).toString(), color, ".46", "url(#p)"),
+            _circle(x, y, (r * 2).toString(), color, ".18", "url(#h)"),
+            _circle(x, y, ((r * 3) / 2).toString(), color, ".34", "url(#p)"),
             _circle(x, y, radius, color, ".94", "url(#g)"),
-            _circle(x, y, (r / 2 + 2).toString(), "#fff", ".82", "")
+            _circle(x, y, (r / 2 + 2).toString(), "#fff", ".58", "")
         );
     }
 
