@@ -57,26 +57,26 @@ contract CubeThumbnailRendererV1 {
         return string.concat(
             '<defs>',
             '<filter id="g" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.8" result="t"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/>',
             '<feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="7" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .75 0" result="mc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="p" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/>',
             '<feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="15" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .65 0" result="mc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="30" result="w"/>',
-            '<feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .38 0" result="wc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/>',
+            '<feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/>',
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="h" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="12" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .45 0" result="mc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="34" result="w"/>',
-            '<feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .25 0" result="wc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/>',
+            '<feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/>',
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
@@ -133,7 +133,7 @@ contract CubeThumbnailRendererV1 {
             '<g transform="translate(100 85) scale(25)" stroke-linecap="round" stroke-linejoin="round">',
             '<use href="#n" fill="',
             planeColor,
-            '" opacity=".012"/>',
+            '" opacity=".006"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
             '" stroke-width=".46" opacity=".90" filter="url(#nt)"/>',
@@ -192,7 +192,7 @@ contract CubeThumbnailRendererV1 {
             for (uint256 bit = 0; bit < 7; bit++) {
                 if (!_edgePointActive(data, edge, bit)) continue;
                 (uint256 x, uint256 y) = _edgePointCoord(edge, bit);
-                out = string.concat(out, _edgePoint(x, y, edge == 1 ? "#fff" : planeColor, edge == 1 ? "13" : "9"));
+                out = string.concat(out, _edgePoint(x, y, planeColor, edge == 1 ? "13" : "9"));
             }
         }
         return string.concat(
