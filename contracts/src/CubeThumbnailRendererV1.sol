@@ -80,12 +80,12 @@ contract CubeThumbnailRendererV1 {
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".78" result="r"/>',
-            '<feColorMatrix in="r" type="matrix" values="9 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .95 0" result="rc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.72" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 2.2 0 0 0 0 0 2.2 0 0 0 0 0 .58 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.35" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 1.2 0 0 0 0 0 1.2 0 0 0 0 0 .07 0" result="mc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".55" result="r"/>',
+            '<feColorMatrix in="r" type="matrix" values="9 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .92 0" result="rc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.22" result="t"/>',
+            '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 2.2 0 0 0 0 0 2.2 0 0 0 0 0 .42 0" result="tc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.75" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 1.2 0 0 0 0 0 1.2 0 0 0 0 0 .045 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
@@ -133,25 +133,25 @@ contract CubeThumbnailRendererV1 {
             '<g transform="translate(100 85) scale(25)" stroke-linecap="round" stroke-linejoin="round">',
             '<use href="#n" fill="',
             planeColor,
-            '" opacity=".006"/>',
+            '" opacity=".003"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".46" opacity=".90" filter="url(#nt)"/>',
+            '" stroke-width=".38" opacity=".90" filter="url(#nt)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".34" opacity="1" filter="url(#g)"/>',
+            '" stroke-width=".27" opacity=".95" filter="url(#g)"/>',
             '<use href="#o" fill="none" stroke="',
             planeColor,
-            '" stroke-width=".24" opacity="1"/>',
-            '<use href="#o" fill="none" stroke="#fff" stroke-width=".032" opacity=".92"/>',
+            '" stroke-width=".20" opacity="1"/>',
+            '<use href="#o" fill="none" stroke="#fff" stroke-width=".026" opacity=".92"/>',
             bytes(labelPath).length == 0
                 ? ""
                 : string.concat(
                     '<use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".38" opacity=".88" filter="url(#nt)"/><use href="#l" fill="none" stroke="',
+                    '" stroke-width=".32" opacity=".88" filter="url(#nt)"/><use href="#l" fill="none" stroke="',
                     planeColor,
-                    '" stroke-width=".32" opacity="1" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".035" opacity=".84"/>'
+                    '" stroke-width=".26" opacity=".95" filter="url(#g)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".028" opacity=".84"/>'
                 ),
             "</g>"
         );
@@ -162,7 +162,7 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (string memory)
     {
-        return string.concat(_planeEdges(data, planeColor), _edgePoints(data, planeColor));
+        return string.concat(_planeEdges(data, planeColor), _edgePoints(data));
     }
 
     function _planeEdges(CubeNFT.CubeData memory data, string memory planeColor)
@@ -182,7 +182,7 @@ contract CubeThumbnailRendererV1 {
         );
     }
 
-    function _edgePoints(CubeNFT.CubeData memory data, string memory planeColor)
+    function _edgePoints(CubeNFT.CubeData memory data)
         private
         pure
         returns (string memory)
@@ -192,7 +192,7 @@ contract CubeThumbnailRendererV1 {
             for (uint256 bit = 0; bit < 7; bit++) {
                 if (!_edgePointActive(data, edge, bit)) continue;
                 (uint256 x, uint256 y) = _edgePointCoord(edge, bit);
-                out = string.concat(out, _edgePoint(x, y, planeColor, edge == 1 ? "13" : "9"));
+                out = string.concat(out, _edgePoint(x, y, "#fff", edge == 1 ? "13" : "9"));
             }
         }
         return string.concat(
@@ -293,10 +293,10 @@ contract CubeThumbnailRendererV1 {
     {
         uint256 r = _parseSmallUint(radius);
         return string.concat(
-            _circle(x, y, (r * 2).toString(), color, ".12", "url(#h)"),
-            _circle(x, y, ((r * 3) / 2).toString(), color, ".26", "url(#p)"),
-            _circle(x, y, radius, color, ".74", "url(#g)"),
-            _circle(x, y, (r / 3 + 2).toString(), "#fff", ".42", "")
+            _circle(x, y, (r * 2).toString(), color, ".10", "url(#h)"),
+            _circle(x, y, ((r * 3) / 2).toString(), color, ".24", "url(#p)"),
+            _circle(x, y, radius, color, ".48", "url(#g)"),
+            _circle(x, y, (r / 3 + 2).toString(), "#fff", ".24", "")
         );
     }
 
