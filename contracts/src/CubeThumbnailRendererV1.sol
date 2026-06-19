@@ -80,12 +80,12 @@ contract CubeThumbnailRendererV1 {
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".55" result="r"/>',
-            '<feColorMatrix in="r" type="matrix" values="9 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .92 0" result="rc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.22" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 2.2 0 0 0 0 0 2.2 0 0 0 0 0 .42 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.75" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 1.2 0 0 0 0 0 1.2 0 0 0 0 0 .045 0" result="mc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".32" result="r"/>',
+            '<feColorMatrix in="r" type="matrix" values="9 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .88 0" result="rc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".68" result="t"/>',
+            '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 2.2 0 0 0 0 0 2.2 0 0 0 0 0 .34 0" result="tc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".95" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 1.2 0 0 0 0 0 1.2 0 0 0 0 0 .025 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
@@ -242,7 +242,7 @@ contract CubeThumbnailRendererV1 {
             _svgPath(path, "#ff1ba6", "7.5", ".32", "url(#p)"),
             _svgPath(path, "#ff3ab8", "5.2", ".92", "url(#g)"),
             _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
-            _svgPath(path, "#fff", "1.65", ".55", "")
+            _svgPath(path, "#ffd6f2", "1.65", ".58", "")
         );
     }
 
@@ -256,7 +256,7 @@ contract CubeThumbnailRendererV1 {
             _svgPath(path, "#ff1ba6", "7.5", ".32", "url(#p)"),
             _svgPath(path, "#ff3ab8", "5.2", ".92", "url(#g)"),
             _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
-            _svgPath(path, "#fff", "1.65", ".55", "")
+            _svgPath(path, "#ffd6f2", "1.65", ".58", "")
         );
     }
 
@@ -293,10 +293,11 @@ contract CubeThumbnailRendererV1 {
     {
         uint256 r = _parseSmallUint(radius);
         return string.concat(
-            _circle(x, y, (r * 2).toString(), color, ".10", "url(#h)"),
-            _circle(x, y, ((r * 3) / 2).toString(), color, ".24", "url(#p)"),
-            _circle(x, y, radius, color, ".48", "url(#g)"),
-            _circle(x, y, (r / 3 + 2).toString(), "#fff", ".24", "")
+            _circle(x, y, (r * 2).toString(), color, ".12", "url(#h)"),
+            _circle(x, y, ((r * 3) / 2).toString(), color, ".30", "url(#p)"),
+            _circle(x, y, radius, color, ".62", "url(#g)"),
+            _circle(x, y, (r / 2 + 3).toString(), "#fff", ".38", "url(#g)"),
+            _circle(x, y, (r / 3 + 2).toString(), "#fff", ".76", "")
         );
     }
 
