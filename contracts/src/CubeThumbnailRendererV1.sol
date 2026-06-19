@@ -80,12 +80,12 @@ contract CubeThumbnailRendererV1 {
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".32" result="r"/>',
-            '<feColorMatrix in="r" type="matrix" values="9 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .88 0" result="rc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".68" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 2.2 0 0 0 0 0 2.2 0 0 0 0 0 .34 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".95" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 1.2 0 0 0 0 0 1.2 0 0 0 0 0 .025 0" result="mc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".26" result="r"/>',
+            '<feColorMatrix in="r" type="matrix" values="10 0 0 0 0 0 3.2 0 0 0 0 0 3.2 0 0 0 0 0 .92 0" result="rc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/>',
+            '<feColorMatrix in="t" type="matrix" values="8 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .38 0" result="tc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".74" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 1.4 0 0 0 0 0 1.4 0 0 0 0 0 .025 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-600" y="-600" width="2400" height="2400" color-interpolation-filters="sRGB">',
@@ -238,11 +238,11 @@ contract CubeThumbnailRendererV1 {
         uint256 x1 = x + d;
         string memory path = string.concat("M", x0.toString(), " ", y.toString(), "H", x1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "12", ".12", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "7.5", ".32", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "5.2", ".92", "url(#g)"),
+            _svgPath(path, "#ff1ba6", "12", ".18", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "7.5", ".46", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "5.2", ".98", "url(#g)"),
             _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
-            _svgPath(path, "#ffd6f2", "1.65", ".58", "")
+            _svgPath(path, "#ffc0ea", "1.65", ".46", "")
         );
     }
 
@@ -252,11 +252,11 @@ contract CubeThumbnailRendererV1 {
         uint256 y1 = y + d;
         string memory path = string.concat("M", x.toString(), " ", y0.toString(), "V", y1.toString());
         return string.concat(
-            _svgPath(path, "#ff1ba6", "12", ".12", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "7.5", ".32", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "5.2", ".92", "url(#g)"),
+            _svgPath(path, "#ff1ba6", "12", ".18", "url(#h)"),
+            _svgPath(path, "#ff1ba6", "7.5", ".46", "url(#p)"),
+            _svgPath(path, "#ff3ab8", "5.2", ".98", "url(#g)"),
             _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
-            _svgPath(path, "#ffd6f2", "1.65", ".58", "")
+            _svgPath(path, "#ffc0ea", "1.65", ".46", "")
         );
     }
 
