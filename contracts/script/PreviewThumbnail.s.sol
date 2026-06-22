@@ -38,7 +38,7 @@ contract PreviewThumbnail is Script {
     function run() external {
         uint256 slot = vm.envOr("SLOT", uint256(0));
         uint256 normieId = vm.envOr("NORMIE_ID", uint256(1257));
-        address dev = address(0xD3V);
+        address dev = address(0xBEEF);
 
         PreviewMockNormies normies = new PreviewMockNormies();
         CubeNFT cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, dev);
