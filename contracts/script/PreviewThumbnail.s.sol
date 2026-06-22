@@ -27,10 +27,11 @@ contract PreviewMockNormies is ERC721 {
 /// aesthetic (the main colour comes from the slot's unique Hilbert axis:
 /// x=red, y=green, z=blue).
 ///
-/// Usage (WSL):
-///   SLOT=0 forge script contracts/script/PreviewThumbnail.s.sol
-///   SLOT=1 forge script contracts/script/PreviewThumbnail.s.sol
-///   for s in 0 1 2 3 4 5; do SLOT=$s forge script contracts/script/PreviewThumbnail.s.sol; done
+/// Usage (WSL) — the file has two contracts, so pass --tc PreviewThumbnail:
+///   SLOT=0 forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail
+///   for s in 0 1 2 3 4 5; do
+///     SLOT=$s forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail
+///   done
 ///
 /// Optional env: NORMIE_ID (label, default 1257).
 /// Writes: data/preview-slot-<SLOT>.svg
