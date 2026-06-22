@@ -87,7 +87,8 @@ contract DeployLocalGenesis is Script {
         AgentStatusRegistry agentRegistry = new AgentStatusRegistry(initialOwner);
 
         vm.broadcast();
-        CubeThumbnailRendererV1 thumbnailRenderer = new CubeThumbnailRendererV1(cubes, address(normies));
+        CubeThumbnailRendererV1 thumbnailRenderer =
+            new CubeThumbnailRendererV1(cubes, address(normies), address(0));
 
         vm.broadcast();
         CubeRendererV2 renderer =

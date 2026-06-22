@@ -8,20 +8,26 @@ interface IThumbnailNormieRawImageStorage {
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
 }
 
+interface IThumbnailNonNormieArtStore {
+    function payloadForCube(uint256 cubeId) external view returns (bytes memory);
+}
+
 contract CubeThumbnailRendererV1 {
     using Strings for uint256;
 
     CubeNFT public immutable cubes;
     address public immutable normieStorage;
+    address public immutable nonNormieStore;
 
-    constructor(CubeNFT cubes_, address normieStorage_) {
+    constructor(CubeNFT cubes_, address normieStorage_, address nonNormieStore_) {
         cubes = cubes_;
         normieStorage = normieStorage_;
+        nonNormieStore = nonNormieStore_;
     }
 
     function thumbnailSVG(uint256 tokenId) public view returns (string memory) {
         CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
-        bytes memory raw = _rawImageBytes(data);
+        bytes memory raw = _rawImageBytes(data, tokenId);
         string memory labelPath = _labelPath(data.sourceTokenId);
         string memory bitmapPath = _bitmapPath(raw);
         string memory outlinePath = _outlinePath(raw, data.sourceTokenId);
@@ -38,15 +44,46 @@ contract CubeThumbnailRendererV1 {
         );
     }
 
-    function _rawImageBytes(CubeNFT.CubeData memory data) private view returns (bytes memory) {
-        if (data.sourceKind != cubes.SOURCE_KIND_NORMIE() || normieStorage == address(0)) return "";
-        try IThumbnailNormieRawImageStorage(normieStorage).getTokenRawImageData(data.sourceTokenId) returns (
-            bytes memory raw
-        ) {
-            return raw;
-        } catch {
-            return "";
+    // Returns a 200-byte (40x40, 1 bit/cell) binary silhouette for either source
+    // kind. Normie art is already binary; non-Normie art is a 400-byte 2-bit
+    // tonal-band payload (NonNormieArtStore) thresholded to a silhouette.
+    function _rawImageBytes(CubeNFT.CubeData memory data, uint256 cubeId) private view returns (bytes memory) {
+        if (data.sourceKind == cubes.SOURCE_KIND_NORMIE()) {
+            if (normieStorage == address(0)) return "";
+            try IThumbnailNormieRawImageStorage(normieStorage).getTokenRawImageData(data.sourceTokenId) returns (
+                bytes memory raw
+            ) {
+                return raw;
+            } catch {
+                return "";
+            }
         }
+        if (data.sourceKind == cubes.SOURCE_KIND_EXTERNAL_ERC721() && nonNormieStore != address(0)) {
+            try IThumbnailNonNormieArtStore(nonNormieStore).payloadForCube(cubeId) returns (
+                bytes memory payload
+            ) {
+                return _tonalToBinary(payload);
+            } catch {
+                return "";
+            }
+        }
+        return "";
+    }
+
+    // Threshold a 400-byte 2-bit tonal-band payload (4 luminance bands, 40x40,
+    // row-major) into the 200-byte 1-bit silhouette the bitmap/outline path
+    // expects: any non-zero band is foreground. Bit layout matches _bitmapBit
+    // (index = row*40+col; byte index/8; bit 7-(index%8)).
+    function _tonalToBinary(bytes memory payload) private pure returns (bytes memory) {
+        if (payload.length != 400) return "";
+        bytes memory out = new bytes(200);
+        for (uint256 cell = 0; cell < 1600; cell++) {
+            uint8 band = uint8(uint8(payload[cell >> 2]) >> ((cell & 3) << 1)) & 3;
+            if (band > 0) {
+                out[cell >> 3] |= bytes1(uint8(1) << uint8(7 - (cell & 7)));
+            }
+        }
+        return out;
     }
     function _thumbnailDefs(string memory bitmapPath, string memory outlinePath, string memory labelPath)
         private
@@ -491,7 +528,7 @@ contract CubeThumbnailRendererV1 {
         if (glyph == "7") return 0x7249;
         if (glyph == "8") return 0x7BEF;
         if (glyph == "9") return 0x7BCF;
-        return 0x2BAA; // '#'
+        return 0x2EBA; // '#' (centre bar + two crossbars, matches viewer label.js 3x5 font)
     }
 
     function _forestLayer(CubeNFT.CubeData memory data, string memory planeColor)
@@ -712,11 +749,43 @@ contract CubeThumbnailRendererV1 {
         );
     }
 
+    // Hilbert world order (must match viewer/main.js HILBERT_ORDER). A cube's
+    // slot is its motif index in [0, 8^(ORDER-1)).
+    uint256 private constant HILBERT_ORDER = 5;
+
     function _planeColor(CubeNFT.CubeData memory data) private pure returns (string memory) {
-        uint256 axis = uint256(data.slot) % 3;
-        if (axis == 0) return "#ff1919";
-        if (axis == 1) return "#38ff4d";
-        return "#244cff";
+        uint256 axis = _mainAxis(uint256(data.slot));
+        if (axis == 0) return "#ff1919"; // x -> red
+        if (axis == 1) return "#38ff4d"; // y -> green
+        return "#244cff";                // z -> blue
+    }
+
+    // The cube's "main" colour comes from its UNIQUE-axis plane (e.g. an XXY
+    // cube takes Y). Derived from the 3D Hilbert geometry: a motif's 3 plane
+    // axes are always [axis(C), axis(B), axis(C)], so the unique axis is always
+    // the B basis vector's axis. We find B's axis by walking the Hilbert octree
+    // (ORDER-1 levels) and tracking how the orientation basis (a,b,c) permutes
+    // per child. Verified to match core/hilbert.js for all motifs (orders 2-5).
+    function _mainAxis(uint256 motif) private pure returns (uint256) {
+        uint256 levels = HILBERT_ORDER - 1;
+        uint256 a = 0; // x
+        uint256 b = 1; // y
+        uint256 c = 2; // z
+        for (uint256 i = 0; i < levels; i++) {
+            uint256 d = (motif / (8 ** (levels - 1 - i))) % 8;
+            uint256 na;
+            uint256 nb;
+            uint256 nc;
+            if (d == 3 || d == 4) {
+                (na, nb, nc) = (a, b, c); // identity
+            } else if (d == 1 || d == 2 || d == 5 || d == 6) {
+                (na, nb, nc) = (c, a, b);
+            } else {
+                (na, nb, nc) = (b, c, a); // 0 or 7
+            }
+            (a, b, c) = (na, nb, nc);
+        }
+        return b;
     }
 
     function _mix(uint256 a, uint256 b, uint256 pct) private pure returns (uint256) {

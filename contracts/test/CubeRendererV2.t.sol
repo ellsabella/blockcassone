@@ -41,7 +41,7 @@ contract CubeRendererV2Test is Test {
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
-        thumbnailRenderer = new CubeThumbnailRendererV1(cubes, address(normies));
+        thumbnailRenderer = new CubeThumbnailRendererV1(cubes, address(normies), address(0));
         renderer = new CubeRendererV2(cubes, assets, address(normies), address(thumbnailRenderer));
 
         bytes memory raw = new bytes(200);

@@ -88,7 +88,7 @@ contract DeployMainnetNormiePreview is Script {
 
         vm.broadcast();
         deployment.thumbnailRenderer =
-            new CubeThumbnailRendererV1(deployment.cubes, NormieAddresses.NORMIES_STORAGE);
+            new CubeThumbnailRendererV1(deployment.cubes, NormieAddresses.NORMIES_STORAGE, address(0));
 
         vm.broadcast();
         deployment.renderer =
