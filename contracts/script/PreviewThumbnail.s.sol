@@ -23,43 +23,76 @@ contract PreviewMockNormies is ERC721 {
     }
 }
 
-/// @notice Dump a thumbnail SVG for a chosen slot, to eyeball the per-slot
-/// aesthetic (the main colour comes from the slot's unique Hilbert axis:
-/// x=red, y=green, z=blue).
+/// @notice Dump thumbnail SVGs for a range of slots in ONE run, to eyeball the
+/// per-slot colour (main colour = the slot's unique Hilbert axis: x=red,
+/// y=green, z=blue). For each slot it logs the colour this script computes
+/// (independent copy of the renderer's formula) so the console and the SVGs
+/// can be compared directly.
 ///
-/// Usage (WSL) — the file has two contracts, so pass --tc PreviewThumbnail:
-///   SLOT=0 forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail
-///   for s in 0 1 2 3 4 5; do
-///     SLOT=$s forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail
-///   done
+/// Usage (WSL):
+///   forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail
+///   COUNT=12 forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail
 ///
-/// Optional env: NORMIE_ID (label, default 1257).
-/// Writes: data/preview-slot-<SLOT>.svg
+/// Writes: data/preview-slot-<N>.svg for N in [0, COUNT)
 contract PreviewThumbnail is Script {
+    uint256 private constant HILBERT_ORDER = 5;
+
     function run() external {
-        uint256 slot = vm.envOr("SLOT", uint256(0));
-        uint256 normieId = vm.envOr("NORMIE_ID", uint256(1257));
+        uint256 count = vm.envOr("COUNT", uint256(8));
         address dev = address(0xBEEF);
 
         PreviewMockNormies normies = new PreviewMockNormies();
         CubeNFT cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, dev);
         CubeThumbnailRendererV1 thumb =
             new CubeThumbnailRendererV1(cubes, address(normies), address(0));
+        bytes memory bmp = _sampleBitmap();
 
-        normies.mint(dev, normieId, _sampleBitmap());
+        for (uint256 s = 0; s < count; s++) {
+            uint256 normieId = 1000 + s; // a normie can only be cubed once, so vary it
+            normies.mint(dev, normieId, bmp);
 
-        vm.prank(dev);
-        uint256 cubeId =
-            cubes.mintNormieCube(normieId, uint32(slot), keccak256(abi.encode("preview", slot)));
+            vm.prank(dev);
+            uint256 cubeId =
+                cubes.mintNormieCube(normieId, uint32(s), keccak256(abi.encode("preview", s)));
 
-        string memory svg = thumb.thumbnailSVG(cubeId);
-        string memory path = string.concat("data/preview-slot-", vm.toString(slot), ".svg");
-        vm.writeFile(path, svg);
+            // read the slot back to prove it round-trips, and render
+            CubeNFT.CubeData memory data = cubes.resolvedCubeData(cubeId);
+            string memory svg = thumb.thumbnailSVG(cubeId);
+            vm.writeFile(string.concat("data/preview-slot-", vm.toString(s), ".svg"), svg);
 
-        console2.log("slot", slot);
-        console2.log("cubeId", cubeId);
-        console2.log("wrote", path);
-        console2.log("(colour: x=red, y=green, z=blue per the slot's unique Hilbert axis)");
+            console2.log("slot", s);
+            console2.log("  data.slot (round-trip):", uint256(data.slot));
+            console2.log("  expected colour:", _colourName(_axis(s)));
+        }
+    }
+
+    // Independent copy of the renderer's unique-axis formula (sanity reference).
+    function _axis(uint256 motif) private pure returns (uint256) {
+        uint256 levels = HILBERT_ORDER - 1;
+        uint256 a = 0;
+        uint256 b = 1;
+        uint256 c = 2;
+        for (uint256 i = 0; i < levels; i++) {
+            uint256 d = (motif / (8 ** (levels - 1 - i))) % 8;
+            uint256 na;
+            uint256 nb;
+            uint256 nc;
+            if (d == 3 || d == 4) {
+                (na, nb, nc) = (a, b, c);
+            } else if (d == 1 || d == 2 || d == 5 || d == 6) {
+                (na, nb, nc) = (c, a, b);
+            } else {
+                (na, nb, nc) = (b, c, a);
+            }
+            (a, b, c) = (na, nb, nc);
+        }
+        return b;
+    }
+
+    function _colourName(uint256 axis) private pure returns (string memory) {
+        if (axis == 0) return "red (x) #ff1919";
+        if (axis == 1) return "green (y) #38ff4d";
+        return "blue (z) #244cff";
     }
 
     // A simple centred filled square so the silhouette/outline/label are visible.
