@@ -95,13 +95,15 @@ contract CubeRendererV2Test is Test {
 
         assertTrue(_contains(svg, '<path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/>'));
         assertTrue(_contains(svg, '<path id="o" d='));
-        assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#ff1919"'));
+        // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green (#38ff4d).
+        // (Was #ff1919 under the old slot%3 rule; now uses the unique-axis colour.)
+        assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#38ff4d"'));
         assertTrue(_contains(svg, '<path d="M100 85H1100V1085H100"'));
         assertTrue(_contains(svg, '<path id="l" d='));
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="14"'));
         assertTrue(_contains(svg, '<filter id="h"'));
-        assertTrue(_contains(svg, '<g fill="none" stroke="#ff1919" stroke-width="1.6"'));
-        assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#ff1919"'));
+        assertTrue(_contains(svg, '<g fill="none" stroke="#38ff4d" stroke-width="1.6"'));
+        assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#38ff4d"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));
     }
