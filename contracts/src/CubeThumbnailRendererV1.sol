@@ -140,6 +140,22 @@ contract CubeThumbnailRendererV1 {
             '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
+            // Forest particle clouds: feTurbulence masked, coloured by the source
+            // (so red/green/blue cubes get matching particles), then bloomed.
+            '<filter id="pc" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
+            '<feTurbulence type="fractalNoise" baseFrequency="0.45" numOctaves="2" seed="7" result="noise"/>',
+            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.2 -1.05" result="mask"/>',
+            '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
+            '<feGaussianBlur in="clip" stdDeviation="4" result="glow"/>',
+            '<feMerge><feMergeNode in="glow"/><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
+            "</filter>",
+            '<filter id="pcw" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
+            '<feTurbulence type="fractalNoise" baseFrequency="0.42" numOctaves="2" seed="19" result="noise"/>',
+            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 3.6 -2.25" result="mask"/>',
+            '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
+            '<feGaussianBlur in="clip" stdDeviation="1.6" result="glow"/>',
+            '<feMerge><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
+            "</filter>",
             '<path id="n" d="',
             bitmapPath,
             '"/>',
@@ -537,112 +553,97 @@ contract CubeThumbnailRendererV1 {
         return 0x2EBA; // '#' (centre bar + two crossbars, matches viewer label.js 3x5 font)
     }
 
+    // Forest: thin inward strands from active edge points to a hub, branching to
+    // tips; each tip carries a turbulence particle-cloud (colour + white passes).
     function _forestLayer(CubeNFT.CubeData memory data, string memory planeColor)
         private
         pure
         returns (string memory)
     {
-        string memory lines = "";
+        string memory strands = "";
+        string memory tips = "";
         for (uint256 bi = 0; bi < 21; bi++) {
             uint256 edge = bi / 7;
-            uint256 bit = bi - edge * 7;
-            if (!_edgePointActive(data, edge, bit)) continue;
+            if (!_edgePointActive(data, edge, bi - edge * 7)) continue;
             if (_rand(data, bi + 999, 100) >= 58) continue;
-            lines = string.concat(lines, _forestTree(data, bi));
+            strands = string.concat(strands, _treeStrands(data, bi));
+            tips = string.concat(tips, _treeTips(data, bi));
         }
-
-        string memory dots = "";
-        for (uint256 bi = 0; bi < 21; bi++) {
-            uint256 edge = bi / 7;
-            uint256 bit = bi - edge * 7;
-            if (!_edgePointActive(data, edge, bit)) continue;
-            if (_rand(data, bi + 999, 100) >= 58) continue;
-            for (uint256 i = 0; i < 7; i++) {
-                dots = string.concat(dots, _forestDot(data, bi, i));
-            }
-        }
+        if (bytes(strands).length == 0) return "";
 
         return string.concat(
-            '<g fill="none" stroke="',
-            planeColor,
-            '" stroke-width="1.6" opacity=".14" filter="url(#p)">',
-            lines,
-            "</g>",
-            '<g fill="none" stroke="',
-            planeColor,
-            '" stroke-width=".9" opacity=".36" filter="url(#g)">',
-            lines,
-            "</g>",
-            '<g fill="',
-            planeColor,
-            '" opacity=".28" filter="url(#p)">',
-            dots,
-            "</g>",
-            '<g fill="',
-            planeColor,
-            '" opacity=".82" filter="url(#g)">',
-            dots,
-            "</g>"
+            '<g fill="none" stroke="', planeColor,
+            '" stroke-width="1.4" opacity=".16" filter="url(#p)">', strands, "</g>",
+            '<g fill="none" stroke="', planeColor,
+            '" stroke-width=".6" opacity=".4" filter="url(#g)">', strands, "</g>",
+            '<g fill="', planeColor, '" filter="url(#pc)">', tips, "</g>",
+            '<g fill="#fff" filter="url(#pcw)">', tips, "</g>"
         );
     }
 
-    function _forestTree(CubeNFT.CubeData memory data, uint256 bi)
+    function _treeHub(CubeNFT.CubeData memory data, uint256 bi)
         private
         pure
-        returns (string memory)
+        returns (uint256 rootX, uint256 rootY, uint256 hubX, uint256 hubY)
     {
         uint256 edge = bi / 7;
-        uint256 bit = bi - edge * 7;
-        (uint256 rootX, uint256 rootY) = _edgePointCoord(edge, bit);
-
-        uint256 trunkLen = 190 + _rand(data, bi + 80, 430);
-        uint256 endX = _inwardX(rootX, trunkLen, data, bi + 120);
-        uint256 endY = _inwardY(rootY, trunkLen, data, bi + 160);
-
-        return string.concat(
-            _forestCurve(data, bi, rootX, rootY, endX, endY, 0),
-            _forestBranch(data, bi, endX, endY, 1),
-            _forestBranch(data, bi, endX, endY, 2)
-        );
+        (rootX, rootY) = _edgePointCoord(edge, bi - edge * 7);
+        uint256 trunkLen = 220 + _rand(data, bi + 80, 360);
+        hubX = _inwardX(rootX, trunkLen, data, bi + 120);
+        hubY = _inwardY(rootY, trunkLen, data, bi + 160);
     }
 
-    function _forestBranch(
-        CubeNFT.CubeData memory data,
-        uint256 bi,
-        uint256 rootX,
-        uint256 rootY,
-        uint256 branch
-    )
+    function _treeTip(CubeNFT.CubeData memory data, uint256 bi, uint256 hubX, uint256 hubY, uint256 b)
+        private
+        pure
+        returns (uint256 tipX, uint256 tipY)
+    {
+        uint256 len = 120 + _rand(data, bi + b * 41 + 200, 220);
+        tipX = _offsetCanvas(hubX, data, bi + b * 59 + 260, len);
+        tipY = _offsetCanvas(hubY, data, bi + b * 73 + 320, len);
+    }
+
+    function _treeStrands(CubeNFT.CubeData memory data, uint256 bi)
         private
         pure
         returns (string memory)
     {
-        uint256 len = 145 + _rand(data, bi + branch * 41, 210);
-        uint256 endX = _offsetCanvas(rootX, data, bi + branch * 59, len);
-        uint256 endY = _offsetCanvas(rootY, data, bi + branch * 73, len);
-        return string.concat(
-            _forestCurve(data, bi, rootX, rootY, endX, endY, branch),
-            _forestTwig(data, bi, endX, endY, branch, 0),
-            _forestTwig(data, bi, endX, endY, branch, 1)
-        );
+        (uint256 rootX, uint256 rootY, uint256 hubX, uint256 hubY) = _treeHub(data, bi);
+        string memory s = _forestCurve(data, bi, rootX, rootY, hubX, hubY, 0);
+        for (uint256 b = 0; b < 3; b++) {
+            (uint256 tipX, uint256 tipY) = _treeTip(data, bi, hubX, hubY, b);
+            s = string.concat(s, _forestCurve(data, bi, hubX, hubY, tipX, tipY, b + 1));
+        }
+        return s;
     }
 
-    function _forestTwig(
-        CubeNFT.CubeData memory data,
-        uint256 bi,
-        uint256 rootX,
-        uint256 rootY,
-        uint256 branch,
-        uint256 twig
-    )
+    function _treeTips(CubeNFT.CubeData memory data, uint256 bi)
         private
         pure
         returns (string memory)
     {
-        uint256 len = 70 + _rand(data, bi + branch * 97 + twig * 31, 145);
-        uint256 endX = _offsetCanvas(rootX, data, bi + branch * 101 + twig * 43, len);
-        uint256 endY = _offsetCanvas(rootY, data, bi + branch * 107 + twig * 47, len);
-        return _forestCurve(data, bi, rootX, rootY, endX, endY, branch * 3 + twig + 3);
+        (,, uint256 hubX, uint256 hubY) = _treeHub(data, bi);
+        string memory t = "";
+        for (uint256 b = 0; b < 3; b++) {
+            (uint256 tipX, uint256 tipY) = _treeTip(data, bi, hubX, hubY, b);
+            t = string.concat(t, _tipEllipse(data, bi, b, tipX, tipY));
+        }
+        return t;
+    }
+
+    function _tipEllipse(CubeNFT.CubeData memory data, uint256 bi, uint256 b, uint256 x, uint256 y)
+        private
+        pure
+        returns (string memory)
+    {
+        uint256 rx = 28 + _rand(data, bi + b * 80 + 360, 38);
+        uint256 ry = 16 + _rand(data, bi + b * 90 + 420, 28);
+        uint256 rot = _rand(data, bi + b * 100 + 480, 180);
+        return string.concat(
+            '<ellipse cx="', x.toString(), '" cy="', y.toString(),
+            '" rx="', rx.toString(), '" ry="', ry.toString(),
+            '" transform="rotate(', rot.toString(), " ", x.toString(), " ", y.toString(), ')"/>'
+        );
     }
 
     function _forestCurve(
@@ -679,26 +680,6 @@ contract CubeThumbnailRendererV1 {
             x2.toString(),
             " ",
             y2.toString(),
-            '"/>'
-        );
-    }
-
-    function _forestDot(CubeNFT.CubeData memory data, uint256 bi, uint256 i)
-        private
-        pure
-        returns (string memory)
-    {
-        uint256 edge = bi / 7;
-        uint256 bit = bi - edge * 7;
-        (uint256 rootX, uint256 rootY) = _edgePointCoord(edge, bit);
-        uint256 drift = 80 + _rand(data, bi + i + 390, 230);
-        return string.concat(
-            '<circle cx="',
-            _offsetCanvas(rootX, data, bi * 11 + i + 400, drift).toString(),
-            '" cy="',
-            _offsetCanvas(rootY, data, bi * 13 + i + 470, drift).toString(),
-            '" r="',
-            (1 + _rand(data, bi * 17 + i + 540, 3)).toString(),
             '"/>'
         );
     }
