@@ -447,10 +447,42 @@ contract CubeThumbnailRendererV1 {
         return uint256(keccak256(abi.encodePacked(data.seed, data.sourceTokenId, edge, bit))) % 3 != 0;
     }
 
+    // --- O(n) string builder ---------------------------------------------------
+    // Repeated `s = string.concat(s, piece)` in the dense per-cell path loops is
+    // O(n^2) (each append re-copies the whole growing string) and is the main
+    // MemoryOOG risk for detailed Normies. These helpers append into a pre-sized
+    // bytes buffer in O(total length). The caller MUST reserve `cap` >= total
+    // appended bytes + 32: the word-aligned copy can write up to 31 bytes of slack
+    // past the logical end, which must stay inside the reserved buffer.
+    function _bufNew(uint256 cap) private pure returns (bytes memory buf) {
+        buf = new bytes(cap); // zero-filled; capacity reserved past the length word
+        assembly {
+            mstore(buf, 0) // logical length starts at 0 (capacity stays allocated)
+        }
+    }
+
+    function _bufCat(bytes memory buf, string memory piece) private pure {
+        assembly {
+            let len := mload(buf)
+            let plen := mload(piece)
+            let dst := add(add(buf, 0x20), len)
+            let src := add(piece, 0x20)
+            for { let i := 0 } lt(i, plen) { i := add(i, 0x20) } {
+                mstore(add(dst, i), mload(add(src, i)))
+            }
+            mstore(buf, add(len, plen)) // advance logical length
+        }
+    }
+
+    function _bufStr(bytes memory buf) private pure returns (string memory) {
+        return string(buf);
+    }
+
     function _bitmapPath(bytes memory raw) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
-        string memory path = "";
+        // <= 40 rows * 20 runs * ~15 bytes/run; 24KB leaves ample slack.
+        bytes memory buf = _bufNew(24576);
         for (uint256 row = 0; row < 40; row++) {
             uint256 col = 0;
             while (col < 40) {
@@ -464,46 +496,49 @@ contract CubeThumbnailRendererV1 {
                     col++;
                 }
 
-                path = string.concat(
-                    path,
-                    "M",
-                    start.toString(),
-                    " ",
-                    row.toString(),
-                    "h",
-                    (col - start).toString(),
-                    "v1H",
-                    start.toString(),
-                    "z"
+                _bufCat(
+                    buf,
+                    string.concat(
+                        "M",
+                        start.toString(),
+                        " ",
+                        row.toString(),
+                        "h",
+                        (col - start).toString(),
+                        "v1H",
+                        start.toString(),
+                        "z"
+                    )
                 );
             }
         }
-        return path;
+        return _bufStr(buf);
     }
 
     function _outlinePath(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
-        string memory path = "";
+        // <= 1600 cells * 4 edges * 8 bytes = 51200; 64KB leaves ample slack.
+        bytes memory buf = _bufNew(65536);
         for (uint256 row = 0; row < 40; row++) {
             for (uint256 col = 0; col < 40; col++) {
                 if (!_bitmapBit(raw, row * 40 + col)) continue;
                 if (_isLabelCell(normieId, row, col)) continue;
                 if (!_bitmapBitAt(raw, row, col, 0, -1)) {
-                    path = string.concat(path, "M", col.toString(), " ", row.toString(), "v1");
+                    _bufCat(buf, string.concat("M", col.toString(), " ", row.toString(), "v1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, 0, 1)) {
-                    path = string.concat(path, "M", (col + 1).toString(), " ", row.toString(), "v1");
+                    _bufCat(buf, string.concat("M", (col + 1).toString(), " ", row.toString(), "v1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, -1, 0)) {
-                    path = string.concat(path, "M", col.toString(), " ", row.toString(), "h1");
+                    _bufCat(buf, string.concat("M", col.toString(), " ", row.toString(), "h1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, 1, 0)) {
-                    path = string.concat(path, "M", col.toString(), " ", (row + 1).toString(), "h1");
+                    _bufCat(buf, string.concat("M", col.toString(), " ", (row + 1).toString(), "h1"));
                 }
             }
         }
-        return path;
+        return _bufStr(buf);
     }
 
     function _labelPath(uint256 normieId) private pure returns (string memory) {
