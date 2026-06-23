@@ -102,7 +102,9 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(svg, '<path id="l" d='));
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="14"'));
         assertTrue(_contains(svg, '<filter id="h"'));
-        assertTrue(_contains(svg, '<g fill="none" stroke="#38ff4d" stroke-width="1.6"'));
+        // forest strand layer (thin strands + turbulence tip-clouds)
+        assertTrue(_contains(svg, '<g fill="none" stroke="#38ff4d" stroke-width="1.4"'));
+        assertTrue(_contains(svg, 'filter="url(#pc)"'));
         assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#38ff4d"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));
