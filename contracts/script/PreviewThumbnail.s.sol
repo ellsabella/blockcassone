@@ -45,11 +45,10 @@ contract PreviewThumbnail is Script {
         CubeNFT cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, dev);
         CubeThumbnailRendererV1 thumb =
             new CubeThumbnailRendererV1(cubes, address(normies), address(0));
-        bytes memory bmp = _sampleBitmap();
 
         for (uint256 s = 0; s < count; s++) {
             uint256 normieId = 1000 + s; // a normie can only be cubed once, so vary it
-            normies.mint(dev, normieId, bmp);
+            normies.mint(dev, normieId, _sampleBitmap(normieId));
 
             vm.prank(dev);
             uint256 cubeId =
@@ -122,15 +121,20 @@ contract PreviewThumbnail is Script {
         return "blue (z) #244cff";
     }
 
-    // A simple centred filled square so the silhouette/outline/label are visible.
-    function _sampleBitmap() private pure returns (bytes memory) {
-        bytes memory raw = new bytes(200);
-        for (uint256 row = 8; row <= 31; row++) {
-            for (uint256 col = 8; col <= 31; col++) {
-                uint256 idx = row * 40 + col;
-                raw[idx / 8] |= bytes1(uint8(1) << uint8(7 - (idx % 8)));
+    // A varied Normie-ish silhouette (same ring/wave pattern as the deploy mock)
+    // so each preview looks like a cube figure, not a plain box.
+    function _sampleBitmap(uint256 id) private pure returns (bytes memory raw) {
+        raw = new bytes(200);
+        for (uint256 i = 0; i < 1600; i++) {
+            uint256 col = i % 40;
+            uint256 row = i / 40;
+            uint256 dx = col > 19 ? col - 19 : 19 - col;
+            uint256 dy = row > 19 ? row - 19 : 19 - row;
+            uint256 ring = (dx * dx + dy * dy + id * 7) % 53;
+            uint256 wave = (col * 13 + row * 17 + id * 19) % 37;
+            if (ring < 28 && wave > 8) {
+                raw[i / 8] = bytes1(uint8(raw[i / 8]) | uint8(1 << (7 - (i % 8))));
             }
         }
-        return raw;
     }
 }

@@ -37,7 +37,6 @@ contract CubeThumbnailRendererV1 {
             '<rect width="1200" height="1200" fill="#020203"/>',
             _thumbnailDefs(bitmapPath, outlinePath, labelPath),
             _forestLayer(data, planeColor),
-            _walkerLayer(data, planeColor),
             _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
             _thumbnailPlaneFrame(data, planeColor),
             "</svg>"
@@ -720,40 +719,6 @@ contract CubeThumbnailRendererV1 {
     {
         uint256 target = _mix(y, 585, 55);
         return _offsetCanvas(target, data, salt, len / 3);
-    }
-
-    function _walkerLayer(CubeNFT.CubeData memory data, string memory planeColor)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory paths = "";
-        for (uint256 i = 0; i < 18; i++) {
-            uint256 x = 130 + _rand(data, i + 700, 940);
-            uint256 y = 115 + _rand(data, i + 740, 920);
-            string memory d = string.concat("M", x.toString(), " ", y.toString());
-            for (uint256 step = 0; step < 4; step++) {
-                x = _offsetCanvas(x, data, i * 13 + step + 780, 160);
-                y = _offsetCanvas(y, data, i * 13 + step + 860, 160);
-                d = string.concat(d, "L", x.toString(), " ", y.toString());
-            }
-            paths = string.concat(paths, '<path d="', d, '"/>');
-        }
-        return string.concat(
-            '<g fill="none" stroke="',
-            planeColor,
-            '" stroke-width="1.5" opacity=".12" filter="url(#p)">',
-            paths,
-            "</g>",
-            '<g fill="none" stroke="',
-            planeColor,
-            '" stroke-width=".95" opacity=".28" filter="url(#g)">',
-            paths,
-            "</g>",
-            '<g fill="none" stroke="#fff" stroke-width=".5" opacity=".22">',
-            paths,
-            "</g>"
-        );
     }
 
     // Hilbert world order (must match viewer/main.js HILBERT_ORDER). A cube's
