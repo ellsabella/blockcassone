@@ -117,11 +117,11 @@ contract CubeThumbnailRendererV1 {
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".26" result="r"/>',
-            '<feColorMatrix in="r" type="matrix" values="10 0 0 0 0 0 3.2 0 0 0 0 0 3.2 0 0 0 0 0 .92 0" result="rc"/>',
+            '<feColorMatrix in="r" type="matrix" values="2.6 0 0 0 0 0 2.6 0 0 0 0 0 2.6 0 0 0 0 0 .92 0" result="rc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="8 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .38 0" result="tc"/>',
+            '<feColorMatrix in="t" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .38 0" result="tc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".74" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 1.4 0 0 0 0 0 1.4 0 0 0 0 0 .025 0" result="mc"/>',
+            '<feColorMatrix in="m" type="matrix" values="1.5 0 0 0 0 0 1.5 0 0 0 0 0 1.5 0 0 0 0 0 .025 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
@@ -135,25 +135,25 @@ contract CubeThumbnailRendererV1 {
             "</filter>",
             '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/>',
+            '<feColorMatrix in="t" type="matrix" values="2.5 0 0 0 0 0 2.5 0 0 0 0 0 2.5 0 0 0 0 0 1 0" result="tc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/>',
+            '<feColorMatrix in="m" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .62 0" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             // Forest particle clouds: feTurbulence masked, coloured by the source
             // (so red/green/blue cubes get matching particles), then bloomed.
             '<filter id="pc" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
-            '<feTurbulence type="fractalNoise" baseFrequency="0.45" numOctaves="2" seed="7" result="noise"/>',
-            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.2 -1.05" result="mask"/>',
+            '<feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="noise"/>',
+            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.6 -1.25" result="mask"/>',
             '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
-            '<feGaussianBlur in="clip" stdDeviation="4" result="glow"/>',
-            '<feMerge><feMergeNode in="glow"/><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
+            '<feGaussianBlur in="clip" stdDeviation="2.2" result="glow"/>',
+            '<feMerge><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
             "</filter>",
             '<filter id="pcw" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
-            '<feTurbulence type="fractalNoise" baseFrequency="0.42" numOctaves="2" seed="19" result="noise"/>',
-            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 3.6 -2.25" result="mask"/>',
+            '<feTurbulence type="fractalNoise" baseFrequency="0.95" numOctaves="2" seed="19" result="noise"/>',
+            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 3.8 -2.4" result="mask"/>',
             '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
-            '<feGaussianBlur in="clip" stdDeviation="1.6" result="glow"/>',
+            '<feGaussianBlur in="clip" stdDeviation="1.1" result="glow"/>',
             '<feMerge><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
             "</filter>",
             '<path id="n" d="',
@@ -598,7 +598,7 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (uint256 tipX, uint256 tipY)
     {
-        uint256 len = 120 + _rand(data, bi + b * 41 + 200, 220);
+        uint256 len = 50 + _rand(data, bi + b * 41 + 200, 90);
         tipX = _offsetCanvas(hubX, data, bi + b * 59 + 260, len);
         tipY = _offsetCanvas(hubY, data, bi + b * 73 + 320, len);
     }
@@ -636,8 +636,8 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (string memory)
     {
-        uint256 rx = 28 + _rand(data, bi + b * 80 + 360, 38);
-        uint256 ry = 16 + _rand(data, bi + b * 90 + 420, 28);
+        uint256 rx = 12 + _rand(data, bi + b * 80 + 360, 16);
+        uint256 ry = 8 + _rand(data, bi + b * 90 + 420, 12);
         uint256 rot = _rand(data, bi + b * 100 + 480, 180);
         return string.concat(
             '<ellipse cx="', x.toString(), '" cy="', y.toString(),
