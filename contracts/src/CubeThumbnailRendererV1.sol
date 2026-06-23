@@ -694,40 +694,29 @@ contract CubeThumbnailRendererV1 {
     )
         private
         pure
-        returns (string memory)
+        returns (string memory p)
     {
-        // inner _offsetCanvas = shared base control point (same for all fibres);
-        // outer = small per-fibre deviation (depends on f) -> tight bundle.
-        uint256 cx1 = _offsetCanvas(_offsetCanvas(_mix(x1, x2, 34), data, bi + salt * 29 + 170, 80), data, bi + salt * 7 + f * 97 + 500, 11);
-        uint256 cy1 = _offsetCanvas(_offsetCanvas(_mix(y1, y2, 34), data, bi + salt * 31 + 210, 80), data, bi + salt * 7 + f * 101 + 540, 11);
-        uint256 cx2 = _offsetCanvas(_offsetCanvas(_mix(x1, x2, 68), data, bi + salt * 37 + 250, 105), data, bi + salt * 7 + f * 103 + 580, 14);
-        uint256 cy2 = _offsetCanvas(_offsetCanvas(_mix(y1, y2, 68), data, bi + salt * 41 + 290, 105), data, bi + salt * 7 + f * 107 + 620, 14);
-        // first fibre hits the exact tip; the others fan a little around it.
-        uint256 ex = _offsetCanvas(x2, data, bi + f * 109 + 660, f == 0 ? 0 : 14);
-        uint256 ey = _offsetCanvas(y2, data, bi + f * 113 + 700, f == 0 ? 0 : 14);
-        return _curvePath(x1, y1, cx1, cy1, cx2, cy2, ex, ey);
-    }
-
-    function _curvePath(
-        uint256 x1,
-        uint256 y1,
-        uint256 cx1,
-        uint256 cy1,
-        uint256 cx2,
-        uint256 cy2,
-        uint256 x2,
-        uint256 y2
-    )
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<path d="M', x1.toString(), " ", y1.toString(),
-            "C", cx1.toString(), " ", cy1.toString(),
-            " ", cx2.toString(), " ", cy2.toString(),
-            " ", x2.toString(), " ", y2.toString(), '"/>'
-        );
+        // Build the path progressively with block-scoped locals so no more than a
+        // couple of coordinates are live at once (avoids stack-too-deep without
+        // via-IR). inner _offsetCanvas = shared base control point (same for all
+        // fibres); outer = small per-fibre deviation (depends on f) -> tight bundle.
+        p = string.concat('<path d="M', x1.toString(), " ", y1.toString(), "C");
+        {
+            uint256 cx1 = _offsetCanvas(_offsetCanvas(_mix(x1, x2, 34), data, bi + salt * 29 + 170, 80), data, bi + salt * 7 + f * 97 + 500, 11);
+            uint256 cy1 = _offsetCanvas(_offsetCanvas(_mix(y1, y2, 34), data, bi + salt * 31 + 210, 80), data, bi + salt * 7 + f * 101 + 540, 11);
+            p = string.concat(p, cx1.toString(), " ", cy1.toString(), " ");
+        }
+        {
+            uint256 cx2 = _offsetCanvas(_offsetCanvas(_mix(x1, x2, 68), data, bi + salt * 37 + 250, 105), data, bi + salt * 7 + f * 103 + 580, 14);
+            uint256 cy2 = _offsetCanvas(_offsetCanvas(_mix(y1, y2, 68), data, bi + salt * 41 + 290, 105), data, bi + salt * 7 + f * 107 + 620, 14);
+            p = string.concat(p, cx2.toString(), " ", cy2.toString(), " ");
+        }
+        {
+            // first fibre hits the exact tip; the others fan a little around it.
+            uint256 ex = _offsetCanvas(x2, data, bi + f * 109 + 660, f == 0 ? 0 : 14);
+            uint256 ey = _offsetCanvas(y2, data, bi + f * 113 + 700, f == 0 ? 0 : 14);
+            p = string.concat(p, ex.toString(), " ", ey.toString(), '"/>');
+        }
     }
 
     function _treeTips(CubeNFT.CubeData memory data, uint256 bi)
