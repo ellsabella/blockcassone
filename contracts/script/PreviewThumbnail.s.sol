@@ -121,18 +121,25 @@ contract PreviewThumbnail is Script {
         return "blue (z) #244cff";
     }
 
-    // A varied Normie-ish silhouette (same ring/wave pattern as the deploy mock)
-    // so each preview looks like a cube figure, not a plain box.
+    // A COHERENT face-ish silhouette (contiguous body + eye/mouth holes) so the
+    // outline path stays small. The old ring/wave pattern was noisy (thousands
+    // of scattered pixels) which produced a huge outline and a MemoryOOG. Real
+    // Normies are coherent like this. Width varies slightly by id.
     function _sampleBitmap(uint256 id) private pure returns (bytes memory raw) {
         raw = new bytes(200);
-        for (uint256 i = 0; i < 1600; i++) {
-            uint256 col = i % 40;
-            uint256 row = i / 40;
-            uint256 dx = col > 19 ? col - 19 : 19 - col;
-            uint256 dy = row > 19 ? row - 19 : 19 - row;
-            uint256 ring = (dx * dx + dy * dy + id * 7) % 53;
-            uint256 wave = (col * 13 + row * 17 + id * 19) % 37;
-            if (ring < 28 && wave > 8) {
+        uint256 w = 12 + (id % 3); // 12..14 half-width
+        for (uint256 row = 5; row <= 35; row++) {
+            for (uint256 col = 6; col <= 33; col++) {
+                uint256 dx = col >= 20 ? col - 20 : 20 - col;
+                bool fill = dx <= w;
+                // eye holes
+                if (row >= 14 && row <= 17 && ((col >= 13 && col <= 16) || (col >= 23 && col <= 26))) {
+                    fill = false;
+                }
+                // mouth hole
+                if (row >= 24 && row <= 25 && col >= 14 && col <= 25) fill = false;
+                if (!fill) continue;
+                uint256 i = row * 40 + col;
                 raw[i / 8] = bytes1(uint8(raw[i / 8]) | uint8(1 << (7 - (i % 8))));
             }
         }
