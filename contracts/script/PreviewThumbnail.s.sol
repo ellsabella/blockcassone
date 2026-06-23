@@ -63,7 +63,34 @@ contract PreviewThumbnail is Script {
             console2.log("slot", s);
             console2.log("  data.slot (round-trip):", uint256(data.slot));
             console2.log("  expected colour:", _colourName(_axis(s)));
+            console2.log("  emitted in SVG:", _emittedColour(svg));
         }
+    }
+
+    // Detect the figure colour the renderer actually emitted. #ff1919 (red) and
+    // #244cff (blue) only ever appear as the plane colour; if neither is present
+    // the plane colour is green (#38ff4d, which also appears in the border).
+    function _emittedColour(string memory svg) private pure returns (string memory) {
+        if (_contains(svg, "#244cff")) return "BLUE (z)";
+        if (_contains(svg, "#ff1919")) return "RED (x)";
+        return "GREEN (y)";
+    }
+
+    function _contains(string memory hay, string memory needle) private pure returns (bool) {
+        bytes memory h = bytes(hay);
+        bytes memory n = bytes(needle);
+        if (n.length == 0 || n.length > h.length) return false;
+        for (uint256 i = 0; i <= h.length - n.length; i++) {
+            bool ok = true;
+            for (uint256 j = 0; j < n.length; j++) {
+                if (h[i + j] != n[j]) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) return true;
+        }
+        return false;
     }
 
     // Independent copy of the renderer's unique-axis formula (sanity reference).
