@@ -63,6 +63,18 @@ contract LocalMockNormies {
 contract DeployLocalGenesis is Script {
     uint32 internal constant DEFAULT_TOTAL_SLOTS = 4096;
 
+    struct Deployment {
+        LocalMockNormies normies;
+        CubeNFT cubes;
+        RendererAssetStore assetStore;
+        AgentStatusRegistry agentRegistry;
+        CubeThumbnailRendererV1 thumbnailRenderer;
+        CubeRendererV2 renderer;
+        NormieGenesisMinter genesis;
+    }
+
+    // Split into helpers (each holding few locals) to stay under the stack limit
+    // without via-IR.
     function run() external {
         address initialOwner = vm.envOr("BLOCKCASSONE_OWNER", msg.sender);
         address seaDrop = vm.envOr("BLOCKCASSONE_SEADROP", initialOwner);
@@ -70,85 +82,105 @@ contract DeployLocalGenesis is Script {
             uint32(vm.envOr("BLOCKCASSONE_TOTAL_SLOTS", uint256(DEFAULT_TOTAL_SLOTS)));
         uint256 sampleMints = vm.envOr("BLOCKCASSONE_SAMPLE_MINTS", uint256(8));
         bytes32 publicSeed = vm.envOr("BLOCKCASSONE_PUBLIC_SEED", keccak256("blockcassone-local"));
-        string memory configOut =
-            vm.envOr("BLOCKCASSONE_CHAIN_CONFIG_OUT", string("data/chain-config.json"));
+
+        Deployment memory d = _deploy(initialOwner, totalSlots, publicSeed);
+        _mintAndFinalize(d, initialOwner, seaDrop, sampleMints);
+        _report(d, seaDrop, sampleMints);
+    }
+
+    function _deploy(address initialOwner, uint32 totalSlots, bytes32 publicSeed)
+        private
+        returns (Deployment memory d)
+    {
+        vm.broadcast();
+        d.normies = new LocalMockNormies();
 
         vm.broadcast();
-        LocalMockNormies normies = new LocalMockNormies();
+        d.cubes = new CubeNFT(
+            "Blockcassone Cubes", "CUBE", address(d.normies), totalSlots, initialOwner
+        );
 
         vm.broadcast();
-        CubeNFT cubes =
-            new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), totalSlots, initialOwner);
+        d.assetStore = new RendererAssetStore(initialOwner);
 
         vm.broadcast();
-        RendererAssetStore assetStore = new RendererAssetStore(initialOwner);
+        d.agentRegistry = new AgentStatusRegistry(initialOwner);
 
         vm.broadcast();
-        AgentStatusRegistry agentRegistry = new AgentStatusRegistry(initialOwner);
+        d.thumbnailRenderer =
+            new CubeThumbnailRendererV1(d.cubes, address(d.normies), address(0));
 
         vm.broadcast();
-        CubeThumbnailRendererV1 thumbnailRenderer =
-            new CubeThumbnailRendererV1(cubes, address(normies), address(0));
+        d.renderer = new CubeRendererV2(
+            d.cubes, d.assetStore, address(d.normies), address(d.thumbnailRenderer)
+        );
 
         vm.broadcast();
-        CubeRendererV2 renderer =
-            new CubeRendererV2(cubes, assetStore, address(normies), address(thumbnailRenderer));
+        d.genesis = new NormieGenesisMinter(d.cubes, publicSeed, initialOwner);
 
         vm.broadcast();
-        NormieGenesisMinter genesis = new NormieGenesisMinter(cubes, publicSeed, initialOwner);
+        d.cubes.setRenderer(address(d.renderer));
 
         vm.broadcast();
-        cubes.setRenderer(address(renderer));
+        d.cubes.setAgentStatusRegistry(address(d.agentRegistry));
 
         vm.broadcast();
-        cubes.setAgentStatusRegistry(address(agentRegistry));
+        d.cubes.transferOwnership(address(d.genesis));
+    }
 
-        vm.broadcast();
-        cubes.transferOwnership(address(genesis));
-
+    function _mintAndFinalize(
+        Deployment memory d,
+        address initialOwner,
+        address seaDrop,
+        uint256 sampleMints
+    ) private {
         uint256[] memory sampleNormies = new uint256[](sampleMints);
         for (uint256 i = 0; i < sampleMints; i++) {
             vm.broadcast();
-            normies.mint(initialOwner, i);
+            d.normies.mint(initialOwner, i);
             sampleNormies[i] = i;
         }
 
         if (sampleMints > 0) {
             vm.broadcast();
-            genesis.addSnapshotNormies(initialOwner, sampleNormies);
+            d.genesis.addSnapshotNormies(initialOwner, sampleNormies);
 
             vm.broadcast();
-            genesis.finalizeSnapshot();
+            d.genesis.finalizeSnapshot();
 
             vm.broadcast();
-            genesis.setSeaDrop(seaDrop);
+            d.genesis.setSeaDrop(seaDrop);
 
             vm.broadcast();
-            genesis.setPhase(NormieGenesisMinter.Phase.Public);
+            d.genesis.setPhase(NormieGenesisMinter.Phase.Public);
 
             vm.broadcast();
-            genesis.mintPublicFor(initialOwner, sampleMints);
+            d.genesis.mintPublicFor(initialOwner, sampleMints);
         }
+    }
 
-        console2.log("LocalMockNormies", address(normies));
-        console2.log("CubeNFT", address(cubes));
-        console2.log("RendererAssetStore", address(assetStore));
-        console2.log("AgentStatusRegistry", address(agentRegistry));
-        console2.log("CubeRendererV2", address(renderer));
-        console2.log("NormieGenesisMinter", address(genesis));
+    function _report(Deployment memory d, address seaDrop, uint256 sampleMints) private {
+        console2.log("LocalMockNormies", address(d.normies));
+        console2.log("CubeNFT", address(d.cubes));
+        console2.log("RendererAssetStore", address(d.assetStore));
+        console2.log("AgentStatusRegistry", address(d.agentRegistry));
+        console2.log("CubeRendererV2", address(d.renderer));
+        console2.log("NormieGenesisMinter", address(d.genesis));
         console2.log("SeaDrop", seaDrop);
         console2.log("Sample mints", sampleMints);
 
+        string memory configOut =
+            vm.envOr("BLOCKCASSONE_CHAIN_CONFIG_OUT", string("data/chain-config.json"));
         _writeViewerConfig(
             configOut,
             block.chainid,
-            address(cubes),
-            address(genesis),
-            address(renderer),
-            address(assetStore),
-            address(agentRegistry),
-            address(normies),
-            address(normies)
+            address(d.cubes),
+            address(d.genesis),
+            address(d.renderer),
+            address(d.assetStore),
+            address(d.agentRegistry),
+            address(d.normies),
+            address(d.normies)
         );
     }
 
