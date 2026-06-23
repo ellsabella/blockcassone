@@ -592,22 +592,24 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (string memory)
     {
-        string memory strands = "";
+        string memory glow = "";
+        string memory core = "";
         string memory tips = "";
         for (uint256 bi = 0; bi < 21; bi++) {
             uint256 edge = bi / 7;
             if (!_edgePointActive(data, edge, bi - edge * 7)) continue;
             if (_rand(data, bi + 999, 100) >= 58) continue;
-            strands = string.concat(strands, _treeStrands(data, bi));
+            glow = string.concat(glow, _treeStrands(data, bi, false));
+            core = string.concat(core, _treeStrands(data, bi, true));
             tips = string.concat(tips, _treeTips(data, bi));
         }
-        if (bytes(strands).length == 0) return "";
+        if (bytes(core).length == 0) return "";
 
         return string.concat(
             '<g fill="none" stroke="', planeColor,
-            '" stroke-width="1.4" opacity=".16" filter="url(#p)">', strands, "</g>",
+            '" stroke-width="1.4" opacity=".16" filter="url(#p)">', glow, "</g>",
             '<g fill="none" stroke="', planeColor,
-            '" stroke-width=".7" opacity=".6" filter="url(#g)">', strands, "</g>",
+            '" stroke-width=".5" opacity=".5" filter="url(#g)">', core, "</g>",
             '<g fill="url(#cg)" filter="url(#pc)">', tips, "</g>",
             '<g fill="url(#cgw)" filter="url(#pcw)">', tips, "</g>"
         );
@@ -635,18 +637,97 @@ contract CubeThumbnailRendererV1 {
         tipY = _offsetCanvas(hubY, data, bi + b * 73 + 320, len);
     }
 
-    function _treeStrands(CubeNFT.CubeData memory data, uint256 bi)
+    // bunch=false -> one curve per segment (used by the blurred glow layer).
+    // bunch=true  -> a 3-fibre bundle per segment (the visible core): fibres
+    // share a base curve, converge at the root and fan slightly at the tip.
+    function _treeStrands(CubeNFT.CubeData memory data, uint256 bi, bool bunch)
         private
         pure
         returns (string memory)
     {
         (uint256 rootX, uint256 rootY, uint256 hubX, uint256 hubY) = _treeHub(data, bi);
-        string memory s = _forestCurve(data, bi, rootX, rootY, hubX, hubY, 0);
+        string memory s = bunch
+            ? _forestBunch(data, bi, rootX, rootY, hubX, hubY, 0)
+            : _forestCurve(data, bi, rootX, rootY, hubX, hubY, 0);
         for (uint256 b = 0; b < 3; b++) {
             (uint256 tipX, uint256 tipY) = _treeTip(data, bi, hubX, hubY, b);
-            s = string.concat(s, _forestCurve(data, bi, hubX, hubY, tipX, tipY, b + 1));
+            s = string.concat(
+                s,
+                bunch
+                    ? _forestBunch(data, bi, hubX, hubY, tipX, tipY, b + 1)
+                    : _forestCurve(data, bi, hubX, hubY, tipX, tipY, b + 1)
+            );
         }
         return s;
+    }
+
+    // A bundle of 3 fibres between the same endpoints. Each fibre shares the base
+    // control points (same salt) and deviates by a small per-fibre jitter, so the
+    // bundle is tight (a "rope") rather than a wide fan.
+    function _forestBunch(
+        CubeNFT.CubeData memory data,
+        uint256 bi,
+        uint256 x1,
+        uint256 y1,
+        uint256 x2,
+        uint256 y2,
+        uint256 salt
+    )
+        private
+        pure
+        returns (string memory s)
+    {
+        for (uint256 f = 0; f < 3; f++) {
+            s = string.concat(s, _fibre(data, bi, x1, y1, x2, y2, salt, f));
+        }
+    }
+
+    function _fibre(
+        CubeNFT.CubeData memory data,
+        uint256 bi,
+        uint256 x1,
+        uint256 y1,
+        uint256 x2,
+        uint256 y2,
+        uint256 salt,
+        uint256 f
+    )
+        private
+        pure
+        returns (string memory)
+    {
+        // inner _offsetCanvas = shared base control point (same for all fibres);
+        // outer = small per-fibre deviation (depends on f) -> tight bundle.
+        uint256 cx1 = _offsetCanvas(_offsetCanvas(_mix(x1, x2, 34), data, bi + salt * 29 + 170, 80), data, bi + salt * 7 + f * 97 + 500, 11);
+        uint256 cy1 = _offsetCanvas(_offsetCanvas(_mix(y1, y2, 34), data, bi + salt * 31 + 210, 80), data, bi + salt * 7 + f * 101 + 540, 11);
+        uint256 cx2 = _offsetCanvas(_offsetCanvas(_mix(x1, x2, 68), data, bi + salt * 37 + 250, 105), data, bi + salt * 7 + f * 103 + 580, 14);
+        uint256 cy2 = _offsetCanvas(_offsetCanvas(_mix(y1, y2, 68), data, bi + salt * 41 + 290, 105), data, bi + salt * 7 + f * 107 + 620, 14);
+        // first fibre hits the exact tip; the others fan a little around it.
+        uint256 ex = _offsetCanvas(x2, data, bi + f * 109 + 660, f == 0 ? 0 : 14);
+        uint256 ey = _offsetCanvas(y2, data, bi + f * 113 + 700, f == 0 ? 0 : 14);
+        return _curvePath(x1, y1, cx1, cy1, cx2, cy2, ex, ey);
+    }
+
+    function _curvePath(
+        uint256 x1,
+        uint256 y1,
+        uint256 cx1,
+        uint256 cy1,
+        uint256 cx2,
+        uint256 cy2,
+        uint256 x2,
+        uint256 y2
+    )
+        private
+        pure
+        returns (string memory)
+    {
+        return string.concat(
+            '<path d="M', x1.toString(), " ", y1.toString(),
+            "C", cx1.toString(), " ", cy1.toString(),
+            " ", cx2.toString(), " ", cy2.toString(),
+            " ", x2.toString(), " ", y2.toString(), '"/>'
+        );
     }
 
     function _treeTips(CubeNFT.CubeData memory data, uint256 bi)
