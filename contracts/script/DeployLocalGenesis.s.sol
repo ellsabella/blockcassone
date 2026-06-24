@@ -85,7 +85,12 @@ contract DeployLocalGenesis is Script {
         uint256 sampleMints = vm.envOr("BLOCKCASSONE_SAMPLE_MINTS", uint256(8));
         bytes32 publicSeed = vm.envOr("BLOCKCASSONE_PUBLIC_SEED", keccak256("blockcassone-local"));
 
+        uint256 gasBefore = gasleft();
         Deployment memory d = _deploy(initialOwner, totalSlots, publicSeed);
+        console2.log(
+            "full-suite deploy gas (contracts only; EXCLUDES RendererAssetStore engine chunks):",
+            gasBefore - gasleft()
+        );
         _mintAndFinalize(d, initialOwner, seaDrop, sampleMints);
         _report(d, seaDrop, sampleMints);
     }

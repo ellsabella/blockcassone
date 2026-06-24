@@ -39,7 +39,13 @@ contract DeployMainnetNormiePreview is Script {
 
     function run() external {
         PreviewConfig memory config = _previewConfig();
+
+        uint256 gasBefore = gasleft();
         Deployment memory deployment = _deploy(config);
+        console2.log(
+            "full-suite deploy gas (contracts only; EXCLUDES RendererAssetStore engine chunks):",
+            gasBefore - gasleft()
+        );
 
         _mintSamples(config, deployment);
         _logDeployment(config, deployment);
