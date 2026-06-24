@@ -197,12 +197,14 @@ contract CubeThumbnailRendererV1 {
             "</filter>",
             // Forest particle clouds: feTurbulence masked, coloured by the source
             // (so red/green/blue cubes get matching particles), then bloomed.
-            '<filter id="pc" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
-            '<feTurbulence type="fractalNoise" baseFrequency="0.45" numOctaves="2" seed="7" result="noise"/>',
-            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.2 -1.05" result="mask"/>',
+            '<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">',
+            '<feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/>',
+            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/>',
             '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
-            '<feGaussianBlur in="clip" stdDeviation="4" result="glow"/>',
-            '<feMerge><feMergeNode in="glow"/><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
+            '<feGaussianBlur in="clip" stdDeviation="5" result="gr"/>',
+            // dim the clipped speckle so the cloud is soft, not a dense blob
+            '<feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/>',
+            '<feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge>',
             "</filter>",
             '<filter id="pcw" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
             '<feTurbulence type="fractalNoise" baseFrequency="0.42" numOctaves="2" seed="19" result="noise"/>',
@@ -215,8 +217,8 @@ contract CubeThumbnailRendererV1 {
             // gradient fades to transparent so the turbulence speckles read as a
             // soft diffuse haze-bloom (not hard granular blobs). cg is the cube's
             // plane colour; cgw is the white sparkle highlight.
-            '<radialGradient id="cg"><stop offset="0" stop-color="', planeColor, '" stop-opacity=".95"/>',
-            '<stop offset=".4" stop-color="', planeColor, '" stop-opacity=".4"/>',
+            '<radialGradient id="cg"><stop offset="0" stop-color="', planeColor, '" stop-opacity=".82"/>',
+            '<stop offset=".4" stop-color="', planeColor, '" stop-opacity=".36"/>',
             '<stop offset="1" stop-color="', planeColor, '" stop-opacity="0"/></radialGradient>',
             '<radialGradient id="cgw"><stop offset="0" stop-color="#fff" stop-opacity=".7"/>',
             '<stop offset=".3" stop-color="#fff" stop-opacity=".22"/>',
@@ -832,8 +834,10 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (string memory)
     {
-        uint256 rx = 28 + _rand(data, bi + b * 80 + 360, 38);
-        uint256 ry = 16 + _rand(data, bi + b * 90 + 420, 28);
+        // elongated (ry << rx) + rotated so the clouds read as organic streaks,
+        // not uniform circles; the turbulence + dim keep them soft, not dense.
+        uint256 rx = 40 + _rand(data, bi + b * 80 + 360, 32);
+        uint256 ry = 10 + _rand(data, bi + b * 90 + 420, 11);
         uint256 rot = _rand(data, bi + b * 100 + 480, 180);
         return string.concat(
             '<ellipse cx="', x.toString(), '" cy="', y.toString(),
