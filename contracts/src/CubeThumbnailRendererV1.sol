@@ -1080,7 +1080,7 @@ contract CubeThumbnailRendererV1 {
         for (uint256 bi = 0; bi < 21; bi++) {
             uint256 edge = bi / 7;
             if (!_edgePointActive(data, edge, bi - edge * 7)) continue;
-            if (_rand(data, bi + 999, 100) >= 58) continue;
+            // one tree per active edge point (matches the nodes/streets exactly).
             glow = string.concat(glow, _treeStrands(data, bi, false, layout));
             core = string.concat(core, _treeStrands(data, bi, true, layout));
             tips = string.concat(tips, _treeTips(data, bi, layout));
