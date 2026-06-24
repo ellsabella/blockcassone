@@ -206,23 +206,12 @@ contract CubeThumbnailRendererV1 {
             '<feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/>',
             '<feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge>',
             "</filter>",
-            '<filter id="pcw" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
-            '<feTurbulence type="fractalNoise" baseFrequency="0.42" numOctaves="2" seed="19" result="noise"/>',
-            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 3.6 -2.25" result="mask"/>',
-            '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
-            '<feGaussianBlur in="clip" stdDeviation="1.6" result="glow"/>',
-            '<feMerge><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
-            "</filter>",
-            // Soft radial gradients used to fill the forest particle clouds: the
-            // gradient fades to transparent so the turbulence speckles read as a
-            // soft diffuse haze-bloom (not hard granular blobs). cg is the cube's
-            // plane colour; cgw is the white sparkle highlight.
+            // Soft radial gradient filling the forest particle clouds: fades to
+            // transparent so the turbulence speckles read as a soft diffuse cloud
+            // (not a hard blob). Plane colour; no white sparkle pass.
             '<radialGradient id="cg"><stop offset="0" stop-color="', planeColor, '" stop-opacity=".82"/>',
             '<stop offset=".4" stop-color="', planeColor, '" stop-opacity=".36"/>',
             '<stop offset="1" stop-color="', planeColor, '" stop-opacity="0"/></radialGradient>',
-            '<radialGradient id="cgw"><stop offset="0" stop-color="#fff" stop-opacity=".7"/>',
-            '<stop offset=".3" stop-color="#fff" stop-opacity=".22"/>',
-            '<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>',
             '<path id="n" d="',
             bitmapPath,
             '"/>',
@@ -691,23 +680,33 @@ contract CubeThumbnailRendererV1 {
         string memory glow = "";
         string memory core = "";
         string memory tips = "";
-        for (uint256 bi = 0; bi < 21; bi++) {
+        // Cap trees at 75% of the active edge points (lighter forest + gas).
+        uint256 cap;
+        {
+            uint256 activePts;
+            for (uint256 bi = 0; bi < 21; bi++) {
+                if (_edgePointActive(data, bi / 7, bi % 7)) activePts++;
+            }
+            cap = activePts * 3 / 4;
+        }
+        uint256 grown;
+        for (uint256 bi = 0; bi < 21 && grown < cap; bi++) {
             uint256 edge = bi / 7;
             if (!_edgePointActive(data, edge, bi - edge * 7)) continue;
-            // one tree per active edge point (matches the nodes/streets exactly).
+            grown++;
             glow = string.concat(glow, _treeStrands(data, bi, false, layout));
             core = string.concat(core, _treeStrands(data, bi, true, layout));
             tips = string.concat(tips, _treeTips(data, bi, layout));
         }
         if (bytes(core).length == 0) return "";
 
+        // No white sparkle pass — the single coloured cloud reads cleaner.
         return string.concat(
             '<g fill="none" stroke="', planeColor,
             '" stroke-width="1.4" opacity=".16" filter="url(#p)">', glow, "</g>",
             '<g fill="none" stroke="', planeColor,
             '" stroke-width=".5" opacity=".5" filter="url(#g)">', core, "</g>",
-            '<g fill="url(#cg)" filter="url(#pc)">', tips, "</g>",
-            '<g fill="url(#cgw)" filter="url(#pcw)">', tips, "</g>"
+            '<g fill="url(#cg)" filter="url(#pc)">', tips, "</g>"
         );
     }
 
@@ -757,7 +756,7 @@ contract CubeThumbnailRendererV1 {
         return s;
     }
 
-    // A bundle of 3 fibres between the same endpoints. Each fibre shares the base
+    // A bundle of 2 fibres between the same endpoints. Each fibre shares the base
     // control points (same salt) and deviates by a small per-fibre jitter, so the
     // bundle is tight (a "rope") rather than a wide fan.
     function _forestBunch(
@@ -773,7 +772,7 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (string memory s)
     {
-        for (uint256 f = 0; f < 3; f++) {
+        for (uint256 f = 0; f < 2; f++) {
             s = string.concat(s, _fibre(data, bi, x1, y1, x2, y2, salt, f));
         }
     }
@@ -829,16 +828,29 @@ contract CubeThumbnailRendererV1 {
         return t;
     }
 
+    // Two elongated, rotated lumps (a main + a smaller offset one) per tip, so the
+    // turbulence cloud reads as an irregular organic cluster, not a uniform oval.
+    // The white sparkle pass was dropped, so this is net-neutral on element count.
     function _tipEllipse(CubeNFT.CubeData memory data, uint256 bi, uint256 b, uint256 x, uint256 y)
         private
         pure
         returns (string memory)
     {
-        // elongated (ry << rx) + rotated so the clouds read as organic streaks,
-        // not uniform circles; the turbulence + dim keep them soft, not dense.
-        uint256 rx = 40 + _rand(data, bi + b * 80 + 360, 32);
-        uint256 ry = 10 + _rand(data, bi + b * 90 + 420, 11);
-        uint256 rot = _rand(data, bi + b * 100 + 480, 180);
+        uint256 rx = 38 + _rand(data, bi + b * 80 + 360, 30);
+        uint256 ry = 11 + _rand(data, bi + b * 90 + 420, 13);
+        string memory main = _ell(x, y, rx, ry, _rand(data, bi + b * 100 + 480, 180));
+        uint256 ox = _offsetCanvas(x, data, bi + b * 31 + 540, 25);
+        uint256 oy = _offsetCanvas(y, data, bi + b * 37 + 580, 25);
+        uint256 rx2 = 22 + _rand(data, bi + b * 41 + 620, 22);
+        uint256 ry2 = 7 + _rand(data, bi + b * 47 + 660, 10);
+        return string.concat(main, _ell(ox, oy, rx2, ry2, _rand(data, bi + b * 53 + 700, 180)));
+    }
+
+    function _ell(uint256 x, uint256 y, uint256 rx, uint256 ry, uint256 rot)
+        private
+        pure
+        returns (string memory)
+    {
         return string.concat(
             '<ellipse cx="', x.toString(), '" cy="', y.toString(),
             '" rx="', rx.toString(), '" ry="', ry.toString(),
