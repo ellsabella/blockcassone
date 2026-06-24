@@ -901,11 +901,6 @@ contract CubeThumbnailRendererV1 {
         return _offsetCanvas(target, data, salt, len / 3);
     }
 
-    // Hilbert world order (must match viewer/main.js HILBERT_ORDER). A cube's
-    // slot is its motif index in [0, 8^(ORDER-1)).
-    uint256 private constant HILBERT_ORDER = 5;
-
-
     function _mix(uint256 a, uint256 b, uint256 pct) private pure returns (uint256) {
         return (a * (100 - pct) + b * pct) / 100;
     }
