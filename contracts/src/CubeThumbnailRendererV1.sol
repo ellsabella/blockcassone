@@ -427,7 +427,7 @@ contract CubeThumbnailRendererV1 {
                 if (!_bitmapBit(raw, row * 40 + col)) continue;
                 if (_isLabelCell(normieId, row, col)) continue;
                 uint256 intensity = _glassIntensity(raw, col, row, cMin, cMax, rMin, rMax);
-                if (intensity < 70) continue;
+                if (intensity < 80) continue; // floor raised 70->80: ~10% fewer cells (drops the dimmest)
                 _bufCat(buf, _glassRect(col, row, intensity));
                 kept++;
             }
