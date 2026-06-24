@@ -39,6 +39,7 @@ contract CubeThumbnailRendererV1 {
             _thumbnailDefs(bitmapPath, outlinePath, labelPath, axis, planeColor),
             _forestLayer(data, planeColor),
             _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
+            _glassLayer(raw, data.sourceTokenId),
             _thumbnailPlaneFrame(data, planeColor),
             "</svg>"
         );
@@ -539,6 +540,206 @@ contract CubeThumbnailRendererV1 {
             }
         }
         return _bufStr(buf);
+    }
+
+    // --- Glass voxel cells -----------------------------------------------------
+    // Infill some Normie cells with luminous translucent panes, the way the 3D
+    // viewer assigns voxel alpha: 3x3 density bands -> interior dimming -> centre
+    // falloff -> per-cell variety -> visibility floor. Colour comes from a static
+    // RGB light field (red upper-right, green lower-left, blue top), saturated
+    // near a single light and blooming to white where they overlap. All maths is
+    // fixed-point (band/mult/falloff/variety/intensity x1000; light field x10000)
+    // and was validated against the float prototype before porting.
+    function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
+        if (raw.length != 200) return "";
+        (uint256 cMin, uint256 cMax, uint256 rMin, uint256 rMax, bool any) = _bbox(raw);
+        if (!any) return "";
+
+        // Cap the cell count so a pathological/noisy bitmap can't overflow the
+        // fixed buffer. A real coherent silhouette keeps far fewer than this
+        // (the prototype #1250 kept ~120); 600 * ~190 bytes/cell < the 128KB cap.
+        bytes memory buf = _bufNew(131072);
+        _bufCat(buf, '<g filter="url(#g)">');
+        uint256 kept = 0;
+        for (uint256 row = 0; row < 40 && kept < 600; row++) {
+            for (uint256 col = 0; col < 40 && kept < 600; col++) {
+                if (!_bitmapBit(raw, row * 40 + col)) continue;
+                if (_isLabelCell(normieId, row, col)) continue;
+                uint256 intensity = _glassIntensity(raw, col, row, cMin, cMax, rMin, rMax);
+                if (intensity < 70) continue;
+                _bufCat(buf, _glassRect(col, row, intensity));
+                kept++;
+            }
+        }
+        _bufCat(buf, "</g>");
+        return _bufStr(buf);
+    }
+
+    // intensity (x1000) = bandAlpha * interiorMult * falloff * variety / 1e9.
+    // Built incrementally (v = v * factor / 1000) to keep the stack shallow.
+    function _glassIntensity(
+        bytes memory raw,
+        uint256 col,
+        uint256 row,
+        uint256 cMin,
+        uint256 cMax,
+        uint256 rMin,
+        uint256 rMax
+    )
+        private
+        pure
+        returns (uint256 v)
+    {
+        {
+            uint256 nb = _neigh8(raw, col, row); // 3x3 on-count (excl. centre)
+            uint256 band = nb <= 1 ? 0 : (nb - 1 > 6 ? 6 : nb - 1);
+            v = _bandAlpha(band);
+        }
+        {
+            uint256 interiorSum = _cellOn(raw, int256(col) - 1, int256(row))
+                + _cellOn(raw, int256(col) + 1, int256(row))
+                + _cellOn(raw, int256(col), int256(row) - 1)
+                + _cellOn(raw, int256(col), int256(row) + 1);
+            v = v * _interiorMult(interiorSum) / 1000;
+        }
+        {
+            uint256 tA = cMax > cMin ? 1000 * _absd(2 * col, cMin + cMax) / (cMax - cMin) : 0;
+            uint256 tB = rMax > rMin ? 1000 * _absd(2 * row, rMin + rMax) / (rMax - rMin) : 0;
+            uint256 t = tA > tB ? tA : tB;
+            uint256 sub = 850 * t / 1000;
+            v = v * (sub >= 850 ? 50 : 900 - sub) / 1000;
+        }
+        {
+            uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
+            v = v * variety / 1000;
+        }
+    }
+
+    function _glassRect(uint256 col, uint256 row, uint256 intensity)
+        private
+        pure
+        returns (string memory rect)
+    {
+        uint256 x = 100 + col * 25 + 2;
+        uint256 y = 85 + row * 25 + 2;
+        (uint256 R, uint256 G, uint256 B) = _lightColor(100 + col * 25 + 12, 85 + row * 25 + 12);
+        uint256 op = intensity * 2 > 1000 ? 1000 : intensity * 2;
+        uint256 bodyOp = intensity > 880 ? 880 : intensity;
+        rect = string.concat(
+            '<rect x="', x.toString(), '" y="', y.toString(), '" width="21" height="21" fill="rgb(',
+            R.toString(), ",", G.toString(), ",", B.toString(), ')" fill-opacity="', _dec2(bodyOp),
+            '" stroke="rgb(', _lerp255(R), ",", _lerp255(G), ",", _lerp255(B),
+            ')" stroke-width="1.6" stroke-opacity="', _dec2(op), '"/>'
+        );
+        if (intensity > 500) {
+            rect = string.concat(
+                rect,
+                '<circle cx="', (x + 6).toString(), '" cy="', (y + 6).toString(),
+                '" r="1.1" fill="#fff" opacity="', _dec2(op / 2), '"/>'
+            );
+        }
+    }
+
+    // RGB light field at canvas (px,py). Each light contributes a = R^2/(R^2+d^2)
+    // to its channel (R=520). Saturate to the dominant hue, then blend toward
+    // white only where several lights strongly overlap.
+    function _lightColor(uint256 px, uint256 py)
+        private
+        pure
+        returns (uint256 R8, uint256 G8, uint256 B8)
+    {
+        uint256 r = _lightA(px, py, 1010, 300);
+        uint256 g = _lightA(px, py, 210, 770);
+        uint256 b = _lightA(px, py, 660, 120);
+        uint256 mx = r;
+        if (g > mx) mx = g;
+        if (b > mx) mx = b;
+        if (mx == 0) mx = 1;
+        uint256 R = r * 10000 / mx;
+        uint256 G = g * 10000 / mx;
+        uint256 B = b * 10000 / mx;
+        uint256 sum = r + g + b;
+        uint256 white = sum > 13000 ? (sum - 13000) / 2 : 0;
+        if (white > 10000) white = 10000;
+        R = R + (10000 - R) * white / 10000;
+        G = G + (10000 - G) * white / 10000;
+        B = B + (10000 - B) * white / 10000;
+        R8 = R * 255 / 10000;
+        G8 = G * 255 / 10000;
+        B8 = B * 255 / 10000;
+    }
+
+    function _lightA(uint256 px, uint256 py, uint256 lx, uint256 ly) private pure returns (uint256) {
+        uint256 dx = px > lx ? px - lx : lx - px;
+        uint256 dy = py > ly ? py - ly : ly - py;
+        return 270400 * 10000 / (270400 + dx * dx + dy * dy);
+    }
+
+    // bright hue-tinted rim: v lerped 30% toward 255.
+    function _lerp255(uint256 v) private pure returns (string memory) {
+        return (v + (255 - v) * 3 / 10).toString();
+    }
+
+    // Format an x1000 opacity fixed-point (0..1000) as an SVG decimal (".07", ".88", "1").
+    function _dec2(uint256 fp) private pure returns (string memory) {
+        if (fp >= 1000) return "1";
+        uint256 d = fp / 10;
+        return string.concat(".", d < 10 ? "0" : "", d.toString());
+    }
+
+    function _neigh8(bytes memory raw, uint256 col, uint256 row) private pure returns (uint256 nb) {
+        for (int256 dr = -1; dr <= 1; dr++) {
+            for (int256 dc = -1; dc <= 1; dc++) {
+                if (dr == 0 && dc == 0) continue;
+                nb += _cellOn(raw, int256(col) + dc, int256(row) + dr);
+            }
+        }
+    }
+
+    function _cellOn(bytes memory raw, int256 c, int256 r) private pure returns (uint256) {
+        if (c < 0 || c >= 40 || r < 0 || r >= 40) return 0;
+        return _bitmapBit(raw, uint256(r) * 40 + uint256(c)) ? 1 : 0;
+    }
+
+    function _bbox(bytes memory raw)
+        private
+        pure
+        returns (uint256 cMin, uint256 cMax, uint256 rMin, uint256 rMax, bool any)
+    {
+        cMin = 39;
+        rMin = 39;
+        for (uint256 row = 0; row < 40; row++) {
+            for (uint256 col = 0; col < 40; col++) {
+                if (!_bitmapBit(raw, row * 40 + col)) continue;
+                any = true;
+                if (col < cMin) cMin = col;
+                if (col > cMax) cMax = col;
+                if (row < rMin) rMin = row;
+                if (row > rMax) rMax = row;
+            }
+        }
+    }
+
+    function _bandAlpha(uint256 band) private pure returns (uint256) {
+        if (band == 0) return 1000;
+        if (band == 1) return 840;
+        if (band == 2) return 680;
+        if (band == 3) return 500;
+        if (band == 4) return 340;
+        if (band == 5) return 200;
+        return 80;
+    }
+
+    function _interiorMult(uint256 interiorSum) private pure returns (uint256) {
+        if (interiorSum == 0) return 1000;
+        if (interiorSum == 1) return 871;
+        if (interiorSum == 2) return 671;
+        if (interiorSum == 3) return 430;
+        return 160;
+    }
+
+    function _absd(uint256 a, uint256 b) private pure returns (uint256) {
+        return a > b ? a - b : b - a;
     }
 
     function _labelPath(uint256 normieId) private pure returns (string memory) {
