@@ -98,7 +98,9 @@ contract CubeRendererV2Test is Test {
         // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green (#38ff4d).
         // (Was #ff1919 under the old slot%3 rule; now uses the unique-axis colour.)
         assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#38ff4d"'));
-        assertTrue(_contains(svg, '<path d="M100 85H1100V1085H100"'));
+        // Frame border now traces the motif's unique-plane sides (slot 1734 -> TRB,
+        // open left) as separate subpaths rather than the old fixed square path.
+        assertTrue(_contains(svg, '<path d="M100 85H1100M1100 85V1085M100 1085H1100"'));
         assertTrue(_contains(svg, '<path id="l" d='));
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="14"'));
         assertTrue(_contains(svg, '<filter id="h"'));

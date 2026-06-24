@@ -286,9 +286,8 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (string memory)
     {
-        string memory s = _svgPath(
-            "M100 85H1100V1085H100", _borderColor(tier), _tierWidth(tier), _borderOpacity(tier), ""
-        );
+        string memory s =
+            _svgPath(_borderPath(layout), _borderColor(tier), _tierWidth(tier), _borderOpacity(tier), "");
         for (uint256 edge = 0; edge < 3; edge++) {
             for (uint256 bit = 0; bit < 7; bit++) {
                 if (!_edgePointActive(data, edge, bit)) continue;
@@ -297,6 +296,22 @@ contract CubeThumbnailRendererV1 {
             }
         }
         return s;
+    }
+
+    // The green border traces the unique plane's 3 path-edges (the same 3 sides
+    // the streets sit on), as full-length side segments; the open 4th side is bare.
+    function _borderPath(uint256 layout) private pure returns (string memory) {
+        return string.concat(_sidePath(layout, 0), _sidePath(layout, 1), _sidePath(layout, 2));
+    }
+
+    function _sidePath(uint256 layout, uint256 edge) private pure returns (string memory) {
+        uint256 e3 = (layout >> (edge * 3)) & 7;
+        if ((e3 & 1) != 0) {
+            // horizontal side: top (y=85) or bottom (y=1085)
+            return (e3 & 2) != 0 ? "M100 85H1100" : "M100 1085H1100";
+        }
+        // vertical side: right (x=1100) or left (x=100)
+        return (e3 & 2) != 0 ? "M1100 85V1085" : "M100 85V1085";
     }
 
     function _accentStroke(bool horiz, uint256 x, uint256 y, uint256 tier)
