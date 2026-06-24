@@ -249,107 +249,148 @@ contract CubeThumbnailRendererV1 {
         );
     }
 
+    // The frame (green border + pink street segments) and node markers are drawn
+    // in 5 depth tiers (wide faint halo -> sharp core). The three filtered tiers
+    // (#h/#p/#g) are each wrapped in a SINGLE group, so a rasterizer applies that
+    // blur once per tier instead of once per element (the old per-element form ran
+    // the filters ~150x for a busy cube). Same elements + styles, just regrouped.
     function _thumbnailPlaneFrame(CubeNFT.CubeData memory data, string memory planeColor)
         private
         pure
         returns (string memory)
     {
-        return string.concat(_planeEdges(data, planeColor), _edgePoints(data));
+        planeColor; // frame colours are fixed (green border, pink streets)
+        return string.concat(_frameStrokes(data), _frameNodes(data));
     }
 
-    function _planeEdges(CubeNFT.CubeData memory data, string memory planeColor)
-        private
-        pure
-        returns (string memory)
-    {
+    function _frameStrokes(CubeNFT.CubeData memory data) private pure returns (string memory) {
         return string.concat(
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision">',
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "12", ".12", "url(#h)"),
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "7.5", ".32", "url(#p)"),
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "5.2", ".92", "url(#g)"),
-            _svgPath("M100 85H1100V1085H100", "#8dff98", "3.4", ".98", ""),
-            _svgPath("M100 85H1100V1085H100", "#fff", "1.65", ".55", ""),
-            _edgeAccents(data, planeColor),
+            '<g filter="url(#h)">', _strokeTier(data, 0), "</g>",
+            '<g filter="url(#p)">', _strokeTier(data, 1), "</g>",
+            '<g filter="url(#g)">', _strokeTier(data, 2), "</g>",
+            _strokeTier(data, 3),
+            _strokeTier(data, 4),
             "</g>"
         );
     }
 
-    function _edgePoints(CubeNFT.CubeData memory data)
+    // One depth tier of the border path + every active street segment.
+    function _strokeTier(CubeNFT.CubeData memory data, uint256 tier)
         private
         pure
         returns (string memory)
     {
-        string memory out = "";
+        string memory s = _svgPath(
+            "M100 85H1100V1085H100", _borderColor(tier), _tierWidth(tier), _borderOpacity(tier), ""
+        );
         for (uint256 edge = 0; edge < 3; edge++) {
             for (uint256 bit = 0; bit < 7; bit++) {
                 if (!_edgePointActive(data, edge, bit)) continue;
                 (uint256 x, uint256 y) = _edgePointCoord(edge, bit);
-                out = string.concat(out, _edgePoint(x, y, "#fff", edge == 1 ? "13" : "9"));
+                s = string.concat(s, _accentStroke(edge, x, y, tier));
             }
         }
+        return s;
+    }
+
+    function _accentStroke(uint256 edge, uint256 x, uint256 y, uint256 tier)
+        private
+        pure
+        returns (string memory)
+    {
+        string memory path;
+        if (edge == 1) {
+            uint256 y0 = y > 96 ? y - 96 : y;
+            path = string.concat("M", x.toString(), " ", y0.toString(), "V", (y + 96).toString());
+        } else {
+            uint256 x0 = x > 96 ? x - 96 : x;
+            path = string.concat("M", x0.toString(), " ", y.toString(), "H", (x + 96).toString());
+        }
+        return _svgPath(path, _accentColor(tier), _tierWidth(tier), _accentOpacity(tier), "");
+    }
+
+    function _frameNodes(CubeNFT.CubeData memory data) private pure returns (string memory) {
         return string.concat(
-            '<g>',
-            _edgePoint(100, 85, "#fff", "14"),
-            _edgePoint(1100, 85, "#fff", "14"),
-            _edgePoint(1100, 1085, "#fff", "14"),
-            _edgePoint(100, 1085, "#fff", "14"),
-            out,
+            "<g>",
+            '<g filter="url(#h)">', _nodeTier(data, 0), "</g>",
+            '<g filter="url(#p)">', _nodeTier(data, 1), "</g>",
+            '<g filter="url(#g)">', _nodeTier(data, 2), "</g>",
+            _nodeTier(data, 3),
             "</g>"
         );
     }
 
-    function _edgeAccents(CubeNFT.CubeData memory data, string memory planeColor)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory out = "";
+    function _nodeTier(CubeNFT.CubeData memory data, uint256 tier) private pure returns (string memory) {
+        string memory s = string.concat(
+            _nodeCircle(100, 85, 14, tier),
+            _nodeCircle(1100, 85, 14, tier),
+            _nodeCircle(1100, 1085, 14, tier),
+            _nodeCircle(100, 1085, 14, tier)
+        );
         for (uint256 edge = 0; edge < 3; edge++) {
             for (uint256 bit = 0; bit < 7; bit++) {
                 if (!_edgePointActive(data, edge, bit)) continue;
                 (uint256 x, uint256 y) = _edgePointCoord(edge, bit);
-                out = string.concat(out, _edgeAccent(edge, x, y, planeColor));
+                s = string.concat(s, _nodeCircle(x, y, edge == 1 ? 13 : 9, tier));
             }
         }
-        return out;
+        return s;
     }
 
-    function _edgeAccent(uint256 edge, uint256 x, uint256 y, string memory planeColor)
+    // The 5 node tiers collapsed onto 4 groups: the two #g circles share the #g
+    // group (tier 2), the sharp core is unfiltered (tier 3).
+    function _nodeCircle(uint256 x, uint256 y, uint256 r, uint256 tier)
         private
         pure
         returns (string memory)
     {
-        planeColor;
-        if (edge == 1) return _edgeAccentV(x, y);
-        return _edgeAccentH(x, y);
+        if (tier == 0) return _circle(x, y, (r * 2).toString(), "#fff", ".12", "");
+        if (tier == 1) return _circle(x, y, ((r * 3) / 2).toString(), "#fff", ".30", "");
+        if (tier == 2) {
+            return string.concat(
+                _circle(x, y, r.toString(), "#fff", ".62", ""),
+                _circle(x, y, (r / 2 + 3).toString(), "#fff", ".38", "")
+            );
+        }
+        return _circle(x, y, (r / 3 + 2).toString(), "#fff", ".76", "");
     }
 
-    function _edgeAccentH(uint256 x, uint256 y) private pure returns (string memory) {
-        uint256 d = 96;
-        uint256 x0 = x > d ? x - d : x;
-        uint256 x1 = x + d;
-        string memory path = string.concat("M", x0.toString(), " ", y.toString(), "H", x1.toString());
-        return string.concat(
-            _svgPath(path, "#ff1ba6", "12", ".18", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "7.5", ".46", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "5.2", ".98", "url(#g)"),
-            _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
-            _svgPath(path, "#ffc0ea", "1.65", ".46", "")
-        );
+    function _tierWidth(uint256 tier) private pure returns (string memory) {
+        if (tier == 0) return "12";
+        if (tier == 1) return "7.5";
+        if (tier == 2) return "5.2";
+        if (tier == 3) return "3.4";
+        return "1.65";
     }
 
-    function _edgeAccentV(uint256 x, uint256 y) private pure returns (string memory) {
-        uint256 d = 96;
-        uint256 y0 = y > d ? y - d : y;
-        uint256 y1 = y + d;
-        string memory path = string.concat("M", x.toString(), " ", y0.toString(), "V", y1.toString());
-        return string.concat(
-            _svgPath(path, "#ff1ba6", "12", ".18", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "7.5", ".46", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "5.2", ".98", "url(#g)"),
-            _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
-            _svgPath(path, "#ffc0ea", "1.65", ".46", "")
-        );
+    function _borderColor(uint256 tier) private pure returns (string memory) {
+        if (tier == 3) return "#8dff98";
+        if (tier == 4) return "#fff";
+        return "#38ff4d";
+    }
+
+    function _borderOpacity(uint256 tier) private pure returns (string memory) {
+        if (tier == 0) return ".12";
+        if (tier == 1) return ".32";
+        if (tier == 2) return ".92";
+        if (tier == 3) return ".98";
+        return ".55";
+    }
+
+    function _accentColor(uint256 tier) private pure returns (string memory) {
+        if (tier == 0 || tier == 1) return "#ff1ba6";
+        if (tier == 2) return "#ff3ab8";
+        if (tier == 3) return "#ff2aa8";
+        return "#ffc0ea";
+    }
+
+    function _accentOpacity(uint256 tier) private pure returns (string memory) {
+        if (tier == 0) return ".18";
+        if (tier == 1) return ".46";
+        if (tier == 2) return ".98";
+        if (tier == 3) return ".98";
+        return ".46";
     }
 
     function _svgPath(
@@ -375,21 +416,6 @@ contract CubeThumbnailRendererV1 {
             '" stroke-linecap="round" stroke-linejoin="round"',
             bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
             "/>"
-        );
-    }
-
-    function _edgePoint(uint256 x, uint256 y, string memory color, string memory radius)
-        private
-        pure
-        returns (string memory)
-    {
-        uint256 r = _parseSmallUint(radius);
-        return string.concat(
-            _circle(x, y, (r * 2).toString(), color, ".12", "url(#h)"),
-            _circle(x, y, ((r * 3) / 2).toString(), color, ".30", "url(#p)"),
-            _circle(x, y, radius, color, ".62", "url(#g)"),
-            _circle(x, y, (r / 2 + 3).toString(), "#fff", ".38", "url(#g)"),
-            _circle(x, y, (r / 3 + 2).toString(), "#fff", ".76", "")
         );
     }
 
@@ -422,16 +448,6 @@ contract CubeThumbnailRendererV1 {
         );
     }
 
-    function _parseSmallUint(string memory value) private pure returns (uint256) {
-        bytes memory b = bytes(value);
-        uint256 out = 0;
-        for (uint256 i = 0; i < b.length; i++) {
-            uint8 c = uint8(b[i]);
-            if (c < 48 || c > 57) continue;
-            out = out * 10 + (c - 48);
-        }
-        return out == 0 ? 1 : out;
-    }
 
     function _edgePointCoord(uint256 edge, uint256 bit) private pure returns (uint256 x, uint256 y) {
         uint256 t = (bit + 1) * 125;
