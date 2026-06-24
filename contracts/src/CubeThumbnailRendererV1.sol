@@ -21,7 +21,7 @@ interface ICubeHilbertGeometry {
 }
 
 interface ICubeFrameLayer {
-    function render(bytes32 seed, uint256 srcId, uint256 layout)
+    function render(bytes32 seed, uint256 srcId, uint256 layout, uint256 axis)
         external
         pure
         returns (string memory);
@@ -66,7 +66,7 @@ contract CubeThumbnailRendererV1 {
             _forestLayer(data, planeColor, layout),
             _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
             _glassLayer(raw, data.sourceTokenId),
-            frame.render(data.seed, data.sourceTokenId, layout),
+            frame.render(data.seed, data.sourceTokenId, layout, axis),
             "</svg>"
         );
     }
