@@ -420,7 +420,7 @@ contract CubeThumbnailRendererV1 {
         // fixed buffer. A real coherent silhouette keeps far fewer than this
         // (the prototype #1250 kept ~120); 600 * ~190 bytes/cell < the 128KB cap.
         bytes memory buf = _bufNew(131072);
-        _bufCat(buf, '<g filter="url(#g)">');
+        _bufCat(buf, '<g filter="url(#g)" stroke-width="1.6">');
         uint256 kept = 0;
         for (uint256 row = 0; row < 40 && kept < 600; row++) {
             for (uint256 col = 0; col < 40 && kept < 600; col++) {
@@ -490,7 +490,7 @@ contract CubeThumbnailRendererV1 {
             '<rect x="', x.toString(), '" y="', y.toString(), '" width="21" height="21" fill="rgb(',
             R.toString(), ",", G.toString(), ",", B.toString(), ')" fill-opacity="', _dec2(bodyOp),
             '" stroke="rgb(', _lerp255(R), ",", _lerp255(G), ",", _lerp255(B),
-            ')" stroke-width="1.6" stroke-opacity="', _dec2(op), '"/>'
+            ')" stroke-opacity="', _dec2(op), '"/>'
         );
         if (intensity > 500) {
             rect = string.concat(

@@ -9,6 +9,10 @@ import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 /// the unique-plane `layout` (the open 4th side is bare). Drawn in 5 depth tiers
 /// with the filtered tiers (#h/#p/#g) grouped so a rasterizer runs each blur once.
 /// Filter ids are defined by the orchestrator's <defs>.
+///
+/// Constant presentation attributes (stroke-linecap/linejoin, stroke-width, fill)
+/// are hoisted to the enclosing <g> so they aren't repeated on every element —
+/// identical rendering, far fewer bytes.
 contract CubeFrameLayer {
     using Strings for uint256;
 
@@ -25,13 +29,15 @@ contract CubeFrameLayer {
         pure
         returns (string memory)
     {
+        // outer group carries fill:none + round caps/joins; each tier group carries
+        // its constant stroke-width (+ filter); paths carry only colour + opacity.
         return string.concat(
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision">',
-            '<g filter="url(#h)">', _strokeTier(seed, srcId, layout, 0), "</g>",
-            '<g filter="url(#p)">', _strokeTier(seed, srcId, layout, 1), "</g>",
-            '<g filter="url(#g)">', _strokeTier(seed, srcId, layout, 2), "</g>",
-            _strokeTier(seed, srcId, layout, 3),
-            _strokeTier(seed, srcId, layout, 4),
+            '<g stroke-width="12" filter="url(#h)">', _strokeTier(seed, srcId, layout, 0), "</g>",
+            '<g stroke-width="7.5" filter="url(#p)">', _strokeTier(seed, srcId, layout, 1), "</g>",
+            '<g stroke-width="5.2" filter="url(#g)">', _strokeTier(seed, srcId, layout, 2), "</g>",
+            '<g stroke-width="3.4">', _strokeTier(seed, srcId, layout, 3), "</g>",
+            '<g stroke-width="1.65">', _strokeTier(seed, srcId, layout, 4), "</g>",
             "</g>"
         );
     }
@@ -41,8 +47,7 @@ contract CubeFrameLayer {
         pure
         returns (string memory)
     {
-        string memory s =
-            _svgPath(_borderPath(layout), _borderColor(tier), _tierWidth(tier), _borderOpacity(tier), "");
+        string memory s = _path(_borderPath(layout), _borderColor(tier), _borderOpacity(tier));
         for (uint256 edge = 0; edge < 3; edge++) {
             for (uint256 bit = 0; bit < 7; bit++) {
                 if (!_active(seed, srcId, edge, bit)) continue;
@@ -66,7 +71,7 @@ contract CubeFrameLayer {
             uint256 y0 = y > 96 ? y - 96 : y;
             path = string.concat("M", x.toString(), " ", y0.toString(), "V", (y + 96).toString());
         }
-        return _svgPath(path, _accentColor(tier), _tierWidth(tier), _accentOpacity(tier), "");
+        return _path(path, _accentColor(tier), _accentOpacity(tier));
     }
 
     function _frameNodes(bytes32 seed, uint256 srcId, uint256 layout)
@@ -74,8 +79,9 @@ contract CubeFrameLayer {
         pure
         returns (string memory)
     {
+        // fill:#fff hoisted to the outer group; tier groups carry the filter.
         return string.concat(
-            "<g>",
+            '<g fill="#fff">',
             '<g filter="url(#h)">', _nodeTier(seed, srcId, layout, 0), "</g>",
             '<g filter="url(#p)">', _nodeTier(seed, srcId, layout, 1), "</g>",
             '<g filter="url(#g)">', _nodeTier(seed, srcId, layout, 2), "</g>",
@@ -110,15 +116,12 @@ contract CubeFrameLayer {
         pure
         returns (string memory)
     {
-        if (tier == 0) return _circle(x, y, (r * 2).toString(), "#fff", ".12", "");
-        if (tier == 1) return _circle(x, y, ((r * 3) / 2).toString(), "#fff", ".30", "");
+        if (tier == 0) return _circle(x, y, r * 2, ".12");
+        if (tier == 1) return _circle(x, y, (r * 3) / 2, ".30");
         if (tier == 2) {
-            return string.concat(
-                _circle(x, y, r.toString(), "#fff", ".62", ""),
-                _circle(x, y, (r / 2 + 3).toString(), "#fff", ".38", "")
-            );
+            return string.concat(_circle(x, y, r, ".62"), _circle(x, y, r / 2 + 3, ".38"));
         }
-        return _circle(x, y, (r / 3 + 2).toString(), "#fff", ".76", "");
+        return _circle(x, y, r / 3 + 2, ".76");
     }
 
     // --- border: the unique plane's 3 sides as full-length segments ---
@@ -163,67 +166,26 @@ contract CubeFrameLayer {
         return ((layout >> (edge * 3)) & 1) == 1;
     }
 
-    function _svgPath(
-        string memory d,
-        string memory color,
-        string memory width,
-        string memory opacity,
-        string memory filter
-    )
+    // path with only the per-element attrs (stroke colour + opacity); width and
+    // caps/joins come from the enclosing groups.
+    function _path(string memory d, string memory color, string memory opacity)
+        private
+        pure
+        returns (string memory)
+    {
+        return string.concat('<path d="', d, '" stroke="', color, '" opacity="', opacity, '"/>');
+    }
+
+    // circle with only cx/cy/r/opacity; fill (#fff) comes from the nodes group.
+    function _circle(uint256 x, uint256 y, uint256 r, string memory opacity)
         private
         pure
         returns (string memory)
     {
         return string.concat(
-            '<path d="',
-            d,
-            '" stroke="',
-            color,
-            '" stroke-width="',
-            width,
-            '" opacity="',
-            opacity,
-            '" stroke-linecap="round" stroke-linejoin="round"',
-            bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
-            "/>"
+            '<circle cx="', x.toString(), '" cy="', y.toString(), '" r="', r.toString(),
+            '" opacity="', opacity, '"/>'
         );
-    }
-
-    function _circle(
-        uint256 x,
-        uint256 y,
-        string memory radius,
-        string memory color,
-        string memory opacity,
-        string memory filter
-    )
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<circle cx="',
-            x.toString(),
-            '" cy="',
-            y.toString(),
-            '" r="',
-            radius,
-            '" fill="',
-            color,
-            '" opacity="',
-            opacity,
-            '"',
-            bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
-            "/>"
-        );
-    }
-
-    function _tierWidth(uint256 tier) private pure returns (string memory) {
-        if (tier == 0) return "12";
-        if (tier == 1) return "7.5";
-        if (tier == 2) return "5.2";
-        if (tier == 3) return "3.4";
-        return "1.65";
     }
 
     function _borderColor(uint256 tier) private pure returns (string memory) {
