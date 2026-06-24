@@ -264,9 +264,6 @@ contract CubeThumbnailRendererV1 {
             '<use href="#o" fill="none" stroke="',
             planeColor,
             '" stroke-width=".27" opacity=".95" filter="url(#gf)"/>',
-            '<use href="#o" fill="none" stroke="',
-            planeColor,
-            '" stroke-width=".20" opacity="1"/>',
             '<use href="#o" fill="none" stroke="#fff" stroke-width=".026" opacity=".92"/>',
             bytes(labelPath).length == 0
                 ? ""
