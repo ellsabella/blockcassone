@@ -834,32 +834,40 @@ contract CubeThumbnailRendererV1 {
     function _tipEllipse(CubeNFT.CubeData memory data, uint256 bi, uint256 b, uint256 x, uint256 y)
         private
         pure
-        returns (string memory r)
+        returns (string memory)
     {
-        // block-scope each lump's locals so they don't all stay live (stack depth)
-        {
-            uint256 rx = 38 + _rand(data, bi + b * 80 + 360, 30);
-            uint256 ry = 11 + _rand(data, bi + b * 90 + 420, 13);
-            r = _ell(x, y, rx, ry, _rand(data, bi + b * 100 + 480, 180));
-        }
-        {
-            uint256 ox = _offsetCanvas(x, data, bi + b * 31 + 540, 25);
-            uint256 oy = _offsetCanvas(y, data, bi + b * 37 + 580, 25);
-            uint256 rx2 = 22 + _rand(data, bi + b * 41 + 620, 22);
-            uint256 ry2 = 7 + _rand(data, bi + b * 47 + 660, 10);
-            r = string.concat(r, _ell(ox, oy, rx2, ry2, _rand(data, bi + b * 53 + 700, 180)));
-        }
+        return string.concat(_lumpA(data, bi, b, x, y), _lumpB(data, bi, b, x, y));
     }
 
-    function _ell(uint256 x, uint256 y, uint256 rx, uint256 ry, uint256 rot)
+    // main lump at the tip (sizes computed inline to keep the stack shallow)
+    function _lumpA(CubeNFT.CubeData memory data, uint256 bi, uint256 b, uint256 x, uint256 y)
         private
         pure
         returns (string memory)
     {
         return string.concat(
             '<ellipse cx="', x.toString(), '" cy="', y.toString(),
-            '" rx="', rx.toString(), '" ry="', ry.toString(),
-            '" transform="rotate(', rot.toString(), " ", x.toString(), " ", y.toString(), ')"/>'
+            '" rx="', (38 + _rand(data, bi + b * 80 + 360, 30)).toString(),
+            '" ry="', (11 + _rand(data, bi + b * 90 + 420, 13)).toString(),
+            '" transform="rotate(', _rand(data, bi + b * 100 + 480, 180).toString(),
+            " ", x.toString(), " ", y.toString(), ')"/>'
+        );
+    }
+
+    // smaller offset lump -> irregular cluster
+    function _lumpB(CubeNFT.CubeData memory data, uint256 bi, uint256 b, uint256 x, uint256 y)
+        private
+        pure
+        returns (string memory)
+    {
+        uint256 ox = _offsetCanvas(x, data, bi + b * 31 + 540, 25);
+        uint256 oy = _offsetCanvas(y, data, bi + b * 37 + 580, 25);
+        return string.concat(
+            '<ellipse cx="', ox.toString(), '" cy="', oy.toString(),
+            '" rx="', (22 + _rand(data, bi + b * 41 + 620, 22)).toString(),
+            '" ry="', (7 + _rand(data, bi + b * 47 + 660, 10)).toString(),
+            '" transform="rotate(', _rand(data, bi + b * 53 + 700, 180).toString(),
+            " ", ox.toString(), " ", oy.toString(), ')"/>'
         );
     }
 
