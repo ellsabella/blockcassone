@@ -6,6 +6,8 @@ import { console2 } from "forge-std/console2.sol";
 import { ERC721 } from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
+import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
+import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 
 // Minimal Normie source used only for previews.
 contract PreviewMockNormies is ERC721 {
@@ -43,8 +45,13 @@ contract PreviewThumbnail is Script {
 
         PreviewMockNormies normies = new PreviewMockNormies();
         CubeNFT cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, dev);
-        CubeThumbnailRendererV1 thumb =
-            new CubeThumbnailRendererV1(cubes, address(normies), address(0));
+        CubeThumbnailRendererV1 thumb = new CubeThumbnailRendererV1(
+            cubes,
+            address(normies),
+            address(0),
+            address(new CubeHilbertGeometry()),
+            address(new CubeFrameLayer())
+        );
 
         for (uint256 s = 0; s < count; s++) {
             uint256 normieId = 1000 + s; // a normie can only be cubed once, so vary it

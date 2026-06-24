@@ -8,6 +8,8 @@ import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
+import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
+import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
 contract RendererV2MockNormies is ERC721 {
@@ -41,7 +43,13 @@ contract CubeRendererV2Test is Test {
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
-        thumbnailRenderer = new CubeThumbnailRendererV1(cubes, address(normies), address(0));
+        thumbnailRenderer = new CubeThumbnailRendererV1(
+            cubes,
+            address(normies),
+            address(0),
+            address(new CubeHilbertGeometry()),
+            address(new CubeFrameLayer())
+        );
         renderer = new CubeRendererV2(cubes, assets, address(normies), address(thumbnailRenderer));
 
         bytes memory raw = new bytes(200);

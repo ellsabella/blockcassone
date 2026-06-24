@@ -6,6 +6,8 @@ import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
+import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
+import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
@@ -107,8 +109,14 @@ contract DeployLocalGenesis is Script {
         d.agentRegistry = new AgentStatusRegistry(initialOwner);
 
         vm.broadcast();
+        address geometry = address(new CubeHilbertGeometry());
+
+        vm.broadcast();
+        address frameLayer = address(new CubeFrameLayer());
+
+        vm.broadcast();
         d.thumbnailRenderer =
-            new CubeThumbnailRendererV1(d.cubes, address(d.normies), address(0));
+            new CubeThumbnailRendererV1(d.cubes, address(d.normies), address(0), geometry, frameLayer);
 
         vm.broadcast();
         d.renderer = new CubeRendererV2(

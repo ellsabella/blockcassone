@@ -6,6 +6,8 @@ import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
+import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
+import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { NormieAddresses } from "../src/NormieAddresses.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
@@ -87,8 +89,15 @@ contract DeployMainnetNormiePreview is Script {
         deployment.agentRegistry = new AgentStatusRegistry(config.initialOwner);
 
         vm.broadcast();
-        deployment.thumbnailRenderer =
-            new CubeThumbnailRendererV1(deployment.cubes, NormieAddresses.NORMIES_STORAGE, address(0));
+        address geometry = address(new CubeHilbertGeometry());
+
+        vm.broadcast();
+        address frameLayer = address(new CubeFrameLayer());
+
+        vm.broadcast();
+        deployment.thumbnailRenderer = new CubeThumbnailRendererV1(
+            deployment.cubes, NormieAddresses.NORMIES_STORAGE, address(0), geometry, frameLayer
+        );
 
         vm.broadcast();
         deployment.renderer =

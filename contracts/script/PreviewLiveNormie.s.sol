@@ -6,6 +6,8 @@ import { console2 } from "forge-std/console2.sol";
 import { IERC721 } from "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
+import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
+import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { NormieAddresses } from "../src/NormieAddresses.sol";
 
 /// @notice Render a thumbnail for any REAL Normie (by its own token id), reading
@@ -34,8 +36,13 @@ contract PreviewLiveNormie is Script {
 
         CubeNFT cubes =
             new CubeNFT("Blockcassone Cubes", "CUBE", NormieAddresses.NORMIES, 4096, msg.sender);
-        CubeThumbnailRendererV1 thumb =
-            new CubeThumbnailRendererV1(cubes, NormieAddresses.NORMIES_STORAGE, address(0));
+        CubeThumbnailRendererV1 thumb = new CubeThumbnailRendererV1(
+            cubes,
+            NormieAddresses.NORMIES_STORAGE,
+            address(0),
+            address(new CubeHilbertGeometry()),
+            address(new CubeFrameLayer())
+        );
 
         for (uint256 i = 0; i < ids.length; i++) {
             uint256 normieId = ids[i];

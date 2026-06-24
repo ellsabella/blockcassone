@@ -12,17 +12,42 @@ interface IThumbnailNonNormieArtStore {
     function payloadForCube(uint256 cubeId) external view returns (bytes memory);
 }
 
+// Swappable render modules (see contracts/src/render/). The orchestrator holds
+// their addresses immutably; swapping a layer = deploy the new module + redeploy
+// this thin orchestrator pointing at it + cubes.setRenderer(...).
+interface ICubeHilbertGeometry {
+    function motifLayout(uint256 slot) external pure returns (uint256);
+    function mainAxis(uint256 slot) external pure returns (uint256);
+}
+
+interface ICubeFrameLayer {
+    function render(bytes32 seed, uint256 srcId, uint256 layout)
+        external
+        pure
+        returns (string memory);
+}
+
 contract CubeThumbnailRendererV1 {
     using Strings for uint256;
 
     CubeNFT public immutable cubes;
     address public immutable normieStorage;
     address public immutable nonNormieStore;
+    ICubeHilbertGeometry public immutable geometry;
+    ICubeFrameLayer public immutable frame;
 
-    constructor(CubeNFT cubes_, address normieStorage_, address nonNormieStore_) {
+    constructor(
+        CubeNFT cubes_,
+        address normieStorage_,
+        address nonNormieStore_,
+        address geometry_,
+        address frame_
+    ) {
         cubes = cubes_;
         normieStorage = normieStorage_;
         nonNormieStore = nonNormieStore_;
+        geometry = ICubeHilbertGeometry(geometry_);
+        frame = ICubeFrameLayer(frame_);
     }
 
     function thumbnailSVG(uint256 tokenId) public view returns (string memory) {
@@ -31,9 +56,9 @@ contract CubeThumbnailRendererV1 {
         string memory labelPath = _labelPath(data.sourceTokenId);
         string memory bitmapPath = _bitmapPath(raw);
         string memory outlinePath = _outlinePath(raw, data.sourceTokenId);
-        string memory planeColor = _planeColor(data);
-        uint256 axis = _mainAxis(uint256(data.slot));
-        uint256 layout = _motifLayout(uint256(data.slot));
+        uint256 axis = geometry.mainAxis(uint256(data.slot));
+        uint256 layout = geometry.motifLayout(uint256(data.slot));
+        string memory planeColor = _colour(axis);
         return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
@@ -41,9 +66,15 @@ contract CubeThumbnailRendererV1 {
             _forestLayer(data, planeColor, layout),
             _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
             _glassLayer(raw, data.sourceTokenId),
-            _thumbnailPlaneFrame(data, planeColor, layout),
+            frame.render(data.seed, data.sourceTokenId, layout),
             "</svg>"
         );
+    }
+
+    function _colour(uint256 axis) private pure returns (string memory) {
+        if (axis == 0) return "#ff1919"; // x -> red
+        if (axis == 1) return "#38ff4d"; // y -> green
+        return "#244cff"; // z -> blue
     }
 
     // Returns a 200-byte (40x40, 1 bit/cell) binary silhouette for either source
@@ -250,247 +281,7 @@ contract CubeThumbnailRendererV1 {
         );
     }
 
-    // The frame (green border + pink street segments) and node markers are drawn
-    // in 5 depth tiers (wide faint halo -> sharp core). The three filtered tiers
-    // (#h/#p/#g) are each wrapped in a SINGLE group, so a rasterizer applies that
-    // blur once per tier instead of once per element (the old per-element form ran
-    // the filters ~150x for a busy cube). Same elements + styles, just regrouped.
-    function _thumbnailPlaneFrame(CubeNFT.CubeData memory data, string memory planeColor, uint256 layout)
-        private
-        pure
-        returns (string memory)
-    {
-        planeColor; // frame colours are fixed (green border, pink streets)
-        return string.concat(_frameStrokes(data, layout), _frameNodes(data, layout));
-    }
 
-    function _frameStrokes(CubeNFT.CubeData memory data, uint256 layout)
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<g fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision">',
-            '<g filter="url(#h)">', _strokeTier(data, layout, 0), "</g>",
-            '<g filter="url(#p)">', _strokeTier(data, layout, 1), "</g>",
-            '<g filter="url(#g)">', _strokeTier(data, layout, 2), "</g>",
-            _strokeTier(data, layout, 3),
-            _strokeTier(data, layout, 4),
-            "</g>"
-        );
-    }
-
-    // One depth tier of the border path + every active street segment.
-    function _strokeTier(CubeNFT.CubeData memory data, uint256 layout, uint256 tier)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory s =
-            _svgPath(_borderPath(layout), _borderColor(tier), _tierWidth(tier), _borderOpacity(tier), "");
-        for (uint256 edge = 0; edge < 3; edge++) {
-            for (uint256 bit = 0; bit < 7; bit++) {
-                if (!_edgePointActive(data, edge, bit)) continue;
-                (uint256 x, uint256 y) = _edgePointCoord(layout, edge, bit);
-                s = string.concat(s, _accentStroke(_edgeHoriz(layout, edge), x, y, tier));
-            }
-        }
-        return s;
-    }
-
-    // The green border traces the unique plane's 3 path-edges (the same 3 sides
-    // the streets sit on), as full-length side segments; the open 4th side is bare.
-    function _borderPath(uint256 layout) private pure returns (string memory) {
-        return string.concat(_sidePath(layout, 0), _sidePath(layout, 1), _sidePath(layout, 2));
-    }
-
-    function _sidePath(uint256 layout, uint256 edge) private pure returns (string memory) {
-        uint256 e3 = (layout >> (edge * 3)) & 7;
-        if ((e3 & 1) != 0) {
-            // horizontal side: top (y=85) or bottom (y=1085)
-            return (e3 & 2) != 0 ? "M100 85H1100" : "M100 1085H1100";
-        }
-        // vertical side: right (x=1100) or left (x=100)
-        return (e3 & 2) != 0 ? "M1100 85V1085" : "M100 85V1085";
-    }
-
-    function _accentStroke(bool horiz, uint256 x, uint256 y, uint256 tier)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory path;
-        if (horiz) {
-            uint256 x0 = x > 96 ? x - 96 : x;
-            path = string.concat("M", x0.toString(), " ", y.toString(), "H", (x + 96).toString());
-        } else {
-            uint256 y0 = y > 96 ? y - 96 : y;
-            path = string.concat("M", x.toString(), " ", y0.toString(), "V", (y + 96).toString());
-        }
-        return _svgPath(path, _accentColor(tier), _tierWidth(tier), _accentOpacity(tier), "");
-    }
-
-    function _frameNodes(CubeNFT.CubeData memory data, uint256 layout)
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            "<g>",
-            '<g filter="url(#h)">', _nodeTier(data, layout, 0), "</g>",
-            '<g filter="url(#p)">', _nodeTier(data, layout, 1), "</g>",
-            '<g filter="url(#g)">', _nodeTier(data, layout, 2), "</g>",
-            _nodeTier(data, layout, 3),
-            "</g>"
-        );
-    }
-
-    function _nodeTier(CubeNFT.CubeData memory data, uint256 layout, uint256 tier)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory s = string.concat(
-            _nodeCircle(100, 85, 14, tier),
-            _nodeCircle(1100, 85, 14, tier),
-            _nodeCircle(1100, 1085, 14, tier),
-            _nodeCircle(100, 1085, 14, tier)
-        );
-        for (uint256 edge = 0; edge < 3; edge++) {
-            for (uint256 bit = 0; bit < 7; bit++) {
-                if (!_edgePointActive(data, edge, bit)) continue;
-                (uint256 x, uint256 y) = _edgePointCoord(layout, edge, bit);
-                s = string.concat(s, _nodeCircle(x, y, _edgeHoriz(layout, edge) ? 9 : 13, tier));
-            }
-        }
-        return s;
-    }
-
-    // The 5 node tiers collapsed onto 4 groups: the two #g circles share the #g
-    // group (tier 2), the sharp core is unfiltered (tier 3).
-    function _nodeCircle(uint256 x, uint256 y, uint256 r, uint256 tier)
-        private
-        pure
-        returns (string memory)
-    {
-        if (tier == 0) return _circle(x, y, (r * 2).toString(), "#fff", ".12", "");
-        if (tier == 1) return _circle(x, y, ((r * 3) / 2).toString(), "#fff", ".30", "");
-        if (tier == 2) {
-            return string.concat(
-                _circle(x, y, r.toString(), "#fff", ".62", ""),
-                _circle(x, y, (r / 2 + 3).toString(), "#fff", ".38", "")
-            );
-        }
-        return _circle(x, y, (r / 3 + 2).toString(), "#fff", ".76", "");
-    }
-
-    function _tierWidth(uint256 tier) private pure returns (string memory) {
-        if (tier == 0) return "12";
-        if (tier == 1) return "7.5";
-        if (tier == 2) return "5.2";
-        if (tier == 3) return "3.4";
-        return "1.65";
-    }
-
-    function _borderColor(uint256 tier) private pure returns (string memory) {
-        if (tier == 3) return "#8dff98";
-        if (tier == 4) return "#fff";
-        return "#38ff4d";
-    }
-
-    function _borderOpacity(uint256 tier) private pure returns (string memory) {
-        if (tier == 0) return ".12";
-        if (tier == 1) return ".32";
-        if (tier == 2) return ".92";
-        if (tier == 3) return ".98";
-        return ".55";
-    }
-
-    function _accentColor(uint256 tier) private pure returns (string memory) {
-        if (tier == 0 || tier == 1) return "#ff1ba6";
-        if (tier == 2) return "#ff3ab8";
-        if (tier == 3) return "#ff2aa8";
-        return "#ffc0ea";
-    }
-
-    function _accentOpacity(uint256 tier) private pure returns (string memory) {
-        if (tier == 0) return ".18";
-        if (tier == 1) return ".46";
-        if (tier == 2) return ".98";
-        if (tier == 3) return ".98";
-        return ".46";
-    }
-
-    function _svgPath(
-        string memory d,
-        string memory color,
-        string memory width,
-        string memory opacity,
-        string memory filter
-    )
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<path d="',
-            d,
-            '" stroke="',
-            color,
-            '" stroke-width="',
-            width,
-            '" opacity="',
-            opacity,
-            '" stroke-linecap="round" stroke-linejoin="round"',
-            bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
-            "/>"
-        );
-    }
-
-    function _circle(
-        uint256 x,
-        uint256 y,
-        string memory radius,
-        string memory color,
-        string memory opacity,
-        string memory filter
-    )
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<circle cx="',
-            x.toString(),
-            '" cy="',
-            y.toString(),
-            '" r="',
-            radius,
-            '" fill="',
-            color,
-            '" opacity="',
-            opacity,
-            '"',
-            bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
-            "/>"
-        );
-    }
-
-
-    // --- Unique-plane geometry (which 3 frame sides carry streets) -------------
-    // The 2D frame shows the motif's UNIQUE plane (the one whose axis appears once
-    // in the XX Y / XX Z / ... triple — always the middle plane, verts [2,3,4,5]).
-    // Its 3 path-edges map to 3 of the 4 frame sides; the 4th (the open quad side)
-    // carries no street. We compute the motif's 8 Hilbert vertices on-chain via an
-    // O(order) octree descent (validated to match the canonical core/ generator for
-    // all 4096 slots), take the unique plane, and pack a 9-bit layout: 3 bits per
-    // edge (bit0 horizontal?, bit1 const-side high?, bit2 start high?). The colour
-    // axis from _mainAxis is provably the same unique axis, so they always agree.
-    function _motifLayout(uint256 slot) private pure returns (uint256) {
-        (int256[3] memory c0, int256[3] memory c1, int256[3] memory c2, int256[3] memory c3) =
-            _uniqueVerts(slot);
-        return _encodeLayout(c0, c1, c2, c3);
-    }
 
     function _edgePointCoord(uint256 layout, uint256 edge, uint256 bit)
         private
@@ -508,182 +299,6 @@ contract CubeThumbnailRendererV1 {
             x = (e3 & 2) != 0 ? 1100 : 100;
             y = (e3 & 4) != 0 ? 1085 - d : 85 + d;
         }
-    }
-
-    function _edgeHoriz(uint256 layout, uint256 edge) private pure returns (bool) {
-        return ((layout >> (edge * 3)) & 1) == 1;
-    }
-
-    // Motif verts [2,3,4,5] (the unique plane) via per-motif octree descent.
-    function _uniqueVerts(uint256 slot)
-        private
-        pure
-        returns (int256[3] memory c0, int256[3] memory c1, int256[3] memory c2, int256[3] memory c3)
-    {
-        int256[3] memory b1;
-        b1[0] = 1;
-        int256[3] memory b2;
-        b2[1] = 1;
-        int256[3] memory b3;
-        b3[2] = 1;
-        int256[3] memory o; // origin, zeros
-        int256 s = int256(1) << HILBERT_ORDER; // 2^order = 32
-        uint256 levels = HILBERT_ORDER - 1;
-        for (uint256 i = 0; i < levels; i++) {
-            uint256 d = (slot / (8 ** (levels - 1 - i))) % 8;
-            s /= 2;
-            (o, b1, b2, b3) = _child(s, o, b1, b2, b3, d);
-        }
-        s /= 2; // expand the s=2 node into its s=1 leaves
-        int256[3] memory bO = _adjustOrigin(o, s, b1, b2, b3);
-        c0 = _add2(bO, s, b1, b2); // vert 2
-        c1 = _add(bO, s, b2); // vert 3
-        c2 = _add2(bO, s, b2, b3); // vert 4
-        c3 = _add3(bO, s, b1, b2, b3); // vert 5
-    }
-
-    function _encodeLayout(
-        int256[3] memory c0,
-        int256[3] memory c1,
-        int256[3] memory c2,
-        int256[3] memory c3
-    )
-        private
-        pure
-        returns (uint256)
-    {
-        uint256 B = (c0[0] == c1[0] && c1[0] == c2[0] && c2[0] == c3[0])
-            ? 0
-            : (c0[1] == c1[1] && c1[1] == c2[1] && c2[1] == c3[1] ? 1 : 2);
-        uint256 U = B == 0 ? 1 : 0;
-        uint256 V = B == 2 ? 1 : 2;
-        int256 minU = _min4(c0[U], c1[U], c2[U], c3[U]);
-        int256 minV = _min4(c0[V], c1[V], c2[V], c3[V]);
-        return _edgeBits(c0, c1, U, V, minU, minV) | (_edgeBits(c1, c2, U, V, minU, minV) << 3)
-            | (_edgeBits(c2, c3, U, V, minU, minV) << 6);
-    }
-
-    // 3-bit code for one path-edge between corners A and Bp (local u,v in {0,1}).
-    function _edgeBits(
-        int256[3] memory A,
-        int256[3] memory Bp,
-        uint256 U,
-        uint256 V,
-        int256 minU,
-        int256 minV
-    )
-        private
-        pure
-        returns (uint256)
-    {
-        uint256 uA = uint256(A[U] - minU);
-        uint256 vA = uint256(A[V] - minV);
-        uint256 uB = uint256(Bp[U] - minU);
-        if (uA == uB) {
-            // vertical: const x. bit1=right(u==1), bit2=startBottom(v==0)
-            return (uA == 1 ? 2 : 0) | (vA == 0 ? 4 : 0);
-        }
-        // horizontal: const y. bit0=1, bit1=top(v==1), bit2=startLeft(u==0)
-        return 1 | (vA == 1 ? 2 : 0) | (uA == 0 ? 4 : 0);
-    }
-
-    // One octree child: adjust origin for negative basis components, then place the
-    // child origin + permuted/negated basis (mirrors core/hilbert.js hilbertC).
-    function _child(
-        int256 s,
-        int256[3] memory o,
-        int256[3] memory b1,
-        int256[3] memory b2,
-        int256[3] memory b3,
-        uint256 d
-    )
-        private
-        pure
-        returns (int256[3] memory, int256[3] memory, int256[3] memory, int256[3] memory)
-    {
-        int256[3] memory bO = _adjustOrigin(o, s, b1, b2, b3);
-        if (d == 0) return (bO, b2, b3, b1);
-        if (d == 1) return (_add(bO, s, b1), b3, b1, b2);
-        if (d == 2) return (_add2(bO, s, b1, b2), b3, b1, b2);
-        if (d == 3) return (_add(bO, s, b2), _neg(b1), _neg(b2), b3);
-        if (d == 4) return (_add2(bO, s, b2, b3), _neg(b1), _neg(b2), b3);
-        if (d == 5) return (_add3(bO, s, b1, b2, b3), _neg(b3), b1, _neg(b2));
-        if (d == 6) return (_add2(bO, s, b1, b3), _neg(b3), b1, _neg(b2));
-        return (_add(bO, s, b3), b2, _neg(b3), _neg(b1));
-    }
-
-    function _adjustOrigin(
-        int256[3] memory o,
-        int256 s,
-        int256[3] memory b1,
-        int256[3] memory b2,
-        int256[3] memory b3
-    )
-        private
-        pure
-        returns (int256[3] memory r)
-    {
-        r[0] = o[0];
-        r[1] = o[1];
-        r[2] = o[2];
-        if (b1[0] < 0) r[0] -= s * b1[0];
-        if (b2[0] < 0) r[0] -= s * b2[0];
-        if (b3[0] < 0) r[0] -= s * b3[0];
-        if (b1[1] < 0) r[1] -= s * b1[1];
-        if (b2[1] < 0) r[1] -= s * b2[1];
-        if (b3[1] < 0) r[1] -= s * b3[1];
-        if (b1[2] < 0) r[2] -= s * b1[2];
-        if (b2[2] < 0) r[2] -= s * b2[2];
-        if (b3[2] < 0) r[2] -= s * b3[2];
-    }
-
-    function _add(int256[3] memory o, int256 s, int256[3] memory a)
-        private
-        pure
-        returns (int256[3] memory r)
-    {
-        r[0] = o[0] + s * a[0];
-        r[1] = o[1] + s * a[1];
-        r[2] = o[2] + s * a[2];
-    }
-
-    function _add2(int256[3] memory o, int256 s, int256[3] memory a, int256[3] memory b)
-        private
-        pure
-        returns (int256[3] memory r)
-    {
-        r[0] = o[0] + s * a[0] + s * b[0];
-        r[1] = o[1] + s * a[1] + s * b[1];
-        r[2] = o[2] + s * a[2] + s * b[2];
-    }
-
-    function _add3(
-        int256[3] memory o,
-        int256 s,
-        int256[3] memory a,
-        int256[3] memory b,
-        int256[3] memory c
-    )
-        private
-        pure
-        returns (int256[3] memory r)
-    {
-        r[0] = o[0] + s * (a[0] + b[0] + c[0]);
-        r[1] = o[1] + s * (a[1] + b[1] + c[1]);
-        r[2] = o[2] + s * (a[2] + b[2] + c[2]);
-    }
-
-    function _neg(int256[3] memory v) private pure returns (int256[3] memory r) {
-        r[0] = -v[0];
-        r[1] = -v[1];
-        r[2] = -v[2];
-    }
-
-    function _min4(int256 a, int256 b, int256 c, int256 d) private pure returns (int256 m) {
-        m = a;
-        if (b < m) m = b;
-        if (c < m) m = c;
-        if (d < m) m = d;
     }
 
     function _edgePointActive(CubeNFT.CubeData memory data, uint256 edge, uint256 bit)
@@ -1290,40 +905,6 @@ contract CubeThumbnailRendererV1 {
     // slot is its motif index in [0, 8^(ORDER-1)).
     uint256 private constant HILBERT_ORDER = 5;
 
-    function _planeColor(CubeNFT.CubeData memory data) private pure returns (string memory) {
-        uint256 axis = _mainAxis(uint256(data.slot));
-        if (axis == 0) return "#ff1919"; // x -> red
-        if (axis == 1) return "#38ff4d"; // y -> green
-        return "#244cff";                // z -> blue
-    }
-
-    // The cube's "main" colour comes from its UNIQUE-axis plane (e.g. an XXY
-    // cube takes Y). Derived from the 3D Hilbert geometry: a motif's 3 plane
-    // axes are always [axis(C), axis(B), axis(C)], so the unique axis is always
-    // the B basis vector's axis. We find B's axis by walking the Hilbert octree
-    // (ORDER-1 levels) and tracking how the orientation basis (a,b,c) permutes
-    // per child. Verified to match core/hilbert.js for all motifs (orders 2-5).
-    function _mainAxis(uint256 motif) private pure returns (uint256) {
-        uint256 levels = HILBERT_ORDER - 1;
-        uint256 a = 0; // x
-        uint256 b = 1; // y
-        uint256 c = 2; // z
-        for (uint256 i = 0; i < levels; i++) {
-            uint256 d = (motif / (8 ** (levels - 1 - i))) % 8;
-            uint256 na;
-            uint256 nb;
-            uint256 nc;
-            if (d == 3 || d == 4) {
-                (na, nb, nc) = (a, b, c); // identity
-            } else if (d == 1 || d == 2 || d == 5 || d == 6) {
-                (na, nb, nc) = (c, a, b);
-            } else {
-                (na, nb, nc) = (b, c, a); // 0 or 7
-            }
-            (a, b, c) = (na, nb, nc);
-        }
-        return b;
-    }
 
     function _mix(uint256 a, uint256 b, uint256 pct) private pure returns (uint256) {
         return (a * (100 - pct) + b * pct) / 100;
