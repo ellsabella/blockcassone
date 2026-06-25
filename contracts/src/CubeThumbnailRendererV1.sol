@@ -416,6 +416,10 @@ contract CubeThumbnailRendererV1 {
     // near a single light and blooming to white where they overlap. All maths is
     // fixed-point (band/mult/falloff/variety/intensity x1000; light field x10000)
     // and was validated against the float prototype before porting.
+    // Glass count/placement dials (see _glassLayer).
+    uint256 private constant GLASS_CONVERGE_MIN = 4; // neigh8 >= this counts as convergent
+    uint256 private constant GLASS_GAIN = 100;       // % of convergent-cell count -> target glass cells
+
     function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
@@ -423,12 +427,9 @@ contract CubeThumbnailRendererV1 {
         // COUNT: tie how much glass to how solid the silhouette is — count the
         // "convergent" cells (>= GLASS_CONVERGE_MIN of 8 neighbours on), the 2D
         // proxy for the 3D multi-plane agreement. GLASS_GAIN scales that into a
-        // target cell count (this is the dial — spin it to taste).
+        // target cell count (spin GLASS_GAIN to taste).
         // PLACEMENT: scatter that target uniformly across ALL foreground cells
         // via a per-cell seeded gate, instead of clustering at the centre.
-        uint256 GLASS_CONVERGE_MIN = 4; // neigh8 >= this counts as convergent
-        uint256 GLASS_GAIN = 100;       // % of convergent-cell count -> target glass cells
-
         uint256 fg = 0;
         uint256 converge = 0;
         for (uint256 i = 0; i < 1600; i++) {
@@ -448,15 +449,26 @@ contract CubeThumbnailRendererV1 {
         uint256 kept = 0;
         for (uint256 i = 0; i < 1600 && kept < 600; i++) {
             if (!_bitmapBit(raw, i)) continue;
-            uint256 col = i % 40;
-            uint256 row = i / 40;
-            if (_isLabelCell(normieId, row, col)) continue;
-            if (uint256(keccak256(abi.encodePacked(normieId, col, row))) % 1000 >= prob) continue;
-            _bufCat(buf, _glassRect(col, row, _glassDensity(raw, col, row)));
-            kept++;
+            if (_isLabelCell(normieId, i / 40, i % 40)) continue;
+            if (_scatterCell(buf, raw, normieId, i, prob)) kept++;
         }
         _bufCat(buf, "</g>");
         return _bufStr(buf);
+    }
+
+    // Scatter gate + emit for one foreground cell; appends a glass rect and
+    // returns true if the cell wins its seeded gate. Kept as its own shallow
+    // frame so the dense nested call doesn't blow the stack (no via-IR).
+    function _scatterCell(bytes memory buf, bytes memory raw, uint256 normieId, uint256 i, uint256 prob)
+        private
+        pure
+        returns (bool)
+    {
+        uint256 col = i % 40;
+        uint256 row = i / 40;
+        if (uint256(keccak256(abi.encodePacked(normieId, col, row))) % 1000 >= prob) return false;
+        _bufCat(buf, _glassRect(col, row, _glassDensity(raw, col, row)));
+        return true;
     }
 
     // Per-cell glass brightness (x1000): DENSER cells (more on-neighbours) glow
