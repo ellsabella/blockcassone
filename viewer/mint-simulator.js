@@ -70,6 +70,7 @@ function cubeFromRecord(record) {
     nft,
     sourceKey: sourceKeyFromRecord(record),
     sourceKind,
+    seed: record.seed || null, // on-chain cube seed (real mints only) for edge-point parity
   };
 }
 
