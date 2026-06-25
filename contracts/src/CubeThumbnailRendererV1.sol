@@ -419,8 +419,8 @@ contract CubeThumbnailRendererV1 {
     // Glass count/placement dials (see _glassLayer).
     uint256 private constant GLASS_CONVERGE_MIN = 4;  // neigh8 >= this counts as convergent
     uint256 private constant GLASS_GAIN = 45;         // % of convergent-cell count -> target glass cells (density dial)
-    uint256 private constant GLASS_SPARKLE_MIN = 160; // intensity above this gets a specular glint
-    uint256 private constant GLASS_WHITE = 8;         // % lift toward white; low so cells stay saturated/translucent (overlaps still whiten via _lightColor)
+    uint256 private constant GLASS_SPARKLE_MIN = 550; // only the brightest ~4% glint (reference: fill-op >= .55)
+    uint256 private constant GLASS_WHITE = 0;         // % lift toward white; 0 = raw light field (matches the reference exactly; _lightColor still whitens real overlaps)
 
     function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
@@ -452,7 +452,7 @@ contract CubeThumbnailRendererV1 {
         for (uint256 i = 0; i < 1600 && kept < 600; i++) {
             if (!_bitmapBit(raw, i)) continue;
             if (_isLabelCell(normieId, i / 40, i % 40)) continue;
-            if (_scatterCell(buf, raw, normieId, i, prob)) kept++;
+            if (_scatterCell(buf, normieId, i, prob)) kept++;
         }
         _bufCat(buf, "</g>");
         return _bufStr(buf);
@@ -461,7 +461,7 @@ contract CubeThumbnailRendererV1 {
     // Scatter gate + emit for one foreground cell; appends a glass rect and
     // returns true if the cell wins its seeded gate. Kept as its own shallow
     // frame so the dense nested call doesn't blow the stack (no via-IR).
-    function _scatterCell(bytes memory buf, bytes memory raw, uint256 normieId, uint256 i, uint256 prob)
+    function _scatterCell(bytes memory buf, uint256 normieId, uint256 i, uint256 prob)
         private
         pure
         returns (bool)
@@ -469,7 +469,7 @@ contract CubeThumbnailRendererV1 {
         uint256 col = i % 40;
         uint256 row = i / 40;
         if (uint256(keccak256(abi.encodePacked(normieId, col, row))) % 1000 >= prob) return false;
-        _bufCat(buf, _glassRect(col, row, _glassDensity(raw, col, row)));
+        _bufCat(buf, _glassRect(col, row, _glassDensity(col, row)));
         return true;
     }
 
@@ -477,18 +477,17 @@ contract CubeThumbnailRendererV1 {
     // brighter, so the scattered glass reads the form's body and sparse edge
     // cells stay faint. A per-cell variety factor keeps it from looking
     // mechanical. No centre bias (that caused the old central bunching).
-    function _glassDensity(bytes memory raw, uint256 col, uint256 row)
-        private
-        pure
-        returns (uint256 v)
-    {
-        // Brightness is mostly a per-cell skewed random so bright cells scatter
-        // across the figure instead of clumping in the densest patch; a small
-        // density bump keeps some form. r^2 skew -> mostly faint, a few bright,
-        // peaks ~.64 like the prototype.
-        uint256 nb = _neigh8(raw, col, row); // 0..8 on-neighbours
+    function _glassDensity(uint256 col, uint256 row) private pure returns (uint256 v) {
+        // Opacity x1000, shaped to the reference's measured distribution: mostly
+        // faint (median ~.14), with a steep bright tail (top ~10% ramps to ~.64).
+        // Random per cell so the bright cells scatter rather than cluster.
         uint256 r = uint256(keccak256(abi.encodePacked(col, row))) % 1000;
-        v = 40 + nb * 5 + (r * r / 1000) * 560 / 1000; // ~40 .. ~640, scattered
+        if (r <= 900) {
+            uint256 t = r * 1000 / 900; // 0..1000
+            v = 65 + (t * t / 1000) * 255 / 1000; // .065 .. .320
+        } else {
+            v = 320 + (r - 900) * 320 / 100; // .320 .. ~.636
+        }
     }
 
     function _glassRect(uint256 col, uint256 row, uint256 intensity)
@@ -509,11 +508,11 @@ contract CubeThumbnailRendererV1 {
     }
 
     function _glassSparkle(uint256 col, uint256 row) private pure returns (string memory) {
-        // Single small upper-left glint — bright enough to read as shine under the
-        // #p bloom, but small/dim so the cell stays translucent, not a white blob.
+        // Small glint, exactly the reference: r1.1, opacity .5, on the brightest
+        // ~4% of cells only.
         return string.concat(
-            '<circle cx="', (100 + col * 25 + 5).toString(), '" cy="', (85 + row * 25 + 5).toString(),
-            '" r="1.3" fill="#fff" opacity=".62"/>'
+            '<circle cx="', (100 + col * 25 + 8).toString(), '" cy="', (85 + row * 25 + 8).toString(),
+            '" r="1.1" fill="#fff" opacity=".5"/>'
         );
     }
 
