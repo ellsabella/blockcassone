@@ -420,7 +420,7 @@ contract CubeThumbnailRendererV1 {
     uint256 private constant GLASS_CONVERGE_MIN = 4;  // neigh8 >= this counts as convergent
     uint256 private constant GLASS_GAIN = 45;         // % of convergent-cell count -> target glass cells (density dial)
     uint256 private constant GLASS_SPARKLE_MIN = 160; // intensity above this gets a specular glint
-    uint256 private constant GLASS_WHITE = 40;        // % lift toward white (pastel/glow; rest keeps the hue)
+    uint256 private constant GLASS_WHITE = 22;        // % lift toward white; lower keeps the cell saturated -> translucent, not milky
 
     function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
@@ -509,15 +509,11 @@ contract CubeThumbnailRendererV1 {
     }
 
     function _glassSparkle(uint256 col, uint256 row) private pure returns (string memory) {
-        // Bright specular glint toward the upper-left + a faint secondary lower-
-        // right — reads as light catching the glass (shine). #p blooms the glint.
-        uint256 x = 100 + col * 25;
-        uint256 y = 85 + row * 25;
+        // Single small upper-left glint — bright enough to read as shine under the
+        // #p bloom, but small/dim so the cell stays translucent, not a white blob.
         return string.concat(
-            '<circle cx="', (x + 5).toString(), '" cy="', (y + 5).toString(),
-            '" r="1.7" fill="#fff" opacity=".82"/>',
-            '<circle cx="', (x + 15).toString(), '" cy="', (y + 15).toString(),
-            '" r=".8" fill="#fff" opacity=".4"/>'
+            '<circle cx="', (100 + col * 25 + 5).toString(), '" cy="', (85 + row * 25 + 5).toString(),
+            '" r="1.3" fill="#fff" opacity=".62"/>'
         );
     }
 

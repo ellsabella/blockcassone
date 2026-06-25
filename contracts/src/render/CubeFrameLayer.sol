@@ -120,10 +120,10 @@ contract CubeFrameLayer {
         // saturated, so the border reads as vivid colour rather than a pale tint
         // (the reference keeps its crisp line vivid, only a thin core near-white).
         if (tier == 4) {
-            if (axis == 0) return "#7dffaa"; // bright green core
+            if (axis == 0) return "#5cff78"; // bright green core
             return "#ff7ac4"; // bright pink core
         }
-        if (axis == 0) return "#1fff66"; // green
+        if (axis == 0) return "#1aff38"; // deep green (low blue -> reads green, not pale cyan)
         return "#ff19a6"; // pink
     }
 
