@@ -110,7 +110,7 @@ contract CubeFrameLayer {
 
     // Hilbert/frame hue paired against the figure colour:
     //   axis 0 (red figure)   -> green
-    //   axis 1 (green figure) -> cyan
+    //   axis 1 (green figure) -> pink
     //   axis 2 (blue figure)  -> pink
     // Tiers stay coloured all the way to the core (no pure white) so the glow
     // reads as colour, not white haze.
@@ -118,18 +118,18 @@ contract CubeFrameLayer {
         if (tier <= 2) {
             // vivid glow tiers
             if (axis == 0) return "#1fff66"; // green
-            if (axis == 1) return "#19f0ff"; // cyan
+            if (axis == 1) return "#ff19a6"; // pink (green figure)
             return "#ff19a6"; // pink
         }
         if (tier == 3) {
             // saturated light tint (not near-white)
             if (axis == 0) return "#5cff96";
-            if (axis == 1) return "#5ce6ff";
+            if (axis == 1) return "#ff5cbe";
             return "#ff5cbe";
         }
         // tier 4 core — bright but still tinted, never pure white
         if (axis == 0) return "#b6ffce";
-        if (axis == 1) return "#b6f3ff";
+        if (axis == 1) return "#ffb6e2";
         return "#ffb6e2";
     }
 
