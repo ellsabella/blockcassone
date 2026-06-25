@@ -133,6 +133,34 @@ contract CubeThumbnailRendererV1 {
         return string.concat(r, " 0 0 0 0 0 ", g, " 0 0 0 0 0 ", b, " 0 0 0 0 0 ", a, " 0");
     }
 
+    // The wide figure glow (#gf). Red/green use the reference's generic white
+    // bloom (tight blur). Blue (axis 2) keeps a colour-specific boost + wider blur
+    // — under a white halo it washes out, so it gets its own coloured glow.
+    function _gfFilter(uint256 axis) private pure returns (string memory) {
+        string memory head =
+            '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">';
+        string memory tail =
+            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+        if (axis == 2) {
+            return string.concat(
+                head,
+                '<feGaussianBlur in="SourceGraphic" stdDeviation="2" result="t"/>',
+                '<feColorMatrix in="t" type="matrix" values="', _neonVals(2, "8", "1.9", "1"), '" result="tc"/>',
+                '<feGaussianBlur in="SourceGraphic" stdDeviation="4.7" result="m"/>',
+                '<feColorMatrix in="m" type="matrix" values="', _neonVals(2, "5.5", "1.4", ".72"), '" result="mc"/>',
+                tail
+            );
+        }
+        return string.concat(
+            head,
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/>',
+            '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "5", "5", "1"), '" result="tc"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/>',
+            '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "3", "3", ".62"), '" result="mc"/>',
+            tail
+        );
+    }
+
     function _thumbnailDefs(
         string memory bitmapPath,
         string memory outlinePath,
@@ -188,13 +216,7 @@ contract CubeThumbnailRendererV1 {
             '<feColorMatrix in="w" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .45 0" result="wc"/>',
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
-            '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "5", "5", "1"), '" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "3", "3", ".62"), '" result="mc"/>',
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
+            _gfFilter(axis),
             // Forest particle clouds: feTurbulence masked, coloured by the source
             // (so red/green/blue cubes get matching particles), then bloomed.
             '<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">',
