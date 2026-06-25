@@ -115,22 +115,16 @@ contract CubeFrameLayer {
     // Tiers stay coloured all the way to the core (no pure white) so the glow
     // reads as colour, not white haze.
     function _borderColor(uint256 tier, uint256 axis) private pure returns (string memory) {
-        if (tier <= 2) {
-            // vivid glow tiers
-            if (axis == 0) return "#1fff66"; // green
-            if (axis == 1) return "#ff19a6"; // pink (green figure)
-            return "#ff19a6"; // pink
+        // tier 4 is the thin hot core: brighter/lighter but still clearly the hue.
+        // tiers 0-3 (the blurred glow AND the crisp dominant line) stay fully
+        // saturated, so the border reads as vivid colour rather than a pale tint
+        // (the reference keeps its crisp line vivid, only a thin core near-white).
+        if (tier == 4) {
+            if (axis == 0) return "#7dffaa"; // bright green core
+            return "#ff7ac4"; // bright pink core
         }
-        if (tier == 3) {
-            // saturated light tint (not near-white)
-            if (axis == 0) return "#5cff96";
-            if (axis == 1) return "#ff5cbe";
-            return "#ff5cbe";
-        }
-        // tier 4 core — bright but still tinted, never pure white
-        if (axis == 0) return "#b6ffce";
-        if (axis == 1) return "#ffb6e2";
-        return "#ffb6e2";
+        if (axis == 0) return "#1fff66"; // green
+        return "#ff19a6"; // pink
     }
 
     // --- shared edge-point plan (orbs + ownership) ----------------------------
