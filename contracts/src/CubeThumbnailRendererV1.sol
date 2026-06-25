@@ -171,11 +171,11 @@ contract CubeThumbnailRendererV1 {
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".26" result="r"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".18" result="r"/>',
             '<feColorMatrix in="r" type="matrix" values="', _neonVals(axis, "9", "1.8", ".92"), '" result="rc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".36" result="t"/>',
             '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "7", "1.4", ".38"), '" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".74" result="m"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="m"/>',
             '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "4.5", "1", ".025"), '" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
@@ -189,9 +189,9 @@ contract CubeThumbnailRendererV1 {
             '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/>',
             '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "6", "1.8", "1"), '" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/>',
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="3.85" result="m"/>',
             '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "4", "1.3", ".62"), '" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
@@ -482,10 +482,13 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (uint256 v)
     {
+        // Brightness is mostly a per-cell skewed random so bright cells scatter
+        // across the figure instead of clumping in the densest patch; a small
+        // density bump keeps some form. r^2 skew -> mostly faint, a few bright,
+        // peaks ~.64 like the prototype.
         uint256 nb = _neigh8(raw, col, row); // 0..8 on-neighbours
-        v = 20 + nb * nb * 10; // 20 (sparse) .. 660 (dense) — quadratic so solid cores glow bright (prototype peaks ~.64)
-        uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
-        v = v * variety / 1000;
+        uint256 r = uint256(keccak256(abi.encodePacked(col, row))) % 1000;
+        v = 40 + nb * 5 + (r * r / 1000) * 560 / 1000; // ~40 .. ~640, scattered
     }
 
     function _glassRect(uint256 col, uint256 row, uint256 intensity)

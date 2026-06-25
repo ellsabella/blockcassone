@@ -10,9 +10,9 @@ import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 /// segments. Drawn in 5 depth tiers with the filtered tiers (#h/#p/#g) grouped so
 /// a rasterizer runs each blur once; filter ids come from the orchestrator <defs>.
 ///
-/// The border is coloured the RGB-wheel OPPOSITE of the cube's plane colour
-/// (axis 0 red -> cyan, 1 green -> pink/magenta, 2 blue -> yellow), so it
-/// contrasts the figure/forest which carry the plane colour.
+/// The border (hilbert) hue is paired against the cube's plane colour:
+/// axis 0 red -> green, 1 green -> yellow, 2 blue -> pink. Tiers stay coloured to
+/// the core (no pure white) so the glow reads as colour, not white haze.
 ///
 /// Constant presentation attributes (stroke-linecap/linejoin, stroke-width, fill)
 /// are hoisted to the enclosing <g> so they aren't repeated on every element.
@@ -32,11 +32,11 @@ contract CubeFrameLayer {
         string memory bp = _borderPath(layout);
         return string.concat(
             '<g fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision">',
-            '<g stroke-width="12" filter="url(#h)">', _path(bp, _borderColor(0, axis), ".12"), "</g>",
-            '<g stroke-width="7.5" filter="url(#p)">', _path(bp, _borderColor(1, axis), ".32"), "</g>",
-            '<g stroke-width="5.2" filter="url(#g)">', _path(bp, _borderColor(2, axis), ".92"), "</g>",
-            '<g stroke-width="3.4">', _path(bp, _borderColor(3, axis), ".98"), "</g>",
-            '<g stroke-width="1.65">', _path(bp, _borderColor(4, axis), ".55"), "</g>",
+            '<g stroke-width="14.4" filter="url(#h)">', _path(bp, _borderColor(0, axis), ".12"), "</g>",
+            '<g stroke-width="9" filter="url(#p)">', _path(bp, _borderColor(1, axis), ".32"), "</g>",
+            '<g stroke-width="6.24" filter="url(#g)">', _path(bp, _borderColor(2, axis), ".92"), "</g>",
+            '<g stroke-width="4.08">', _path(bp, _borderColor(3, axis), ".98"), "</g>",
+            '<g stroke-width="1.98">', _path(bp, _borderColor(4, axis), ".55"), "</g>",
             "</g>"
         );
     }
@@ -108,18 +108,29 @@ contract CubeFrameLayer {
         return (e3 & 2) != 0 ? "M1100 85V1085" : "M100 85V1085";
     }
 
-    // The complement of the plane colour: red->cyan, green->pink, blue->yellow.
-    // Tiers 0-2 use the vivid complement; tier 3 a lighter tint; tier 4 white core.
+    // Hilbert/frame hue paired against the figure colour:
+    //   axis 0 (red figure)   -> green
+    //   axis 1 (green figure) -> yellow (amped)
+    //   axis 2 (blue figure)  -> pink
+    // Tiers stay coloured all the way to the core (no pure white) so the glow
+    // reads as colour, not white haze.
     function _borderColor(uint256 tier, uint256 axis) private pure returns (string memory) {
-        if (tier == 4) return "#fff";
-        if (tier == 3) {
-            if (axis == 0) return "#8df7ff"; // light cyan
-            if (axis == 1) return "#ff8dd1"; // light pink
-            return "#fff18d"; // light yellow
+        if (tier <= 2) {
+            // vivid glow tiers
+            if (axis == 0) return "#1fff66"; // green
+            if (axis == 1) return "#ffe000"; // yellow (amped)
+            return "#ff19a6"; // pink
         }
-        if (axis == 0) return "#19f0ff"; // cyan   (opp red)
-        if (axis == 1) return "#ff19a6"; // pink   (opp green)
-        return "#ffe619"; // yellow (opp blue)
+        if (tier == 3) {
+            // saturated light tint (not near-white)
+            if (axis == 0) return "#5cff96";
+            if (axis == 1) return "#ffe84d";
+            return "#ff5cbe";
+        }
+        // tier 4 core — bright but still tinted, never pure white
+        if (axis == 0) return "#b6ffce";
+        if (axis == 1) return "#fff3a0";
+        return "#ffb6e2";
     }
 
     // --- shared edge-point plan (orbs + ownership) ----------------------------
