@@ -289,12 +289,29 @@ contract CubeThumbnailRendererV1 {
         }
     }
 
-    function _edgePointActive(CubeNFT.CubeData memory data, uint256 edge, uint256 bit)
+    // Per-side edge-point plan: orbs (2..6 of 7) + which subset THIS plane owns.
+    // Keyed on the cube seed (per-cube variation) + the edge's canonical id so the
+    // two faces of a shared edge agree (never-both). MUST stay byte-for-byte
+    // identical to CubeFrameLayer._sidePlan and the JS viewer's selector.
+    function _sidePlan(bytes32 seed, uint256 edge)
         private
         pure
-        returns (bool)
+        returns (uint256 orbMask, uint256 strandMask)
     {
-        return uint256(keccak256(abi.encodePacked(data.seed, data.sourceTokenId, edge, bit))) % 3 != 0;
+        uint256 canon = edge == 0 ? 23 : (edge == 1 ? 34 : 45);
+        uint256 h = uint256(keccak256(abi.encodePacked(seed, canon)));
+        uint256 count = 2 + (h & 0xff) % 5; // 2..6 orbs on this side
+        uint256 placed;
+        for (uint256 i = 0; i < 7; i++) {
+            uint256 needed = count - placed;
+            if ((((h >> (8 + i * 8)) & 0xff) % (7 - i)) < needed) {
+                orbMask |= (1 << i);
+                placed++;
+                if (edge == 1 || ((h >> (72 + i)) & 1) == 1) {
+                    strandMask |= (1 << i);
+                }
+            }
+        }
     }
 
     // --- O(n) string builder ---------------------------------------------------
@@ -680,23 +697,19 @@ contract CubeThumbnailRendererV1 {
         string memory glow = "";
         string memory core = "";
         string memory tips = "";
-        // Cap trees at 75% of the active edge points (lighter forest + gas).
-        uint256 cap;
-        {
-            uint256 activePts;
-            for (uint256 bi = 0; bi < 21; bi++) {
-                if (_edgePointActive(data, bi / 7, bi % 7)) activePts++;
+        // Strands sprout only at sub-slots this plane OWNS (strandMask). Bare orbs
+        // (neighbour-owned, and empty slots) grow nothing — the frame layer draws
+        // those nodes. The 2..6 count + ownership split now do all the thinning,
+        // so no artificial cap.
+        for (uint256 edge = 0; edge < 3; edge++) {
+            (, uint256 strandMask) = _sidePlan(data.seed, edge);
+            for (uint256 bit = 0; bit < 7; bit++) {
+                if (((strandMask >> bit) & 1) == 0) continue;
+                uint256 bi = edge * 7 + bit;
+                glow = string.concat(glow, _treeStrands(data, bi, false, layout));
+                core = string.concat(core, _treeStrands(data, bi, true, layout));
+                tips = string.concat(tips, _treeTips(data, bi, layout));
             }
-            cap = activePts * 3 / 4;
-        }
-        uint256 grown;
-        for (uint256 bi = 0; bi < 21 && grown < cap; bi++) {
-            uint256 edge = bi / 7;
-            if (!_edgePointActive(data, edge, bi - edge * 7)) continue;
-            grown++;
-            glow = string.concat(glow, _treeStrands(data, bi, false, layout));
-            core = string.concat(core, _treeStrands(data, bi, true, layout));
-            tips = string.concat(tips, _treeTips(data, bi, layout));
         }
         if (bytes(core).length == 0) return "";
 

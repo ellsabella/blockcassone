@@ -19,12 +19,12 @@ import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 contract CubeFrameLayer {
     using Strings for uint256;
 
-    function render(bytes32 seed, uint256 srcId, uint256 layout, uint256 axis)
+    function render(bytes32 seed, uint256, uint256 layout, uint256 axis)
         external
         pure
         returns (string memory)
     {
-        return string.concat(_frameStrokes(layout, axis), _frameNodes(seed, srcId, layout));
+        return string.concat(_frameStrokes(layout, axis), _frameNodes(seed, layout));
     }
 
     // The border line, one path per depth tier (no street accents).
@@ -41,7 +41,7 @@ contract CubeFrameLayer {
         );
     }
 
-    function _frameNodes(bytes32 seed, uint256 srcId, uint256 layout)
+    function _frameNodes(bytes32 seed, uint256 layout)
         private
         pure
         returns (string memory)
@@ -49,19 +49,22 @@ contract CubeFrameLayer {
         // fill:#fff hoisted to the outer group; tier groups carry the filter.
         return string.concat(
             '<g fill="#fff">',
-            '<g filter="url(#h)">', _nodeTier(seed, srcId, layout, 0), "</g>",
-            '<g filter="url(#p)">', _nodeTier(seed, srcId, layout, 1), "</g>",
-            '<g filter="url(#g)">', _nodeTier(seed, srcId, layout, 2), "</g>",
-            _nodeTier(seed, srcId, layout, 3),
+            '<g filter="url(#h)">', _nodeTier(seed, layout, 0), "</g>",
+            '<g filter="url(#p)">', _nodeTier(seed, layout, 1), "</g>",
+            '<g filter="url(#g)">', _nodeTier(seed, layout, 2), "</g>",
+            _nodeTier(seed, layout, 3),
             "</g>"
         );
     }
 
-    function _nodeTier(bytes32 seed, uint256 srcId, uint256 layout, uint256 tier)
+    function _nodeTier(bytes32 seed, uint256 layout, uint256 tier)
         private
         pure
         returns (string memory)
     {
+        // An orb at every PLACED sub (this-plane- or neighbour-owned). The forest
+        // layer grows strands only on the subset this plane owns; the rest stay
+        // bare orbs (the visual tell that the point belongs to the adjacent face).
         string memory s = string.concat(
             _nodeCircle(100, 85, 14, tier),
             _nodeCircle(1100, 85, 14, tier),
@@ -69,8 +72,9 @@ contract CubeFrameLayer {
             _nodeCircle(100, 1085, 14, tier)
         );
         for (uint256 edge = 0; edge < 3; edge++) {
+            (uint256 orbMask,) = _sidePlan(seed, edge);
             for (uint256 bit = 0; bit < 7; bit++) {
-                if (!_active(seed, srcId, edge, bit)) continue;
+                if (((orbMask >> bit) & 1) == 0) continue;
                 (uint256 x, uint256 y) = _coord(layout, edge, bit);
                 s = string.concat(s, _nodeCircle(x, y, _horiz(layout, edge) ? 9 : 13, tier));
             }
@@ -118,13 +122,35 @@ contract CubeFrameLayer {
         return "#ffe619"; // yellow (opp blue)
     }
 
-    // --- shared edge-point math (active points = node positions) ---
-    function _active(bytes32 seed, uint256 srcId, uint256 edge, uint256 bit)
+    // --- shared edge-point plan (orbs + ownership) ----------------------------
+    // Per side, pick 2..6 of the 7 sub-slots as orbs, then assign ownership.
+    // h = keccak(seed, canonical-edge-id): keyed on the cube seed (per-cube
+    // variation) and the edge's canonical identity (2-3 / 3-4 / 4-5) so the two
+    // faces sharing an edge resolve the SAME plan -> a sub is owned by exactly one
+    // plane, never both. strandMask is the subset this (the unique) plane owns:
+    // the own edge (3-4) sprouts every orb; shared edges sprout only owner-bit-1.
+    // MUST stay byte-for-byte identical to the orchestrator's copy and the JS
+    // viewer's selector, or 2D/3D diverge.
+    function _sidePlan(bytes32 seed, uint256 edge)
         private
         pure
-        returns (bool)
+        returns (uint256 orbMask, uint256 strandMask)
     {
-        return uint256(keccak256(abi.encodePacked(seed, srcId, edge, bit))) % 3 != 0;
+        uint256 canon = edge == 0 ? 23 : (edge == 1 ? 34 : 45);
+        uint256 h = uint256(keccak256(abi.encodePacked(seed, canon)));
+        uint256 count = 2 + (h & 0xff) % 5; // 2..6 orbs on this side
+        uint256 placed;
+        for (uint256 i = 0; i < 7; i++) {
+            uint256 needed = count - placed;
+            // exact sequential selection: include slot i with prob needed/remaining
+            if ((((h >> (8 + i * 8)) & 0xff) % (7 - i)) < needed) {
+                orbMask |= (1 << i);
+                placed++;
+                if (edge == 1 || ((h >> (72 + i)) & 1) == 1) {
+                    strandMask |= (1 << i); // own edge, or plane-1 owns this shared sub
+                }
+            }
+        }
     }
 
     function _coord(uint256 layout, uint256 edge, uint256 bit)
