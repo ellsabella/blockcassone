@@ -417,9 +417,9 @@ contract CubeThumbnailRendererV1 {
     // fixed-point (band/mult/falloff/variety/intensity x1000; light field x10000)
     // and was validated against the float prototype before porting.
     // Glass count/placement dials (see _glassLayer).
-    uint256 private constant GLASS_CONVERGE_MIN = 4; // neigh8 >= this counts as convergent
-    uint256 private constant GLASS_GAIN = 30;        // % of convergent-cell count -> target glass cells (density dial)
-    uint256 private constant GLASS_TINT = 45;        // % of the light-field hue kept; rest blended to cool neutral
+    uint256 private constant GLASS_CONVERGE_MIN = 4;  // neigh8 >= this counts as convergent
+    uint256 private constant GLASS_GAIN = 45;         // % of convergent-cell count -> target glass cells (density dial)
+    uint256 private constant GLASS_SPARKLE_MIN = 220; // intensity above this gets a white highlight dot
 
     function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
@@ -482,7 +482,7 @@ contract CubeThumbnailRendererV1 {
         returns (uint256 v)
     {
         uint256 nb = _neigh8(raw, col, row); // 0..8 on-neighbours
-        v = 90 + nb * 26; // 90 (sparse) .. 298 (dense) — translucent; denser a touch brighter
+        v = 90 + nb * 30; // 90 (sparse) .. 330 (dense) — denser cells brighter; brightest get a sparkle
         uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
         v = v * variety / 1000;
     }
@@ -490,30 +490,36 @@ contract CubeThumbnailRendererV1 {
     function _glassRect(uint256 col, uint256 row, uint256 intensity)
         private
         pure
-        returns (string memory)
+        returns (string memory rect)
     {
         (string memory fill, string memory stroke) = _glassColors(col, row);
         uint256 bodyOp = intensity > 880 ? 880 : intensity;
-        return string.concat(
+        uint256 sop = intensity * 2 > 1000 ? 1000 : intensity * 2; // rim glow ~2x the fill
+        rect = string.concat(
             '<rect x="', (100 + col * 25 + 2).toString(), '" y="', (85 + row * 25 + 2).toString(),
             '" width="21" height="21" fill="rgb(', fill, ')" fill-opacity="', _dec2(bodyOp),
-            '" stroke="rgb(', stroke, ')" stroke-opacity="', _dec2(intensity / 2), '"/>'
+            '" stroke="rgb(', stroke, ')" stroke-opacity="', _dec2(sop), '"/>'
+        );
+        // White highlight dot on the brighter cells — the prototype's "sparkle".
+        if (intensity > GLASS_SPARKLE_MIN) rect = string.concat(rect, _glassSparkle(col, row));
+    }
+
+    function _glassSparkle(uint256 col, uint256 row) private pure returns (string memory) {
+        return string.concat(
+            '<circle cx="', (100 + col * 25 + 8).toString(), '" cy="', (85 + row * 25 + 8).toString(),
+            '" r="1.1" fill="#fff" opacity=".5"/>'
         );
     }
 
-    // Fill + stroke "r,g,b" strings for a glass cell. Keeps only GLASS_TINT% of
-    // the light-field hue, blending the rest toward a cool neutral so the glass
-    // tints subtly instead of glowing in full colour. Split out of _glassRect to
-    // keep that frame shallow (no via-IR).
+    // Fill + stroke "r,g,b" strings for a glass cell — the full saturated
+    // light-field hue (matches the prototype). Split out of _glassRect to keep
+    // that frame shallow (no via-IR).
     function _glassColors(uint256 col, uint256 row)
         private
         pure
         returns (string memory fill, string memory stroke)
     {
         (uint256 R, uint256 G, uint256 B) = _lightColor(100 + col * 25 + 12, 85 + row * 25 + 12);
-        R = R * GLASS_TINT / 100 + 205 * (100 - GLASS_TINT) / 100;
-        G = G * GLASS_TINT / 100 + 214 * (100 - GLASS_TINT) / 100;
-        B = B * GLASS_TINT / 100 + 232 * (100 - GLASS_TINT) / 100;
         fill = string.concat(R.toString(), ",", G.toString(), ",", B.toString());
         stroke = string.concat(_lerp255(R), ",", _lerp255(G), ",", _lerp255(B));
     }
