@@ -8,6 +8,8 @@ import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
+import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
+import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
 contract RendererV2MockNormies is ERC721 {
@@ -41,7 +43,13 @@ contract CubeRendererV2Test is Test {
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
-        thumbnailRenderer = new CubeThumbnailRendererV1(cubes, address(normies), address(0));
+        thumbnailRenderer = new CubeThumbnailRendererV1(
+            cubes,
+            address(normies),
+            address(0),
+            address(new CubeHilbertGeometry()),
+            address(new CubeFrameLayer())
+        );
         renderer = new CubeRendererV2(cubes, assets, address(normies), address(thumbnailRenderer));
 
         bytes memory raw = new bytes(200);
@@ -98,7 +106,9 @@ contract CubeRendererV2Test is Test {
         // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green (#38ff4d).
         // (Was #ff1919 under the old slot%3 rule; now uses the unique-axis colour.)
         assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#38ff4d"'));
-        assertTrue(_contains(svg, '<path d="M100 85H1100V1085H100"'));
+        // Frame border now traces the motif's unique-plane sides (slot 1734 -> TRB,
+        // open left) as separate subpaths rather than the old fixed square path.
+        assertTrue(_contains(svg, '<path d="M100 85H1100M1100 85V1085M100 1085H1100"'));
         assertTrue(_contains(svg, '<path id="l" d='));
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="14"'));
         assertTrue(_contains(svg, '<filter id="h"'));

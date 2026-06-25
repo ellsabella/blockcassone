@@ -12,17 +12,42 @@ interface IThumbnailNonNormieArtStore {
     function payloadForCube(uint256 cubeId) external view returns (bytes memory);
 }
 
+// Swappable render modules (see contracts/src/render/). The orchestrator holds
+// their addresses immutably; swapping a layer = deploy the new module + redeploy
+// this thin orchestrator pointing at it + cubes.setRenderer(...).
+interface ICubeHilbertGeometry {
+    function motifLayout(uint256 slot) external pure returns (uint256);
+    function mainAxis(uint256 slot) external pure returns (uint256);
+}
+
+interface ICubeFrameLayer {
+    function render(bytes32 seed, uint256 srcId, uint256 layout, uint256 axis)
+        external
+        pure
+        returns (string memory);
+}
+
 contract CubeThumbnailRendererV1 {
     using Strings for uint256;
 
     CubeNFT public immutable cubes;
     address public immutable normieStorage;
     address public immutable nonNormieStore;
+    ICubeHilbertGeometry public immutable geometry;
+    ICubeFrameLayer public immutable frame;
 
-    constructor(CubeNFT cubes_, address normieStorage_, address nonNormieStore_) {
+    constructor(
+        CubeNFT cubes_,
+        address normieStorage_,
+        address nonNormieStore_,
+        address geometry_,
+        address frame_
+    ) {
         cubes = cubes_;
         normieStorage = normieStorage_;
         nonNormieStore = nonNormieStore_;
+        geometry = ICubeHilbertGeometry(geometry_);
+        frame = ICubeFrameLayer(frame_);
     }
 
     function thumbnailSVG(uint256 tokenId) public view returns (string memory) {
@@ -31,16 +56,25 @@ contract CubeThumbnailRendererV1 {
         string memory labelPath = _labelPath(data.sourceTokenId);
         string memory bitmapPath = _bitmapPath(raw);
         string memory outlinePath = _outlinePath(raw, data.sourceTokenId);
-        string memory planeColor = _planeColor(data);
+        uint256 axis = geometry.mainAxis(uint256(data.slot));
+        uint256 layout = geometry.motifLayout(uint256(data.slot));
+        string memory planeColor = _colour(axis);
         return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
-            _thumbnailDefs(bitmapPath, outlinePath, labelPath),
-            _forestLayer(data, planeColor),
+            _thumbnailDefs(bitmapPath, outlinePath, labelPath, axis, planeColor),
+            _forestLayer(data, planeColor, layout),
             _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
-            _thumbnailPlaneFrame(data, planeColor),
+            _glassLayer(raw, data.sourceTokenId),
+            frame.render(data.seed, data.sourceTokenId, layout, axis),
             "</svg>"
         );
+    }
+
+    function _colour(uint256 axis) private pure returns (string memory) {
+        if (axis == 0) return "#ff1919"; // x -> red
+        if (axis == 1) return "#38ff4d"; // y -> green
+        return "#244cff"; // z -> blue
     }
 
     // Returns a 200-byte (40x40, 1 bit/cell) binary silhouette for either source
@@ -84,7 +118,28 @@ contract CubeThumbnailRendererV1 {
         }
         return out;
     }
-    function _thumbnailDefs(string memory bitmapPath, string memory outlinePath, string memory labelPath)
+    // Build a diagonal feColorMatrix "values" string that boosts the cube's own
+    // colour channel (axis 0=R,1=G,2=B) by `dom` and the other two by `sec`, with
+    // alpha `a`. This makes the neon glow saturate in the cube's hue (red cubes
+    // glow red, blue glow blue) instead of washing toward white.
+    function _neonVals(uint256 axis, string memory dom, string memory sec, string memory a)
+        private
+        pure
+        returns (string memory)
+    {
+        string memory r = axis == 0 ? dom : sec;
+        string memory g = axis == 1 ? dom : sec;
+        string memory b = axis == 2 ? dom : sec;
+        return string.concat(r, " 0 0 0 0 0 ", g, " 0 0 0 0 0 ", b, " 0 0 0 0 0 ", a, " 0");
+    }
+
+    function _thumbnailDefs(
+        string memory bitmapPath,
+        string memory outlinePath,
+        string memory labelPath,
+        uint256 axis,
+        string memory planeColor
+    )
         private
         pure
         returns (string memory)
@@ -117,11 +172,11 @@ contract CubeThumbnailRendererV1 {
             "</filter>",
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".26" result="r"/>',
-            '<feColorMatrix in="r" type="matrix" values="10 0 0 0 0 0 3.2 0 0 0 0 0 3.2 0 0 0 0 0 .92 0" result="rc"/>',
+            '<feColorMatrix in="r" type="matrix" values="', _neonVals(axis, "9", "1.8", ".92"), '" result="rc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="8 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .38 0" result="tc"/>',
+            '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "7", "1.4", ".38"), '" result="tc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".74" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 1.4 0 0 0 0 0 1.4 0 0 0 0 0 .025 0" result="mc"/>',
+            '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "4.5", "1", ".025"), '" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             '<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
@@ -135,27 +190,28 @@ contract CubeThumbnailRendererV1 {
             "</filter>",
             '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/>',
+            '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "6", "1.8", "1"), '" result="tc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/>',
+            '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "4", "1.3", ".62"), '" result="mc"/>',
             '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
             "</filter>",
             // Forest particle clouds: feTurbulence masked, coloured by the source
             // (so red/green/blue cubes get matching particles), then bloomed.
-            '<filter id="pc" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
-            '<feTurbulence type="fractalNoise" baseFrequency="0.45" numOctaves="2" seed="7" result="noise"/>',
-            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.2 -1.05" result="mask"/>',
+            '<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">',
+            '<feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/>',
+            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/>',
             '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
-            '<feGaussianBlur in="clip" stdDeviation="4" result="glow"/>',
-            '<feMerge><feMergeNode in="glow"/><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
+            '<feGaussianBlur in="clip" stdDeviation="5" result="gr"/>',
+            // dim the clipped speckle so the cloud is soft, not a dense blob
+            '<feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/>',
+            '<feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge>',
             "</filter>",
-            '<filter id="pcw" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">',
-            '<feTurbulence type="fractalNoise" baseFrequency="0.42" numOctaves="2" seed="19" result="noise"/>',
-            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 3.6 -2.25" result="mask"/>',
-            '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
-            '<feGaussianBlur in="clip" stdDeviation="1.6" result="glow"/>',
-            '<feMerge><feMergeNode in="glow"/><feMergeNode in="clip"/></feMerge>',
-            "</filter>",
+            // Soft radial gradient filling the forest particle clouds: fades to
+            // transparent so the turbulence speckles read as a soft diffuse cloud
+            // (not a hard blob). Plane colour; no white sparkle pass.
+            '<radialGradient id="cg"><stop offset="0" stop-color="', planeColor, '" stop-opacity=".82"/>',
+            '<stop offset=".4" stop-color="', planeColor, '" stop-opacity=".36"/>',
+            '<stop offset="1" stop-color="', planeColor, '" stop-opacity="0"/></radialGradient>',
             '<path id="n" d="',
             bitmapPath,
             '"/>',
@@ -199,9 +255,6 @@ contract CubeThumbnailRendererV1 {
             '<use href="#o" fill="none" stroke="',
             planeColor,
             '" stroke-width=".27" opacity=".95" filter="url(#gf)"/>',
-            '<use href="#o" fill="none" stroke="',
-            planeColor,
-            '" stroke-width=".20" opacity="1"/>',
             '<use href="#o" fill="none" stroke="#fff" stroke-width=".026" opacity=".92"/>',
             bytes(labelPath).length == 0
                 ? ""
@@ -216,209 +269,87 @@ contract CubeThumbnailRendererV1 {
         );
     }
 
-    function _thumbnailPlaneFrame(CubeNFT.CubeData memory data, string memory planeColor)
+
+
+    function _edgePointCoord(uint256 layout, uint256 edge, uint256 bit)
         private
         pure
-        returns (string memory)
+        returns (uint256 x, uint256 y)
     {
-        return string.concat(_planeEdges(data, planeColor), _edgePoints(data));
+        uint256 d = (bit + 1) * 125;
+        uint256 e3 = (layout >> (edge * 3)) & 7;
+        if ((e3 & 1) != 0) {
+            // horizontal side: const y (top/bottom), x varies
+            y = (e3 & 2) != 0 ? 85 : 1085;
+            x = (e3 & 4) != 0 ? 100 + d : 1100 - d;
+        } else {
+            // vertical side: const x (left/right), y varies
+            x = (e3 & 2) != 0 ? 1100 : 100;
+            y = (e3 & 4) != 0 ? 1085 - d : 85 + d;
+        }
     }
 
-    function _planeEdges(CubeNFT.CubeData memory data, string memory planeColor)
+    // Per-side edge-point plan: orbs (2..6 of 7) + which subset THIS plane owns.
+    // Keyed on the cube seed (per-cube variation) + the edge's canonical id so the
+    // two faces of a shared edge agree (never-both). MUST stay byte-for-byte
+    // identical to CubeFrameLayer._sidePlan and the JS viewer's selector.
+    function _sidePlan(bytes32 seed, uint256 edge)
         private
         pure
-        returns (string memory)
+        returns (uint256 orbMask, uint256 strandMask)
     {
-        return string.concat(
-            '<g fill="none" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision">',
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "12", ".12", "url(#h)"),
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "7.5", ".32", "url(#p)"),
-            _svgPath("M100 85H1100V1085H100", "#38ff4d", "5.2", ".92", "url(#g)"),
-            _svgPath("M100 85H1100V1085H100", "#8dff98", "3.4", ".98", ""),
-            _svgPath("M100 85H1100V1085H100", "#fff", "1.65", ".55", ""),
-            _edgeAccents(data, planeColor),
-            "</g>"
-        );
-    }
-
-    function _edgePoints(CubeNFT.CubeData memory data)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory out = "";
-        for (uint256 edge = 0; edge < 3; edge++) {
-            for (uint256 bit = 0; bit < 7; bit++) {
-                if (!_edgePointActive(data, edge, bit)) continue;
-                (uint256 x, uint256 y) = _edgePointCoord(edge, bit);
-                out = string.concat(out, _edgePoint(x, y, "#fff", edge == 1 ? "13" : "9"));
+        uint256 canon = edge == 0 ? 23 : (edge == 1 ? 34 : 45);
+        uint256 h = uint256(keccak256(abi.encodePacked(seed, canon)));
+        uint256 count = 2 + (h & 0xff) % 5; // 2..6 orbs on this side
+        uint256 placed;
+        for (uint256 i = 0; i < 7; i++) {
+            uint256 needed = count - placed;
+            if ((((h >> (8 + i * 8)) & 0xff) % (7 - i)) < needed) {
+                orbMask |= (1 << i);
+                placed++;
+                if (edge == 1 || ((h >> (72 + i)) & 1) == 1) {
+                    strandMask |= (1 << i);
+                }
             }
         }
-        return string.concat(
-            '<g>',
-            _edgePoint(100, 85, "#fff", "14"),
-            _edgePoint(1100, 85, "#fff", "14"),
-            _edgePoint(1100, 1085, "#fff", "14"),
-            _edgePoint(100, 1085, "#fff", "14"),
-            out,
-            "</g>"
-        );
     }
 
-    function _edgeAccents(CubeNFT.CubeData memory data, string memory planeColor)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory out = "";
-        for (uint256 edge = 0; edge < 3; edge++) {
-            for (uint256 bit = 0; bit < 7; bit++) {
-                if (!_edgePointActive(data, edge, bit)) continue;
-                (uint256 x, uint256 y) = _edgePointCoord(edge, bit);
-                out = string.concat(out, _edgeAccent(edge, x, y, planeColor));
+    // --- O(n) string builder ---------------------------------------------------
+    // Repeated `s = string.concat(s, piece)` in the dense per-cell path loops is
+    // O(n^2) (each append re-copies the whole growing string) and is the main
+    // MemoryOOG risk for detailed Normies. These helpers append into a pre-sized
+    // bytes buffer in O(total length). The caller MUST reserve `cap` >= total
+    // appended bytes + 32: the word-aligned copy can write up to 31 bytes of slack
+    // past the logical end, which must stay inside the reserved buffer.
+    function _bufNew(uint256 cap) private pure returns (bytes memory buf) {
+        buf = new bytes(cap); // zero-filled; capacity reserved past the length word
+        assembly {
+            mstore(buf, 0) // logical length starts at 0 (capacity stays allocated)
+        }
+    }
+
+    function _bufCat(bytes memory buf, string memory piece) private pure {
+        assembly {
+            let len := mload(buf)
+            let plen := mload(piece)
+            let dst := add(add(buf, 0x20), len)
+            let src := add(piece, 0x20)
+            for { let i := 0 } lt(i, plen) { i := add(i, 0x20) } {
+                mstore(add(dst, i), mload(add(src, i)))
             }
+            mstore(buf, add(len, plen)) // advance logical length
         }
-        return out;
     }
 
-    function _edgeAccent(uint256 edge, uint256 x, uint256 y, string memory planeColor)
-        private
-        pure
-        returns (string memory)
-    {
-        planeColor;
-        if (edge == 1) return _edgeAccentV(x, y);
-        return _edgeAccentH(x, y);
-    }
-
-    function _edgeAccentH(uint256 x, uint256 y) private pure returns (string memory) {
-        uint256 d = 96;
-        uint256 x0 = x > d ? x - d : x;
-        uint256 x1 = x + d;
-        string memory path = string.concat("M", x0.toString(), " ", y.toString(), "H", x1.toString());
-        return string.concat(
-            _svgPath(path, "#ff1ba6", "12", ".18", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "7.5", ".46", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "5.2", ".98", "url(#g)"),
-            _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
-            _svgPath(path, "#ffc0ea", "1.65", ".46", "")
-        );
-    }
-
-    function _edgeAccentV(uint256 x, uint256 y) private pure returns (string memory) {
-        uint256 d = 96;
-        uint256 y0 = y > d ? y - d : y;
-        uint256 y1 = y + d;
-        string memory path = string.concat("M", x.toString(), " ", y0.toString(), "V", y1.toString());
-        return string.concat(
-            _svgPath(path, "#ff1ba6", "12", ".18", "url(#h)"),
-            _svgPath(path, "#ff1ba6", "7.5", ".46", "url(#p)"),
-            _svgPath(path, "#ff3ab8", "5.2", ".98", "url(#g)"),
-            _svgPath(path, "#ff2aa8", "3.4", ".98", ""),
-            _svgPath(path, "#ffc0ea", "1.65", ".46", "")
-        );
-    }
-
-    function _svgPath(
-        string memory d,
-        string memory color,
-        string memory width,
-        string memory opacity,
-        string memory filter
-    )
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<path d="',
-            d,
-            '" stroke="',
-            color,
-            '" stroke-width="',
-            width,
-            '" opacity="',
-            opacity,
-            '" stroke-linecap="round" stroke-linejoin="round"',
-            bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
-            "/>"
-        );
-    }
-
-    function _edgePoint(uint256 x, uint256 y, string memory color, string memory radius)
-        private
-        pure
-        returns (string memory)
-    {
-        uint256 r = _parseSmallUint(radius);
-        return string.concat(
-            _circle(x, y, (r * 2).toString(), color, ".12", "url(#h)"),
-            _circle(x, y, ((r * 3) / 2).toString(), color, ".30", "url(#p)"),
-            _circle(x, y, radius, color, ".62", "url(#g)"),
-            _circle(x, y, (r / 2 + 3).toString(), "#fff", ".38", "url(#g)"),
-            _circle(x, y, (r / 3 + 2).toString(), "#fff", ".76", "")
-        );
-    }
-
-    function _circle(
-        uint256 x,
-        uint256 y,
-        string memory radius,
-        string memory color,
-        string memory opacity,
-        string memory filter
-    )
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<circle cx="',
-            x.toString(),
-            '" cy="',
-            y.toString(),
-            '" r="',
-            radius,
-            '" fill="',
-            color,
-            '" opacity="',
-            opacity,
-            '"',
-            bytes(filter).length == 0 ? "" : string.concat(' filter="', filter, '"'),
-            "/>"
-        );
-    }
-
-    function _parseSmallUint(string memory value) private pure returns (uint256) {
-        bytes memory b = bytes(value);
-        uint256 out = 0;
-        for (uint256 i = 0; i < b.length; i++) {
-            uint8 c = uint8(b[i]);
-            if (c < 48 || c > 57) continue;
-            out = out * 10 + (c - 48);
-        }
-        return out == 0 ? 1 : out;
-    }
-
-    function _edgePointCoord(uint256 edge, uint256 bit) private pure returns (uint256 x, uint256 y) {
-        uint256 t = (bit + 1) * 125;
-        if (edge == 0) return (100 + t, 85);
-        if (edge == 1) return (1100, 85 + t);
-        return (1100 - t, 1085);
-    }
-
-    function _edgePointActive(CubeNFT.CubeData memory data, uint256 edge, uint256 bit)
-        private
-        pure
-        returns (bool)
-    {
-        return uint256(keccak256(abi.encodePacked(data.seed, data.sourceTokenId, edge, bit))) % 3 != 0;
+    function _bufStr(bytes memory buf) private pure returns (string memory) {
+        return string(buf);
     }
 
     function _bitmapPath(bytes memory raw) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
-        string memory path = "";
+        // <= 40 rows * 20 runs * ~15 bytes/run; 24KB leaves ample slack.
+        bytes memory buf = _bufNew(24576);
         for (uint256 row = 0; row < 40; row++) {
             uint256 col = 0;
             while (col < 40) {
@@ -432,46 +363,249 @@ contract CubeThumbnailRendererV1 {
                     col++;
                 }
 
-                path = string.concat(
-                    path,
-                    "M",
-                    start.toString(),
-                    " ",
-                    row.toString(),
-                    "h",
-                    (col - start).toString(),
-                    "v1H",
-                    start.toString(),
-                    "z"
+                _bufCat(
+                    buf,
+                    string.concat(
+                        "M",
+                        start.toString(),
+                        " ",
+                        row.toString(),
+                        "h",
+                        (col - start).toString(),
+                        "v1H",
+                        start.toString(),
+                        "z"
+                    )
                 );
             }
         }
-        return path;
+        return _bufStr(buf);
     }
 
     function _outlinePath(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
-        string memory path = "";
+        // <= 1600 cells * 4 edges * 8 bytes = 51200; 64KB leaves ample slack.
+        bytes memory buf = _bufNew(65536);
         for (uint256 row = 0; row < 40; row++) {
             for (uint256 col = 0; col < 40; col++) {
                 if (!_bitmapBit(raw, row * 40 + col)) continue;
                 if (_isLabelCell(normieId, row, col)) continue;
                 if (!_bitmapBitAt(raw, row, col, 0, -1)) {
-                    path = string.concat(path, "M", col.toString(), " ", row.toString(), "v1");
+                    _bufCat(buf, string.concat("M", col.toString(), " ", row.toString(), "v1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, 0, 1)) {
-                    path = string.concat(path, "M", (col + 1).toString(), " ", row.toString(), "v1");
+                    _bufCat(buf, string.concat("M", (col + 1).toString(), " ", row.toString(), "v1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, -1, 0)) {
-                    path = string.concat(path, "M", col.toString(), " ", row.toString(), "h1");
+                    _bufCat(buf, string.concat("M", col.toString(), " ", row.toString(), "h1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, 1, 0)) {
-                    path = string.concat(path, "M", col.toString(), " ", (row + 1).toString(), "h1");
+                    _bufCat(buf, string.concat("M", col.toString(), " ", (row + 1).toString(), "h1"));
                 }
             }
         }
-        return path;
+        return _bufStr(buf);
+    }
+
+    // --- Glass voxel cells -----------------------------------------------------
+    // Infill some Normie cells with luminous translucent panes, the way the 3D
+    // viewer assigns voxel alpha: 3x3 density bands -> interior dimming -> centre
+    // falloff -> per-cell variety -> visibility floor. Colour comes from a static
+    // RGB light field (red upper-right, green lower-left, blue top), saturated
+    // near a single light and blooming to white where they overlap. All maths is
+    // fixed-point (band/mult/falloff/variety/intensity x1000; light field x10000)
+    // and was validated against the float prototype before porting.
+    function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
+        if (raw.length != 200) return "";
+        (uint256 cMin, uint256 cMax, uint256 rMin, uint256 rMax, bool any) = _bbox(raw);
+        if (!any) return "";
+
+        // Cap the cell count so a pathological/noisy bitmap can't overflow the
+        // fixed buffer. A real coherent silhouette keeps far fewer than this
+        // (the prototype #1250 kept ~120); 600 * ~190 bytes/cell < the 128KB cap.
+        bytes memory buf = _bufNew(131072);
+        _bufCat(buf, '<g filter="url(#g)" stroke-width="1.6">');
+        uint256 kept = 0;
+        for (uint256 row = 0; row < 40 && kept < 600; row++) {
+            for (uint256 col = 0; col < 40 && kept < 600; col++) {
+                if (!_bitmapBit(raw, row * 40 + col)) continue;
+                if (_isLabelCell(normieId, row, col)) continue;
+                uint256 intensity = _glassIntensity(raw, col, row, cMin, cMax, rMin, rMax);
+                if (intensity < 80) continue; // floor raised 70->80: ~10% fewer cells (drops the dimmest)
+                _bufCat(buf, _glassRect(col, row, intensity));
+                kept++;
+            }
+        }
+        _bufCat(buf, "</g>");
+        return _bufStr(buf);
+    }
+
+    // intensity (x1000) = bandAlpha * interiorMult * falloff * variety / 1e9.
+    // Built incrementally (v = v * factor / 1000) to keep the stack shallow.
+    function _glassIntensity(
+        bytes memory raw,
+        uint256 col,
+        uint256 row,
+        uint256 cMin,
+        uint256 cMax,
+        uint256 rMin,
+        uint256 rMax
+    )
+        private
+        pure
+        returns (uint256 v)
+    {
+        {
+            uint256 nb = _neigh8(raw, col, row); // 3x3 on-count (excl. centre)
+            uint256 band = nb <= 1 ? 0 : (nb - 1 > 6 ? 6 : nb - 1);
+            v = _bandAlpha(band);
+        }
+        {
+            uint256 interiorSum = _cellOn(raw, int256(col) - 1, int256(row))
+                + _cellOn(raw, int256(col) + 1, int256(row))
+                + _cellOn(raw, int256(col), int256(row) - 1)
+                + _cellOn(raw, int256(col), int256(row) + 1);
+            v = v * _interiorMult(interiorSum) / 1000;
+        }
+        {
+            uint256 tA = cMax > cMin ? 1000 * _absd(2 * col, cMin + cMax) / (cMax - cMin) : 0;
+            uint256 tB = rMax > rMin ? 1000 * _absd(2 * row, rMin + rMax) / (rMax - rMin) : 0;
+            uint256 t = tA > tB ? tA : tB;
+            uint256 sub = 850 * t / 1000;
+            v = v * (sub >= 850 ? 50 : 900 - sub) / 1000;
+        }
+        {
+            uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
+            v = v * variety / 1000;
+        }
+    }
+
+    function _glassRect(uint256 col, uint256 row, uint256 intensity)
+        private
+        pure
+        returns (string memory rect)
+    {
+        uint256 x = 100 + col * 25 + 2;
+        uint256 y = 85 + row * 25 + 2;
+        (uint256 R, uint256 G, uint256 B) = _lightColor(100 + col * 25 + 12, 85 + row * 25 + 12);
+        uint256 op = intensity * 2 > 1000 ? 1000 : intensity * 2;
+        uint256 bodyOp = intensity > 880 ? 880 : intensity;
+        rect = string.concat(
+            '<rect x="', x.toString(), '" y="', y.toString(), '" width="21" height="21" fill="rgb(',
+            R.toString(), ",", G.toString(), ",", B.toString(), ')" fill-opacity="', _dec2(bodyOp),
+            '" stroke="rgb(', _lerp255(R), ",", _lerp255(G), ",", _lerp255(B),
+            ')" stroke-opacity="', _dec2(op), '"/>'
+        );
+        if (intensity > 500) {
+            rect = string.concat(
+                rect,
+                '<circle cx="', (x + 6).toString(), '" cy="', (y + 6).toString(),
+                '" r="1.1" fill="#fff" opacity="', _dec2(op / 2), '"/>'
+            );
+        }
+    }
+
+    // RGB light field at canvas (px,py). Each light contributes a = R^2/(R^2+d^2)
+    // to its channel (R=520). Saturate to the dominant hue, then blend toward
+    // white only where several lights strongly overlap.
+    function _lightColor(uint256 px, uint256 py)
+        private
+        pure
+        returns (uint256 R8, uint256 G8, uint256 B8)
+    {
+        uint256 r = _lightA(px, py, 1010, 300);
+        uint256 g = _lightA(px, py, 210, 770);
+        uint256 b = _lightA(px, py, 660, 120);
+        uint256 mx = r;
+        if (g > mx) mx = g;
+        if (b > mx) mx = b;
+        if (mx == 0) mx = 1;
+        uint256 R = r * 10000 / mx;
+        uint256 G = g * 10000 / mx;
+        uint256 B = b * 10000 / mx;
+        uint256 sum = r + g + b;
+        uint256 white = sum > 13000 ? (sum - 13000) / 2 : 0;
+        if (white > 10000) white = 10000;
+        R = R + (10000 - R) * white / 10000;
+        G = G + (10000 - G) * white / 10000;
+        B = B + (10000 - B) * white / 10000;
+        R8 = R * 255 / 10000;
+        G8 = G * 255 / 10000;
+        B8 = B * 255 / 10000;
+    }
+
+    function _lightA(uint256 px, uint256 py, uint256 lx, uint256 ly) private pure returns (uint256) {
+        uint256 dx = px > lx ? px - lx : lx - px;
+        uint256 dy = py > ly ? py - ly : ly - py;
+        return 270400 * 10000 / (270400 + dx * dx + dy * dy);
+    }
+
+    // bright hue-tinted rim: v lerped 30% toward 255.
+    function _lerp255(uint256 v) private pure returns (string memory) {
+        return (v + (255 - v) * 3 / 10).toString();
+    }
+
+    // Format an x1000 opacity fixed-point (0..1000) as an SVG decimal (".07", ".88", "1").
+    function _dec2(uint256 fp) private pure returns (string memory) {
+        if (fp >= 1000) return "1";
+        uint256 d = fp / 10;
+        return string.concat(".", d < 10 ? "0" : "", d.toString());
+    }
+
+    function _neigh8(bytes memory raw, uint256 col, uint256 row) private pure returns (uint256 nb) {
+        for (int256 dr = -1; dr <= 1; dr++) {
+            for (int256 dc = -1; dc <= 1; dc++) {
+                if (dr == 0 && dc == 0) continue;
+                nb += _cellOn(raw, int256(col) + dc, int256(row) + dr);
+            }
+        }
+    }
+
+    function _cellOn(bytes memory raw, int256 c, int256 r) private pure returns (uint256) {
+        if (c < 0 || c >= 40 || r < 0 || r >= 40) return 0;
+        return _bitmapBit(raw, uint256(r) * 40 + uint256(c)) ? 1 : 0;
+    }
+
+    function _bbox(bytes memory raw)
+        private
+        pure
+        returns (uint256 cMin, uint256 cMax, uint256 rMin, uint256 rMax, bool any)
+    {
+        cMin = 39;
+        rMin = 39;
+        for (uint256 row = 0; row < 40; row++) {
+            for (uint256 col = 0; col < 40; col++) {
+                if (!_bitmapBit(raw, row * 40 + col)) continue;
+                any = true;
+                if (col < cMin) cMin = col;
+                if (col > cMax) cMax = col;
+                if (row < rMin) rMin = row;
+                if (row > rMax) rMax = row;
+            }
+        }
+    }
+
+    function _bandAlpha(uint256 band) private pure returns (uint256) {
+        if (band == 0) return 1000;
+        if (band == 1) return 840;
+        if (band == 2) return 680;
+        if (band == 3) return 500;
+        if (band == 4) return 340;
+        if (band == 5) return 200;
+        return 80;
+    }
+
+    function _interiorMult(uint256 interiorSum) private pure returns (uint256) {
+        if (interiorSum == 0) return 1000;
+        if (interiorSum == 1) return 871;
+        if (interiorSum == 2) return 671;
+        if (interiorSum == 3) return 430;
+        return 160;
+    }
+
+    function _absd(uint256 a, uint256 b) private pure returns (uint256) {
+        return a > b ? a - b : b - a;
     }
 
     function _labelPath(uint256 normieId) private pure returns (string memory) {
@@ -555,39 +689,47 @@ contract CubeThumbnailRendererV1 {
 
     // Forest: thin inward strands from active edge points to a hub, branching to
     // tips; each tip carries a turbulence particle-cloud (colour + white passes).
-    function _forestLayer(CubeNFT.CubeData memory data, string memory planeColor)
+    function _forestLayer(CubeNFT.CubeData memory data, string memory planeColor, uint256 layout)
         private
         pure
         returns (string memory)
     {
-        string memory strands = "";
+        string memory glow = "";
+        string memory core = "";
         string memory tips = "";
-        for (uint256 bi = 0; bi < 21; bi++) {
-            uint256 edge = bi / 7;
-            if (!_edgePointActive(data, edge, bi - edge * 7)) continue;
-            if (_rand(data, bi + 999, 100) >= 58) continue;
-            strands = string.concat(strands, _treeStrands(data, bi));
-            tips = string.concat(tips, _treeTips(data, bi));
+        // Strands sprout only at sub-slots this plane OWNS (strandMask). Bare orbs
+        // (neighbour-owned, and empty slots) grow nothing — the frame layer draws
+        // those nodes. The 2..6 count + ownership split now do all the thinning,
+        // so no artificial cap.
+        for (uint256 edge = 0; edge < 3; edge++) {
+            (, uint256 strandMask) = _sidePlan(data.seed, edge);
+            for (uint256 bit = 0; bit < 7; bit++) {
+                if (((strandMask >> bit) & 1) == 0) continue;
+                uint256 bi = edge * 7 + bit;
+                glow = string.concat(glow, _treeStrands(data, bi, false, layout));
+                core = string.concat(core, _treeStrands(data, bi, true, layout));
+                tips = string.concat(tips, _treeTips(data, bi, layout));
+            }
         }
-        if (bytes(strands).length == 0) return "";
+        if (bytes(core).length == 0) return "";
 
+        // No white sparkle pass — the single coloured cloud reads cleaner.
         return string.concat(
             '<g fill="none" stroke="', planeColor,
-            '" stroke-width="1.4" opacity=".16" filter="url(#p)">', strands, "</g>",
+            '" stroke-width="1.4" opacity=".16" filter="url(#p)">', glow, "</g>",
             '<g fill="none" stroke="', planeColor,
-            '" stroke-width=".6" opacity=".4" filter="url(#g)">', strands, "</g>",
-            '<g fill="', planeColor, '" filter="url(#pc)">', tips, "</g>",
-            '<g fill="#fff" filter="url(#pcw)">', tips, "</g>"
+            '" stroke-width=".5" opacity=".5" filter="url(#g)">', core, "</g>",
+            '<g fill="url(#cg)" filter="url(#pc)">', tips, "</g>"
         );
     }
 
-    function _treeHub(CubeNFT.CubeData memory data, uint256 bi)
+    function _treeHub(CubeNFT.CubeData memory data, uint256 bi, uint256 layout)
         private
         pure
         returns (uint256 rootX, uint256 rootY, uint256 hubX, uint256 hubY)
     {
         uint256 edge = bi / 7;
-        (rootX, rootY) = _edgePointCoord(edge, bi - edge * 7);
+        (rootX, rootY) = _edgePointCoord(layout, edge, bi - edge * 7);
         uint256 trunkLen = 220 + _rand(data, bi + 80, 360);
         hubX = _inwardX(rootX, trunkLen, data, bi + 120);
         hubY = _inwardY(rootY, trunkLen, data, bi + 160);
@@ -603,26 +745,94 @@ contract CubeThumbnailRendererV1 {
         tipY = _offsetCanvas(hubY, data, bi + b * 73 + 320, len);
     }
 
-    function _treeStrands(CubeNFT.CubeData memory data, uint256 bi)
+    // bunch=false -> one curve per segment (used by the blurred glow layer).
+    // bunch=true  -> a 3-fibre bundle per segment (the visible core): fibres
+    // share a base curve, converge at the root and fan slightly at the tip.
+    function _treeStrands(CubeNFT.CubeData memory data, uint256 bi, bool bunch, uint256 layout)
         private
         pure
         returns (string memory)
     {
-        (uint256 rootX, uint256 rootY, uint256 hubX, uint256 hubY) = _treeHub(data, bi);
-        string memory s = _forestCurve(data, bi, rootX, rootY, hubX, hubY, 0);
+        (uint256 rootX, uint256 rootY, uint256 hubX, uint256 hubY) = _treeHub(data, bi, layout);
+        string memory s = bunch
+            ? _forestBunch(data, bi, rootX, rootY, hubX, hubY, 0)
+            : _forestCurve(data, bi, rootX, rootY, hubX, hubY, 0);
         for (uint256 b = 0; b < 3; b++) {
             (uint256 tipX, uint256 tipY) = _treeTip(data, bi, hubX, hubY, b);
-            s = string.concat(s, _forestCurve(data, bi, hubX, hubY, tipX, tipY, b + 1));
+            s = string.concat(
+                s,
+                bunch
+                    ? _forestBunch(data, bi, hubX, hubY, tipX, tipY, b + 1)
+                    : _forestCurve(data, bi, hubX, hubY, tipX, tipY, b + 1)
+            );
         }
         return s;
     }
 
-    function _treeTips(CubeNFT.CubeData memory data, uint256 bi)
+    // A bundle of 2 fibres between the same endpoints. Each fibre shares the base
+    // control points (same salt) and deviates by a small per-fibre jitter, so the
+    // bundle is tight (a "rope") rather than a wide fan.
+    function _forestBunch(
+        CubeNFT.CubeData memory data,
+        uint256 bi,
+        uint256 x1,
+        uint256 y1,
+        uint256 x2,
+        uint256 y2,
+        uint256 salt
+    )
+        private
+        pure
+        returns (string memory s)
+    {
+        for (uint256 f = 0; f < 2; f++) {
+            s = string.concat(s, _fibre(data, bi, x1, y1, x2, y2, salt, f));
+        }
+    }
+
+    function _fibre(
+        CubeNFT.CubeData memory data,
+        uint256 bi,
+        uint256 x1,
+        uint256 y1,
+        uint256 x2,
+        uint256 y2,
+        uint256 salt,
+        uint256 f
+    )
+        private
+        pure
+        returns (string memory p)
+    {
+        // Build the path progressively with block-scoped locals so no more than a
+        // couple of coordinates are live at once (avoids stack-too-deep without
+        // via-IR). inner _offsetCanvas = shared base control point (same for all
+        // fibres); outer = small per-fibre deviation (depends on f) -> tight bundle.
+        p = string.concat('<path d="M', x1.toString(), " ", y1.toString(), "C");
+        {
+            uint256 cx1 = _offsetCanvas(_offsetCanvas(_mix(x1, x2, 34), data, bi + salt * 29 + 170, 80), data, bi + salt * 7 + f * 97 + 500, 11);
+            uint256 cy1 = _offsetCanvas(_offsetCanvas(_mix(y1, y2, 34), data, bi + salt * 31 + 210, 80), data, bi + salt * 7 + f * 101 + 540, 11);
+            p = string.concat(p, cx1.toString(), " ", cy1.toString(), " ");
+        }
+        {
+            uint256 cx2 = _offsetCanvas(_offsetCanvas(_mix(x1, x2, 68), data, bi + salt * 37 + 250, 105), data, bi + salt * 7 + f * 103 + 580, 14);
+            uint256 cy2 = _offsetCanvas(_offsetCanvas(_mix(y1, y2, 68), data, bi + salt * 41 + 290, 105), data, bi + salt * 7 + f * 107 + 620, 14);
+            p = string.concat(p, cx2.toString(), " ", cy2.toString(), " ");
+        }
+        {
+            // first fibre hits the exact tip; the others fan a little around it.
+            uint256 ex = _offsetCanvas(x2, data, bi + f * 109 + 660, f == 0 ? 0 : 14);
+            uint256 ey = _offsetCanvas(y2, data, bi + f * 113 + 700, f == 0 ? 0 : 14);
+            p = string.concat(p, ex.toString(), " ", ey.toString(), '"/>');
+        }
+    }
+
+    function _treeTips(CubeNFT.CubeData memory data, uint256 bi, uint256 layout)
         private
         pure
         returns (string memory)
     {
-        (,, uint256 hubX, uint256 hubY) = _treeHub(data, bi);
+        (,, uint256 hubX, uint256 hubY) = _treeHub(data, bi, layout);
         string memory t = "";
         for (uint256 b = 0; b < 3; b++) {
             (uint256 tipX, uint256 tipY) = _treeTip(data, bi, hubX, hubY, b);
@@ -631,18 +841,46 @@ contract CubeThumbnailRendererV1 {
         return t;
     }
 
+    // Two elongated, rotated lumps (a main + a smaller offset one) per tip, so the
+    // turbulence cloud reads as an irregular organic cluster, not a uniform oval.
+    // The white sparkle pass was dropped, so this is net-neutral on element count.
     function _tipEllipse(CubeNFT.CubeData memory data, uint256 bi, uint256 b, uint256 x, uint256 y)
         private
         pure
         returns (string memory)
     {
-        uint256 rx = 28 + _rand(data, bi + b * 80 + 360, 38);
-        uint256 ry = 16 + _rand(data, bi + b * 90 + 420, 28);
-        uint256 rot = _rand(data, bi + b * 100 + 480, 180);
+        return string.concat(_lumpA(data, bi, b, x, y), _lumpB(data, bi, b, x, y));
+    }
+
+    // main lump at the tip (sizes computed inline to keep the stack shallow)
+    function _lumpA(CubeNFT.CubeData memory data, uint256 bi, uint256 b, uint256 x, uint256 y)
+        private
+        pure
+        returns (string memory)
+    {
         return string.concat(
             '<ellipse cx="', x.toString(), '" cy="', y.toString(),
-            '" rx="', rx.toString(), '" ry="', ry.toString(),
-            '" transform="rotate(', rot.toString(), " ", x.toString(), " ", y.toString(), ')"/>'
+            '" rx="', (38 + _rand(data, bi + b * 80 + 360, 30)).toString(),
+            '" ry="', (11 + _rand(data, bi + b * 90 + 420, 13)).toString(),
+            '" transform="rotate(', _rand(data, bi + b * 100 + 480, 180).toString(),
+            " ", x.toString(), " ", y.toString(), ')"/>'
+        );
+    }
+
+    // smaller offset lump -> irregular cluster
+    function _lumpB(CubeNFT.CubeData memory data, uint256 bi, uint256 b, uint256 x, uint256 y)
+        private
+        pure
+        returns (string memory)
+    {
+        uint256 ox = _offsetCanvas(x, data, bi + b * 31 + 540, 25);
+        uint256 oy = _offsetCanvas(y, data, bi + b * 37 + 580, 25);
+        return string.concat(
+            '<ellipse cx="', ox.toString(), '" cy="', oy.toString(),
+            '" rx="', (22 + _rand(data, bi + b * 41 + 620, 22)).toString(),
+            '" ry="', (7 + _rand(data, bi + b * 47 + 660, 10)).toString(),
+            '" transform="rotate(', _rand(data, bi + b * 53 + 700, 180).toString(),
+            " ", ox.toString(), " ", oy.toString(), ')"/>'
         );
     }
 
@@ -700,45 +938,6 @@ contract CubeThumbnailRendererV1 {
     {
         uint256 target = _mix(y, 585, 55);
         return _offsetCanvas(target, data, salt, len / 3);
-    }
-
-    // Hilbert world order (must match viewer/main.js HILBERT_ORDER). A cube's
-    // slot is its motif index in [0, 8^(ORDER-1)).
-    uint256 private constant HILBERT_ORDER = 5;
-
-    function _planeColor(CubeNFT.CubeData memory data) private pure returns (string memory) {
-        uint256 axis = _mainAxis(uint256(data.slot));
-        if (axis == 0) return "#ff1919"; // x -> red
-        if (axis == 1) return "#38ff4d"; // y -> green
-        return "#244cff";                // z -> blue
-    }
-
-    // The cube's "main" colour comes from its UNIQUE-axis plane (e.g. an XXY
-    // cube takes Y). Derived from the 3D Hilbert geometry: a motif's 3 plane
-    // axes are always [axis(C), axis(B), axis(C)], so the unique axis is always
-    // the B basis vector's axis. We find B's axis by walking the Hilbert octree
-    // (ORDER-1 levels) and tracking how the orientation basis (a,b,c) permutes
-    // per child. Verified to match core/hilbert.js for all motifs (orders 2-5).
-    function _mainAxis(uint256 motif) private pure returns (uint256) {
-        uint256 levels = HILBERT_ORDER - 1;
-        uint256 a = 0; // x
-        uint256 b = 1; // y
-        uint256 c = 2; // z
-        for (uint256 i = 0; i < levels; i++) {
-            uint256 d = (motif / (8 ** (levels - 1 - i))) % 8;
-            uint256 na;
-            uint256 nb;
-            uint256 nc;
-            if (d == 3 || d == 4) {
-                (na, nb, nc) = (a, b, c); // identity
-            } else if (d == 1 || d == 2 || d == 5 || d == 6) {
-                (na, nb, nc) = (c, a, b);
-            } else {
-                (na, nb, nc) = (b, c, a); // 0 or 7
-            }
-            (a, b, c) = (na, nb, nc);
-        }
-        return b;
     }
 
     function _mix(uint256 a, uint256 b, uint256 pct) private pure returns (uint256) {

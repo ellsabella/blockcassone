@@ -6,6 +6,8 @@ import { AgentStatusRegistry } from "../src/AgentStatusRegistry.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
+import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
+import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
@@ -83,7 +85,12 @@ contract DeployLocalGenesis is Script {
         uint256 sampleMints = vm.envOr("BLOCKCASSONE_SAMPLE_MINTS", uint256(8));
         bytes32 publicSeed = vm.envOr("BLOCKCASSONE_PUBLIC_SEED", keccak256("blockcassone-local"));
 
+        uint256 gasBefore = gasleft();
         Deployment memory d = _deploy(initialOwner, totalSlots, publicSeed);
+        console2.log(
+            "full-suite deploy gas (contracts only; EXCLUDES RendererAssetStore engine chunks):",
+            gasBefore - gasleft()
+        );
         _mintAndFinalize(d, initialOwner, seaDrop, sampleMints);
         _report(d, seaDrop, sampleMints);
     }
@@ -107,8 +114,14 @@ contract DeployLocalGenesis is Script {
         d.agentRegistry = new AgentStatusRegistry(initialOwner);
 
         vm.broadcast();
+        address geometry = address(new CubeHilbertGeometry());
+
+        vm.broadcast();
+        address frameLayer = address(new CubeFrameLayer());
+
+        vm.broadcast();
         d.thumbnailRenderer =
-            new CubeThumbnailRendererV1(d.cubes, address(d.normies), address(0));
+            new CubeThumbnailRendererV1(d.cubes, address(d.normies), address(0), geometry, frameLayer);
 
         vm.broadcast();
         d.renderer = new CubeRendererV2(

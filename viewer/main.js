@@ -22,6 +22,7 @@ import {
   setWalletDataReadyCallback,
 } from './wallet-nfts.js';
 import { serializeAllPlaced } from '/core/serialize.js';
+import { assignCubeEdgePoints, assignMotifEdgePoints, placeholderSeed } from '/core/cube-edge-points.js';
 import {
   getMintedCubeForSlot,
   getMintedCubes,
@@ -104,6 +105,11 @@ const REGION_SIZE = 512;
 const R = new Random();
 const hilbert = generateHilbert3D(HILBERT_ORDER);
 assignPlaneProperties(hilbert, R);
+// Overwrite the random edge patterns with the deterministic per-cube sidePlan
+// (the JS twin of the on-chain _sidePlan). Preview/unminted slots use a
+// placeholder seed; minted cubes get recomputed from their real on-chain seed
+// when chain data resolves (see applyMintedCubeSeed).
+assignCubeEdgePoints(hilbert, placeholderSeed);
 buildPlaneEdges(hilbert);
 const blocks = buildBlocks(hilbert);
 
@@ -2516,7 +2522,18 @@ function rebuildScene() {
 setDataReadyCallback(() => rebuildScene());
 setBannerDataReadyCallback(() => rebuildScene());
 setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
-setMintDataReadyCallback(() => { _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
+setMintDataReadyCallback(() => { _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); applyMintedCubeSeeds(); rebuildScene(); });
+
+// Recompute edge points for real minted cubes from their on-chain seed, so a
+// minted cube's unique-plane grown points match its on-chain 2D thumbnail.
+// Simulated mints have no real seed and keep their placeholder pattern.
+function applyMintedCubeSeeds() {
+  for (const cube of getMintedCubes()) {
+    if (!cube.seed || cube.slot == null) continue;
+    const planes = planesForMotif(cube.slot); // serialized planes actually rendered
+    if (planes.length === 3) assignMotifEdgePoints(planes, cube.seed);
+  }
+}
 
 loadMintSimulation()
   .then(cubes => {
