@@ -490,23 +490,32 @@ contract CubeThumbnailRendererV1 {
     function _glassRect(uint256 col, uint256 row, uint256 intensity)
         private
         pure
-        returns (string memory rect)
+        returns (string memory)
     {
-        uint256 x = 100 + col * 25 + 2;
-        uint256 y = 85 + row * 25 + 2;
+        (string memory fill, string memory stroke) = _glassColors(col, row);
+        uint256 bodyOp = intensity > 880 ? 880 : intensity;
+        return string.concat(
+            '<rect x="', (100 + col * 25 + 2).toString(), '" y="', (85 + row * 25 + 2).toString(),
+            '" width="21" height="21" fill="rgb(', fill, ')" fill-opacity="', _dec2(bodyOp),
+            '" stroke="rgb(', stroke, ')" stroke-opacity="', _dec2(intensity / 2), '"/>'
+        );
+    }
+
+    // Fill + stroke "r,g,b" strings for a glass cell. Keeps only GLASS_TINT% of
+    // the light-field hue, blending the rest toward a cool neutral so the glass
+    // tints subtly instead of glowing in full colour. Split out of _glassRect to
+    // keep that frame shallow (no via-IR).
+    function _glassColors(uint256 col, uint256 row)
+        private
+        pure
+        returns (string memory fill, string memory stroke)
+    {
         (uint256 R, uint256 G, uint256 B) = _lightColor(100 + col * 25 + 12, 85 + row * 25 + 12);
-        // Keep only GLASS_TINT% of the light-field hue; blend the rest toward a
-        // cool neutral so the glass tints subtly instead of glowing in full colour.
         R = R * GLASS_TINT / 100 + 205 * (100 - GLASS_TINT) / 100;
         G = G * GLASS_TINT / 100 + 214 * (100 - GLASS_TINT) / 100;
         B = B * GLASS_TINT / 100 + 232 * (100 - GLASS_TINT) / 100;
-        uint256 bodyOp = intensity > 880 ? 880 : intensity;
-        rect = string.concat(
-            '<rect x="', x.toString(), '" y="', y.toString(), '" width="21" height="21" fill="rgb(',
-            R.toString(), ",", G.toString(), ",", B.toString(), ')" fill-opacity="', _dec2(bodyOp),
-            '" stroke="rgb(', _lerp255(R), ",", _lerp255(G), ",", _lerp255(B),
-            ')" stroke-opacity="', _dec2(intensity / 2), '"/>'
-        );
+        fill = string.concat(R.toString(), ",", G.toString(), ",", B.toString());
+        stroke = string.concat(_lerp255(R), ",", _lerp255(G), ",", _lerp255(B));
     }
 
     // RGB light field at canvas (px,py). Each light contributes a = R^2/(R^2+d^2)
