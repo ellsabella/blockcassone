@@ -115,7 +115,7 @@ contract CubeRendererV2Test is Test {
         // forest strand layer (thin strands + turbulence tip-clouds)
         assertTrue(_contains(svg, '<g fill="none" stroke="#1fff3a" stroke-width="1.4"'));
         assertTrue(_contains(svg, 'filter="url(#pc)"'));
-        assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#38ff4d"'));
+        assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#1fff3a"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));
     }
