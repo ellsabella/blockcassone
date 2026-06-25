@@ -137,27 +137,31 @@ contract CubeThumbnailRendererV1 {
     // bloom (tight blur). Blue (axis 2) keeps a colour-specific boost + wider blur
     // — under a white halo it washes out, so it gets its own coloured glow.
     function _gfFilter(uint256 axis) private pure returns (string memory) {
-        string memory head =
-            '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">';
-        string memory tail =
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+        return string.concat(
+            '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
+            _gfBody(axis),
+            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
+        );
+    }
+
+    // The two blur+colour-matrix layers of #gf. axis 2 (blue) = colour-specific
+    // boost + wider blur; red/green = generic white bloom (reference).
+    function _gfBody(uint256 axis) private pure returns (string memory) {
         if (axis == 2) {
             return string.concat(
-                head,
-                '<feGaussianBlur in="SourceGraphic" stdDeviation="2" result="t"/>',
-                '<feColorMatrix in="t" type="matrix" values="', _neonVals(2, "8", "1.9", "1"), '" result="tc"/>',
-                '<feGaussianBlur in="SourceGraphic" stdDeviation="4.7" result="m"/>',
-                '<feColorMatrix in="m" type="matrix" values="', _neonVals(2, "5.5", "1.4", ".72"), '" result="mc"/>',
-                tail
+                '<feGaussianBlur in="SourceGraphic" stdDeviation="2" result="t"/><feColorMatrix in="t" type="matrix" values="',
+                _neonVals(2, "8", "1.9", "1"),
+                '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="4.7" result="m"/><feColorMatrix in="m" type="matrix" values="',
+                _neonVals(2, "5.5", "1.4", ".72"),
+                '" result="mc"/>'
             );
         }
         return string.concat(
-            head,
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "5", "5", "1"), '" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "3", "3", ".62"), '" result="mc"/>',
-            tail
+            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/><feColorMatrix in="t" type="matrix" values="',
+            _neonVals(axis, "5", "5", "1"),
+            '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/><feColorMatrix in="m" type="matrix" values="',
+            _neonVals(axis, "3", "3", ".62"),
+            '" result="mc"/>'
         );
     }
 
