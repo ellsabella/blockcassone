@@ -11,7 +11,7 @@ import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 /// a rasterizer runs each blur once; filter ids come from the orchestrator <defs>.
 ///
 /// The border (hilbert) hue is paired against the cube's plane colour:
-/// axis 0 red -> green, 1 green -> yellow, 2 blue -> pink. Tiers stay coloured to
+/// axis 0 red -> green, 1 green -> cyan, 2 blue -> pink. Tiers stay coloured to
 /// the core (no pure white) so the glow reads as colour, not white haze.
 ///
 /// Constant presentation attributes (stroke-linecap/linejoin, stroke-width, fill)
@@ -110,7 +110,7 @@ contract CubeFrameLayer {
 
     // Hilbert/frame hue paired against the figure colour:
     //   axis 0 (red figure)   -> green
-    //   axis 1 (green figure) -> yellow (amped)
+    //   axis 1 (green figure) -> cyan
     //   axis 2 (blue figure)  -> pink
     // Tiers stay coloured all the way to the core (no pure white) so the glow
     // reads as colour, not white haze.
@@ -118,18 +118,18 @@ contract CubeFrameLayer {
         if (tier <= 2) {
             // vivid glow tiers
             if (axis == 0) return "#1fff66"; // green
-            if (axis == 1) return "#ffe000"; // yellow (amped)
+            if (axis == 1) return "#19f0ff"; // cyan
             return "#ff19a6"; // pink
         }
         if (tier == 3) {
             // saturated light tint (not near-white)
             if (axis == 0) return "#5cff96";
-            if (axis == 1) return "#ffe84d";
+            if (axis == 1) return "#5ce6ff";
             return "#ff5cbe";
         }
         // tier 4 core — bright but still tinted, never pure white
         if (axis == 0) return "#b6ffce";
-        if (axis == 1) return "#fff3a0";
+        if (axis == 1) return "#b6f3ff";
         return "#ffb6e2";
     }
 

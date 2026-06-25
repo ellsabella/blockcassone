@@ -64,8 +64,8 @@ contract CubeThumbnailRendererV1 {
             '<rect width="1200" height="1200" fill="#020203"/>',
             _thumbnailDefs(bitmapPath, outlinePath, labelPath, axis, planeColor),
             _forestLayer(data, planeColor, layout),
-            _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
             _glassLayer(raw, data.sourceTokenId),
+            _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
             frame.render(data.seed, data.sourceTokenId, layout, axis),
             "</svg>"
         );
