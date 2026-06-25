@@ -419,8 +419,8 @@ contract CubeThumbnailRendererV1 {
     // Glass count/placement dials (see _glassLayer).
     uint256 private constant GLASS_CONVERGE_MIN = 4;  // neigh8 >= this counts as convergent
     uint256 private constant GLASS_GAIN = 45;         // % of convergent-cell count -> target glass cells (density dial)
-    uint256 private constant GLASS_SPARKLE_MIN = 220; // intensity above this gets a white highlight dot
-    uint256 private constant GLASS_WHITE = 30;        // % lift toward white (pastel/glow; rest keeps the hue)
+    uint256 private constant GLASS_SPARKLE_MIN = 180; // intensity above this gets a white highlight dot
+    uint256 private constant GLASS_WHITE = 40;        // % lift toward white (pastel/glow; rest keeps the hue)
 
     function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
@@ -447,7 +447,7 @@ contract CubeThumbnailRendererV1 {
         uint256 prob = target * 1000 / fg; // per-cell scatter probability (x1000)
 
         bytes memory buf = _bufNew(131072);
-        _bufCat(buf, '<g filter="url(#g)" stroke-width="1.6">');
+        _bufCat(buf, '<g filter="url(#p)" stroke-width="1.6">'); // #p = bloomier glow than #g (more oomph)
         uint256 kept = 0;
         for (uint256 i = 0; i < 1600 && kept < 600; i++) {
             if (!_bitmapBit(raw, i)) continue;
