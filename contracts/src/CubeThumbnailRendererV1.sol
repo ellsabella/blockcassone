@@ -179,13 +179,25 @@ contract CubeThumbnailRendererV1 {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
         return string.concat(
             '<defs>',
+            _glowDefs(),
+            _ntFilter(axis),
+            _tFilter(),
+            _gfFilter(axis),
+            _forestDefs(planeColor),
+            _pathDefs(bitmapPath, outlinePath, labelPath),
+            "</defs>"
+        );
+    }
+
+    // #g/#p/#h: the shared white-ish glow tiers (border + nodes + glass).
+    function _glowDefs() private pure returns (string memory) {
+        return string.concat(
             '<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/>',
             '<feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/>',
             '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/>',
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
+            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
             '<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/>',
             '<feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/>',
@@ -193,15 +205,19 @@ contract CubeThumbnailRendererV1 {
             '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/>',
             '<feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
+            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
             '<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/>',
             '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/>',
             '<feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
-            "</filter>",
+            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge></filter>'
+        );
+    }
+
+    // #nt: the figure neon tube (pure colour-specific core).
+    function _ntFilter(uint256 axis) private pure returns (string memory) {
+        return string.concat(
             '<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".21" result="r"/>',
             '<feColorMatrix in="r" type="matrix" values="', _neonVals(axis, "30", "2", ".99"), '" result="rc"/>',
@@ -209,8 +225,13 @@ contract CubeThumbnailRendererV1 {
             '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "28", "2.4", ".38"), '" result="tc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".24" result="m"/>',
             '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "15", "1.4", ".025"), '" result="mc"/>',
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
+            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
+        );
+    }
+
+    // #t: extra figure glow tier (literals).
+    function _tFilter() private pure returns (string memory) {
+        return string.concat(
             '<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
             '<feGaussianBlur in="SourceGraphic" stdDeviation=".8" result="t"/>',
             '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 7 0 0 0 0 0 7 0 0 0 0 0 1 0" result="tc"/>',
@@ -218,36 +239,36 @@ contract CubeThumbnailRendererV1 {
             '<feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 .85 0" result="mc"/>',
             '<feGaussianBlur in="SourceGraphic" stdDeviation="8" result="w"/>',
             '<feColorMatrix in="w" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .45 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
-            _gfFilter(axis),
-            // Forest particle clouds: feTurbulence masked, coloured by the source
-            // (so red/green/blue cubes get matching particles), then bloomed.
+            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
+        );
+    }
+
+    // #pc forest particle filter + #cg plane-colour cloud gradient.
+    function _forestDefs(string memory planeColor) private pure returns (string memory) {
+        return string.concat(
             '<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">',
             '<feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/>',
             '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/>',
             '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
             '<feGaussianBlur in="clip" stdDeviation="5" result="gr"/>',
-            // dim the clipped speckle so the cloud is soft, not a dense blob
             '<feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/>',
-            '<feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge>',
-            "</filter>",
-            // Soft radial gradient filling the forest particle clouds: fades to
-            // transparent so the turbulence speckles read as a soft diffuse cloud
-            // (not a hard blob). Plane colour; no white sparkle pass.
+            '<feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>',
             '<radialGradient id="cg"><stop offset="0" stop-color="', planeColor, '" stop-opacity=".82"/>',
             '<stop offset=".4" stop-color="', planeColor, '" stop-opacity=".36"/>',
-            '<stop offset="1" stop-color="', planeColor, '" stop-opacity="0"/></radialGradient>',
-            '<path id="n" d="',
-            bitmapPath,
-            '"/>',
-            '<path id="o" d="',
-            outlinePath,
-            '"/>',
-            '<path id="l" d="',
-            labelPath,
-            '"/>',
-            "</defs>"
+            '<stop offset="1" stop-color="', planeColor, '" stop-opacity="0"/></radialGradient>'
+        );
+    }
+
+    // The motif/outline/label path data referenced by <use>.
+    function _pathDefs(string memory bitmapPath, string memory outlinePath, string memory labelPath)
+        private
+        pure
+        returns (string memory)
+    {
+        return string.concat(
+            '<path id="n" d="', bitmapPath, '"/>',
+            '<path id="o" d="', outlinePath, '"/>',
+            '<path id="l" d="', labelPath, '"/>'
         );
     }
 
