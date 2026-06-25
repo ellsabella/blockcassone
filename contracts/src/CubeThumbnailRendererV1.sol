@@ -418,67 +418,60 @@ contract CubeThumbnailRendererV1 {
     // and was validated against the float prototype before porting.
     function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
-        (uint256 cMin, uint256 cMax, uint256 rMin, uint256 rMax, bool any) = _bbox(raw);
-        if (!any) return "";
 
-        // Cap the cell count so a pathological/noisy bitmap can't overflow the
-        // fixed buffer. A real coherent silhouette keeps far fewer than this
-        // (the prototype #1250 kept ~120); 600 * ~190 bytes/cell < the 128KB cap.
+        // Count from "agreement", placement by scatter.
+        // COUNT: tie how much glass to how solid the silhouette is — count the
+        // "convergent" cells (>= GLASS_CONVERGE_MIN of 8 neighbours on), the 2D
+        // proxy for the 3D multi-plane agreement. GLASS_GAIN scales that into a
+        // target cell count (this is the dial — spin it to taste).
+        // PLACEMENT: scatter that target uniformly across ALL foreground cells
+        // via a per-cell seeded gate, instead of clustering at the centre.
+        uint256 GLASS_CONVERGE_MIN = 4; // neigh8 >= this counts as convergent
+        uint256 GLASS_GAIN = 100;       // % of convergent-cell count -> target glass cells
+
+        uint256 fg = 0;
+        uint256 converge = 0;
+        for (uint256 i = 0; i < 1600; i++) {
+            if (!_bitmapBit(raw, i)) continue;
+            if (_isLabelCell(normieId, i / 40, i % 40)) continue;
+            fg++;
+            if (_neigh8(raw, i % 40, i / 40) >= GLASS_CONVERGE_MIN) converge++;
+        }
+        if (fg == 0) return "";
+        uint256 target = converge * GLASS_GAIN / 100;
+        if (target > 600) target = 600; // buffer/visual cap; keeps the scatter even
+        if (target == 0) return "";
+        uint256 prob = target * 1000 / fg; // per-cell scatter probability (x1000)
+
         bytes memory buf = _bufNew(131072);
         _bufCat(buf, '<g filter="url(#g)" stroke-width="1.6">');
         uint256 kept = 0;
-        for (uint256 row = 0; row < 40 && kept < 600; row++) {
-            for (uint256 col = 0; col < 40 && kept < 600; col++) {
-                if (!_bitmapBit(raw, row * 40 + col)) continue;
-                if (_isLabelCell(normieId, row, col)) continue;
-                uint256 intensity = _glassIntensity(raw, col, row, cMin, cMax, rMin, rMax);
-                if (intensity < 80) continue; // floor raised 70->80: ~10% fewer cells (drops the dimmest)
-                _bufCat(buf, _glassRect(col, row, intensity));
-                kept++;
-            }
+        for (uint256 i = 0; i < 1600 && kept < 600; i++) {
+            if (!_bitmapBit(raw, i)) continue;
+            uint256 col = i % 40;
+            uint256 row = i / 40;
+            if (_isLabelCell(normieId, row, col)) continue;
+            if (uint256(keccak256(abi.encodePacked(normieId, col, row))) % 1000 >= prob) continue;
+            _bufCat(buf, _glassRect(col, row, _glassDensity(raw, col, row)));
+            kept++;
         }
         _bufCat(buf, "</g>");
         return _bufStr(buf);
     }
 
-    // intensity (x1000) = bandAlpha * interiorMult * falloff * variety / 1e9.
-    // Built incrementally (v = v * factor / 1000) to keep the stack shallow.
-    function _glassIntensity(
-        bytes memory raw,
-        uint256 col,
-        uint256 row,
-        uint256 cMin,
-        uint256 cMax,
-        uint256 rMin,
-        uint256 rMax
-    )
+    // Per-cell glass brightness (x1000): DENSER cells (more on-neighbours) glow
+    // brighter, so the scattered glass reads the form's body and sparse edge
+    // cells stay faint. A per-cell variety factor keeps it from looking
+    // mechanical. No centre bias (that caused the old central bunching).
+    function _glassDensity(bytes memory raw, uint256 col, uint256 row)
         private
         pure
         returns (uint256 v)
     {
-        {
-            uint256 nb = _neigh8(raw, col, row); // 3x3 on-count (excl. centre)
-            uint256 band = nb <= 1 ? 0 : (nb - 1 > 6 ? 6 : nb - 1);
-            v = _bandAlpha(band);
-        }
-        {
-            uint256 interiorSum = _cellOn(raw, int256(col) - 1, int256(row))
-                + _cellOn(raw, int256(col) + 1, int256(row))
-                + _cellOn(raw, int256(col), int256(row) - 1)
-                + _cellOn(raw, int256(col), int256(row) + 1);
-            v = v * _interiorMult(interiorSum) / 1000;
-        }
-        {
-            uint256 tA = cMax > cMin ? 1000 * _absd(2 * col, cMin + cMax) / (cMax - cMin) : 0;
-            uint256 tB = rMax > rMin ? 1000 * _absd(2 * row, rMin + rMax) / (rMax - rMin) : 0;
-            uint256 t = tA > tB ? tA : tB;
-            uint256 sub = 850 * t / 1000;
-            v = v * (sub >= 850 ? 50 : 900 - sub) / 1000;
-        }
-        {
-            uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
-            v = v * variety / 1000;
-        }
+        uint256 nb = _neigh8(raw, col, row); // 0..8 on-neighbours
+        v = 250 + nb * 90; // 250 (sparse) .. 970 (dense)
+        uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
+        v = v * variety / 1000;
     }
 
     function _glassRect(uint256 col, uint256 row, uint256 intensity)
@@ -565,47 +558,6 @@ contract CubeThumbnailRendererV1 {
     function _cellOn(bytes memory raw, int256 c, int256 r) private pure returns (uint256) {
         if (c < 0 || c >= 40 || r < 0 || r >= 40) return 0;
         return _bitmapBit(raw, uint256(r) * 40 + uint256(c)) ? 1 : 0;
-    }
-
-    function _bbox(bytes memory raw)
-        private
-        pure
-        returns (uint256 cMin, uint256 cMax, uint256 rMin, uint256 rMax, bool any)
-    {
-        cMin = 39;
-        rMin = 39;
-        for (uint256 row = 0; row < 40; row++) {
-            for (uint256 col = 0; col < 40; col++) {
-                if (!_bitmapBit(raw, row * 40 + col)) continue;
-                any = true;
-                if (col < cMin) cMin = col;
-                if (col > cMax) cMax = col;
-                if (row < rMin) rMin = row;
-                if (row > rMax) rMax = row;
-            }
-        }
-    }
-
-    function _bandAlpha(uint256 band) private pure returns (uint256) {
-        if (band == 0) return 1000;
-        if (band == 1) return 840;
-        if (band == 2) return 680;
-        if (band == 3) return 500;
-        if (band == 4) return 340;
-        if (band == 5) return 200;
-        return 80;
-    }
-
-    function _interiorMult(uint256 interiorSum) private pure returns (uint256) {
-        if (interiorSum == 0) return 1000;
-        if (interiorSum == 1) return 871;
-        if (interiorSum == 2) return 671;
-        if (interiorSum == 3) return 430;
-        return 160;
-    }
-
-    function _absd(uint256 a, uint256 b) private pure returns (uint256) {
-        return a > b ? a - b : b - a;
     }
 
     function _labelPath(uint256 normieId) private pure returns (string memory) {
