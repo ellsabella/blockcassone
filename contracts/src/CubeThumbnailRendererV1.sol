@@ -73,8 +73,8 @@ contract CubeThumbnailRendererV1 {
 
     function _colour(uint256 axis) private pure returns (string memory) {
         if (axis == 0) return "#ff1919"; // x -> red
-        if (axis == 1) return "#38ff4d"; // y -> green
-        return "#244cff"; // z -> blue
+        if (axis == 1) return "#1fff3a"; // y -> green (strengthened, purer)
+        return "#1f3bff"; // z -> blue (strengthened, deeper)
     }
 
     // Returns a 200-byte (40x40, 1 bit/cell) binary silhouette for either source

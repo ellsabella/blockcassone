@@ -103,9 +103,9 @@ contract CubeRendererV2Test is Test {
 
         assertTrue(_contains(svg, '<path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/>'));
         assertTrue(_contains(svg, '<path id="o" d='));
-        // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green (#38ff4d).
+        // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green (#1fff3a).
         // (Was #ff1919 under the old slot%3 rule; now uses the unique-axis colour.)
-        assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#38ff4d"'));
+        assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#1fff3a"'));
         // Frame border now traces the motif's unique-plane sides (slot 1734 -> TRB,
         // open left) as separate subpaths rather than the old fixed square path.
         assertTrue(_contains(svg, '<path d="M100 85H1100M1100 85V1085M100 1085H1100"'));
@@ -113,7 +113,7 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="14"'));
         assertTrue(_contains(svg, '<filter id="h"'));
         // forest strand layer (thin strands + turbulence tip-clouds)
-        assertTrue(_contains(svg, '<g fill="none" stroke="#38ff4d" stroke-width="1.4"'));
+        assertTrue(_contains(svg, '<g fill="none" stroke="#1fff3a" stroke-width="1.4"'));
         assertTrue(_contains(svg, 'filter="url(#pc)"'));
         assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#38ff4d"'));
         assertFalse(_contains(svg, "Normie #6722"));
