@@ -418,7 +418,8 @@ contract CubeThumbnailRendererV1 {
     // and was validated against the float prototype before porting.
     // Glass count/placement dials (see _glassLayer).
     uint256 private constant GLASS_CONVERGE_MIN = 4; // neigh8 >= this counts as convergent
-    uint256 private constant GLASS_GAIN = 100;       // % of convergent-cell count -> target glass cells
+    uint256 private constant GLASS_GAIN = 30;        // % of convergent-cell count -> target glass cells (density dial)
+    uint256 private constant GLASS_TINT = 45;        // % of the light-field hue kept; rest blended to cool neutral
 
     function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
@@ -481,7 +482,7 @@ contract CubeThumbnailRendererV1 {
         returns (uint256 v)
     {
         uint256 nb = _neigh8(raw, col, row); // 0..8 on-neighbours
-        v = 250 + nb * 90; // 250 (sparse) .. 970 (dense)
+        v = 90 + nb * 26; // 90 (sparse) .. 298 (dense) — translucent; denser a touch brighter
         uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
         v = v * variety / 1000;
     }
@@ -494,21 +495,18 @@ contract CubeThumbnailRendererV1 {
         uint256 x = 100 + col * 25 + 2;
         uint256 y = 85 + row * 25 + 2;
         (uint256 R, uint256 G, uint256 B) = _lightColor(100 + col * 25 + 12, 85 + row * 25 + 12);
-        uint256 op = intensity * 2 > 1000 ? 1000 : intensity * 2;
+        // Keep only GLASS_TINT% of the light-field hue; blend the rest toward a
+        // cool neutral so the glass tints subtly instead of glowing in full colour.
+        R = R * GLASS_TINT / 100 + 205 * (100 - GLASS_TINT) / 100;
+        G = G * GLASS_TINT / 100 + 214 * (100 - GLASS_TINT) / 100;
+        B = B * GLASS_TINT / 100 + 232 * (100 - GLASS_TINT) / 100;
         uint256 bodyOp = intensity > 880 ? 880 : intensity;
         rect = string.concat(
             '<rect x="', x.toString(), '" y="', y.toString(), '" width="21" height="21" fill="rgb(',
             R.toString(), ",", G.toString(), ",", B.toString(), ')" fill-opacity="', _dec2(bodyOp),
             '" stroke="rgb(', _lerp255(R), ",", _lerp255(G), ",", _lerp255(B),
-            ')" stroke-opacity="', _dec2(op), '"/>'
+            ')" stroke-opacity="', _dec2(intensity / 2), '"/>'
         );
-        if (intensity > 500) {
-            rect = string.concat(
-                rect,
-                '<circle cx="', (x + 6).toString(), '" cy="', (y + 6).toString(),
-                '" r="1.1" fill="#fff" opacity="', _dec2(op / 2), '"/>'
-            );
-        }
     }
 
     // RGB light field at canvas (px,py). Each light contributes a = R^2/(R^2+d^2)
