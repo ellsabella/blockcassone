@@ -420,6 +420,7 @@ contract CubeThumbnailRendererV1 {
     uint256 private constant GLASS_CONVERGE_MIN = 4;  // neigh8 >= this counts as convergent
     uint256 private constant GLASS_GAIN = 45;         // % of convergent-cell count -> target glass cells (density dial)
     uint256 private constant GLASS_SPARKLE_MIN = 220; // intensity above this gets a white highlight dot
+    uint256 private constant GLASS_WHITE = 30;        // % lift toward white (pastel/glow; rest keeps the hue)
 
     function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
@@ -482,7 +483,7 @@ contract CubeThumbnailRendererV1 {
         returns (uint256 v)
     {
         uint256 nb = _neigh8(raw, col, row); // 0..8 on-neighbours
-        v = 90 + nb * 30; // 90 (sparse) .. 330 (dense) — denser cells brighter; brightest get a sparkle
+        v = 20 + nb * nb * 10; // 20 (sparse) .. 660 (dense) — quadratic so solid cores glow bright (prototype peaks ~.64)
         uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
         v = v * variety / 1000;
     }
@@ -520,6 +521,11 @@ contract CubeThumbnailRendererV1 {
         returns (string memory fill, string memory stroke)
     {
         (uint256 R, uint256 G, uint256 B) = _lightColor(100 + col * 25 + 12, 85 + row * 25 + 12);
+        // Lift toward white so the glass reads as pale glowing glass, not a vivid
+        // colour fill (the prototype's bright cells sit near white with a tint).
+        R = R * (100 - GLASS_WHITE) / 100 + 255 * GLASS_WHITE / 100;
+        G = G * (100 - GLASS_WHITE) / 100 + 255 * GLASS_WHITE / 100;
+        B = B * (100 - GLASS_WHITE) / 100 + 255 * GLASS_WHITE / 100;
         fill = string.concat(R.toString(), ",", G.toString(), ",", B.toString());
         stroke = string.concat(_lerp255(R), ",", _lerp255(G), ",", _lerp255(B));
     }
