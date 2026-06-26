@@ -325,16 +325,11 @@ function readPlots() {
     agentId: p && p.agentId ? String(p.agentId) : '',
   });
 
+  // Street view ONLY for a merged-street token (the merge contract injects
+  // TOKEN.plots). A normal cube has no .plots and renders as a single cube.
   if (Array.isArray(TOKEN.plots) && TOKEN.plots.length) {
     const base = (TOKEN.street != null ? Number(TOKEN.street) : Number(TOKEN.plots[0].slot || 0) >> 3) * 8;
     return { mode: 'street', base, plots: TOKEN.plots.slice(0, 8).map((p, k) => plotFrom(p, base + k)) };
-  }
-
-  if (location.hash.toLowerCase().includes('street')) {
-    const base = Number(TOKEN.slot || 0) & ~7;
-    const plots = [];
-    for (let k = 0; k < 8; k++) plots.push(plotFrom(k < 3 ? TOKEN : null, base + k));
-    return { mode: 'street', base, plots };
   }
 
   const motifIdx = Number(TOKEN.slot || 0);
