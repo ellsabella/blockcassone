@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import { CubeNFT } from "./CubeNFT.sol";
+import { StrBuf } from "./lib/StrBuf.sol";
 
 interface IThumbnailNormieRawImageStorage {
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
@@ -29,6 +30,7 @@ interface ICubeFrameLayer {
 
 contract CubeThumbnailRendererV1 {
     using Strings for uint256;
+    using StrBuf for bytes;
 
     CubeNFT public immutable cubes;
     address public immutable normieStorage;
@@ -134,8 +136,8 @@ contract CubeThumbnailRendererV1 {
         return string.concat(r, " 0 0 0 0 0 ", g, " 0 0 0 0 0 ", b, " 0 0 0 0 0 ", a, " 0");
     }
 
-    // Builds the whole <defs> block. Uses the O(n) byte buffer (each _bufCat is a
-    // shallow 2-arg call) rather than one giant string.concat, which overflowed
+    // Builds the whole <defs> block. Uses the shared O(n) StrBuf (each buf.cat is
+    // a shallow call) rather than one giant string.concat, which overflowed
     // the legacy stack limit. The only axis-dependent parts are #nt (colour-
     // specific tube) and #gf (generic white for red/green; colour-specific for
     // blue, which washes out under a white halo).
@@ -151,58 +153,58 @@ contract CubeThumbnailRendererV1 {
         returns (string memory)
     {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
-        bytes memory buf = _bufNew(
+        bytes memory buf = StrBuf.alloc(
             8192 + bytes(bitmapPath).length + bytes(outlinePath).length + bytes(labelPath).length
         );
-        _bufCat(buf, '<defs>');
+        buf.cat('<defs>');
         // shared white-ish glow tiers #g / #p / #h
-        _bufCat(buf, '<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/><feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/><feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
-        _bufCat(buf, '<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/><feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/><feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
-        _bufCat(buf, '<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/><feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge></filter>');
+        buf.cat('<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/><feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/><feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        buf.cat('<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/><feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/><feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        buf.cat('<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/><feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge></filter>');
         // figure neon tube #nt (pure colour-specific core)
-        _bufCat(buf, '<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".21" result="r"/><feColorMatrix in="r" type="matrix" values="');
-        _bufCat(buf, _neonVals(axis, "30", "2", ".99"));
-        _bufCat(buf, '" result="rc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/><feColorMatrix in="t" type="matrix" values="');
-        _bufCat(buf, _neonVals(axis, "28", "2.4", ".38"));
-        _bufCat(buf, '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".24" result="m"/><feColorMatrix in="m" type="matrix" values="');
-        _bufCat(buf, _neonVals(axis, "15", "1.4", ".025"));
-        _bufCat(buf, '" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        buf.cat('<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".21" result="r"/><feColorMatrix in="r" type="matrix" values="');
+        buf.cat(_neonVals(axis, "30", "2", ".99"));
+        buf.cat('" result="rc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/><feColorMatrix in="t" type="matrix" values="');
+        buf.cat(_neonVals(axis, "28", "2.4", ".38"));
+        buf.cat('" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".24" result="m"/><feColorMatrix in="m" type="matrix" values="');
+        buf.cat(_neonVals(axis, "15", "1.4", ".025"));
+        buf.cat('" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
         // extra figure glow tier #t
-        _bufCat(buf, '<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".8" result="t"/><feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 7 0 0 0 0 0 7 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="m"/><feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 .85 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="w"/><feColorMatrix in="w" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .45 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        buf.cat('<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".8" result="t"/><feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 7 0 0 0 0 0 7 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="m"/><feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 .85 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="w"/><feColorMatrix in="w" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .45 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
         // wide figure glow #gf — generic white for red/green, colour-specific for blue
-        _bufCat(buf, '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">');
+        buf.cat('<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">');
         if (axis == 2) {
-            _bufCat(buf, '<feGaussianBlur in="SourceGraphic" stdDeviation="2" result="t"/><feColorMatrix in="t" type="matrix" values="');
-            _bufCat(buf, _neonVals(2, "8", "1.9", "1"));
-            _bufCat(buf, '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="4.7" result="m"/><feColorMatrix in="m" type="matrix" values="');
-            _bufCat(buf, _neonVals(2, "5.5", "1.4", ".72"));
-            _bufCat(buf, '" result="mc"/>');
+            buf.cat('<feGaussianBlur in="SourceGraphic" stdDeviation="2" result="t"/><feColorMatrix in="t" type="matrix" values="');
+            buf.cat(_neonVals(2, "8", "1.9", "1"));
+            buf.cat('" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="4.7" result="m"/><feColorMatrix in="m" type="matrix" values="');
+            buf.cat(_neonVals(2, "5.5", "1.4", ".72"));
+            buf.cat('" result="mc"/>');
         } else {
-            _bufCat(buf, '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/><feColorMatrix in="t" type="matrix" values="');
-            _bufCat(buf, _neonVals(axis, "5", "5", "1"));
-            _bufCat(buf, '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/><feColorMatrix in="m" type="matrix" values="');
-            _bufCat(buf, _neonVals(axis, "3", "3", ".62"));
-            _bufCat(buf, '" result="mc"/>');
+            buf.cat('<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/><feColorMatrix in="t" type="matrix" values="');
+            buf.cat(_neonVals(axis, "5", "5", "1"));
+            buf.cat('" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/><feColorMatrix in="m" type="matrix" values="');
+            buf.cat(_neonVals(axis, "3", "3", ".62"));
+            buf.cat('" result="mc"/>');
         }
-        _bufCat(buf, '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        buf.cat('<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
         // forest particle filter #pc + plane-colour cloud gradient #cg
-        _bufCat(buf, '<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/><feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/><feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/><feGaussianBlur in="clip" stdDeviation="5" result="gr"/><feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/><feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>');
-        _bufCat(buf, '<radialGradient id="cg"><stop offset="0" stop-color="');
-        _bufCat(buf, planeColor);
-        _bufCat(buf, '" stop-opacity=".82"/><stop offset=".4" stop-color="');
-        _bufCat(buf, planeColor);
-        _bufCat(buf, '" stop-opacity=".36"/><stop offset="1" stop-color="');
-        _bufCat(buf, planeColor);
-        _bufCat(buf, '" stop-opacity="0"/></radialGradient>');
+        buf.cat('<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/><feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/><feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/><feGaussianBlur in="clip" stdDeviation="5" result="gr"/><feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/><feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>');
+        buf.cat('<radialGradient id="cg"><stop offset="0" stop-color="');
+        buf.cat(planeColor);
+        buf.cat('" stop-opacity=".82"/><stop offset=".4" stop-color="');
+        buf.cat(planeColor);
+        buf.cat('" stop-opacity=".36"/><stop offset="1" stop-color="');
+        buf.cat(planeColor);
+        buf.cat('" stop-opacity="0"/></radialGradient>');
         // path data referenced by <use>
-        _bufCat(buf, '<path id="n" d="');
-        _bufCat(buf, bitmapPath);
-        _bufCat(buf, '"/><path id="o" d="');
-        _bufCat(buf, outlinePath);
-        _bufCat(buf, '"/><path id="l" d="');
-        _bufCat(buf, labelPath);
-        _bufCat(buf, '"/></defs>');
-        return _bufStr(buf);
+        buf.cat('<path id="n" d="');
+        buf.cat(bitmapPath);
+        buf.cat('"/><path id="o" d="');
+        buf.cat(outlinePath);
+        buf.cat('"/><path id="l" d="');
+        buf.cat(labelPath);
+        buf.cat('"/></defs>');
+        return buf.str();
     }
 
     function _thumbnailBitmap(
@@ -303,42 +305,11 @@ contract CubeThumbnailRendererV1 {
         }
     }
 
-    // --- O(n) string builder ---------------------------------------------------
-    // Repeated `s = string.concat(s, piece)` in the dense per-cell path loops is
-    // O(n^2) (each append re-copies the whole growing string) and is the main
-    // MemoryOOG risk for detailed Normies. These helpers append into a pre-sized
-    // bytes buffer in O(total length). The caller MUST reserve `cap` >= total
-    // appended bytes + 32: the word-aligned copy can write up to 31 bytes of slack
-    // past the logical end, which must stay inside the reserved buffer.
-    function _bufNew(uint256 cap) private pure returns (bytes memory buf) {
-        buf = new bytes(cap); // zero-filled; capacity reserved past the length word
-        assembly {
-            mstore(buf, 0) // logical length starts at 0 (capacity stays allocated)
-        }
-    }
-
-    function _bufCat(bytes memory buf, string memory piece) private pure {
-        assembly {
-            let len := mload(buf)
-            let plen := mload(piece)
-            let dst := add(add(buf, 0x20), len)
-            let src := add(piece, 0x20)
-            for { let i := 0 } lt(i, plen) { i := add(i, 0x20) } {
-                mstore(add(dst, i), mload(add(src, i)))
-            }
-            mstore(buf, add(len, plen)) // advance logical length
-        }
-    }
-
-    function _bufStr(bytes memory buf) private pure returns (string memory) {
-        return string(buf);
-    }
-
     function _bitmapPath(bytes memory raw) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
         // <= 40 rows * 20 runs * ~15 bytes/run; 24KB leaves ample slack.
-        bytes memory buf = _bufNew(24576);
+        bytes memory buf = StrBuf.alloc(24576);
         for (uint256 row = 0; row < 40; row++) {
             uint256 col = 0;
             while (col < 40) {
@@ -352,8 +323,7 @@ contract CubeThumbnailRendererV1 {
                     col++;
                 }
 
-                _bufCat(
-                    buf,
+                buf.cat(
                     string.concat(
                         "M",
                         start.toString(),
@@ -368,33 +338,33 @@ contract CubeThumbnailRendererV1 {
                 );
             }
         }
-        return _bufStr(buf);
+        return buf.str();
     }
 
     function _outlinePath(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
         // <= 1600 cells * 4 edges * 8 bytes = 51200; 64KB leaves ample slack.
-        bytes memory buf = _bufNew(65536);
+        bytes memory buf = StrBuf.alloc(65536);
         for (uint256 row = 0; row < 40; row++) {
             for (uint256 col = 0; col < 40; col++) {
                 if (!_bitmapBit(raw, row * 40 + col)) continue;
                 if (_isLabelCell(normieId, row, col)) continue;
                 if (!_bitmapBitAt(raw, row, col, 0, -1)) {
-                    _bufCat(buf, string.concat("M", col.toString(), " ", row.toString(), "v1"));
+                    buf.cat(string.concat("M", col.toString(), " ", row.toString(), "v1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, 0, 1)) {
-                    _bufCat(buf, string.concat("M", (col + 1).toString(), " ", row.toString(), "v1"));
+                    buf.cat(string.concat("M", (col + 1).toString(), " ", row.toString(), "v1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, -1, 0)) {
-                    _bufCat(buf, string.concat("M", col.toString(), " ", row.toString(), "h1"));
+                    buf.cat(string.concat("M", col.toString(), " ", row.toString(), "h1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, 1, 0)) {
-                    _bufCat(buf, string.concat("M", col.toString(), " ", (row + 1).toString(), "h1"));
+                    buf.cat(string.concat("M", col.toString(), " ", (row + 1).toString(), "h1"));
                 }
             }
         }
-        return _bufStr(buf);
+        return buf.str();
     }
 
     // --- Glass voxel cells -----------------------------------------------------
@@ -435,16 +405,16 @@ contract CubeThumbnailRendererV1 {
         if (target == 0) return "";
         uint256 prob = target * 1000 / fg; // per-cell scatter probability (x1000)
 
-        bytes memory buf = _bufNew(131072);
-        _bufCat(buf, '<g filter="url(#g)" stroke-width="1.6">'); // tight glow: distinct translucent panes, not a bloomed haze
+        bytes memory buf = StrBuf.alloc(131072);
+        buf.cat('<g filter="url(#g)" stroke-width="1.6">'); // tight glow: distinct translucent panes, not a bloomed haze
         uint256 kept = 0;
         for (uint256 i = 0; i < 1600 && kept < 600; i++) {
             if (!_bitmapBit(raw, i)) continue;
             if (_isLabelCell(normieId, i / 40, i % 40)) continue;
             if (_scatterCell(buf, normieId, i, prob)) kept++;
         }
-        _bufCat(buf, "</g>");
-        return _bufStr(buf);
+        buf.cat("</g>");
+        return buf.str();
     }
 
     // Scatter gate + emit for one foreground cell; appends a glass rect and
@@ -458,7 +428,7 @@ contract CubeThumbnailRendererV1 {
         uint256 col = i % 40;
         uint256 row = i / 40;
         if (uint256(keccak256(abi.encodePacked(normieId, col, row))) % 1000 >= prob) return false;
-        _bufCat(buf, _glassRect(col, row, _glassDensity(col, row)));
+        buf.cat(_glassRect(col, row, _glassDensity(col, row)));
         return true;
     }
 

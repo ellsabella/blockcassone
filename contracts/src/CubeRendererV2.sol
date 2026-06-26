@@ -6,6 +6,7 @@ import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import { CubeNFT } from "./CubeNFT.sol";
 import { ICubeRenderer } from "./interfaces/ICubeRenderer.sol";
 import { RendererAssetStore } from "./RendererAssetStore.sol";
+import { StrBuf } from "./lib/StrBuf.sol";
 
 interface INormieRawImageStorage {
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
@@ -17,6 +18,7 @@ interface ICubeThumbnailRenderer {
 
 contract CubeRendererV2 is ICubeRenderer {
     using Strings for uint256;
+    using StrBuf for bytes;
 
     uint256 public constant HTML_HEAD_CHUNK = 0;
     uint256 public constant HTML_SCRIPT_CHUNK = 1;
@@ -195,10 +197,21 @@ contract CubeRendererV2 is ICubeRenderer {
             return _chunkOrDefault(HTML_SCRIPT_CHUNK, _defaultHTMLScript());
         }
 
-        string memory out = "";
-        for (uint256 i = HTML_SCRIPT_START_CHUNK; i < count; i++) {
-            out = string.concat(out, assets.chunk(i));
+        // Fetch each chunk once, sum lengths, then build into the shared O(n)
+        // buffer — the old `out = concat(out, chunk)` loop was O(n^2) on a ~100KB
+        // bundle.
+        uint256 n = count - HTML_SCRIPT_START_CHUNK;
+        string[] memory parts = new string[](n);
+        uint256 total;
+        for (uint256 i = 0; i < n; i++) {
+            parts[i] = assets.chunk(HTML_SCRIPT_START_CHUNK + i);
+            total += bytes(parts[i]).length;
         }
+        bytes memory buf = StrBuf.alloc(total + 32);
+        for (uint256 i = 0; i < n; i++) {
+            buf.cat(parts[i]);
+        }
+        string memory out = buf.str();
         return bytes(out).length == 0 ? _defaultHTMLScript() : out;
     }
 
