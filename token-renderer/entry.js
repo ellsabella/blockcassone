@@ -2,6 +2,7 @@ import { CONFIG } from '../core/config.js';
 import { generateHilbert3D } from '../core/hilbert.js';
 import { Random } from '../core/random.js';
 import { assignPlaneProperties, buildPlaneEdges } from '../core/planes.js';
+import { assignMotifEdgePoints } from '../core/cube-edge-points.js';
 import { buildBlocks } from '../core/blocks.js';
 import { serializeAllPlaced } from '../core/serialize.js';
 import { createBox, createWireframeBox, createMeshGL } from '../renderer/src/geometry.js';
@@ -332,6 +333,12 @@ async function main() {
 
   const hilbert = generateHilbert3D(ORDER);
   assignPlaneProperties(hilbert, new Random('0x' + '12345678'.repeat(8)));
+  // Per-cube edge points — the same sidePlan as the 2D thumbnail and the dev
+  // viewer — keyed on the token's on-chain seed, so the 3D cube's owned edge
+  // points (which sprout the forest strands) match its image exactly.
+  if (TOKEN.seed) {
+    assignMotifEdgePoints(hilbert.planes.slice(motifIdx * 3, motifIdx * 3 + 3), TOKEN.seed);
+  }
   buildPlaneEdges(hilbert);
   const blocks = buildBlocks(hilbert);
   const serializedPlanes = serializeAllPlaced(hilbert, hilbert.planes, blocks)

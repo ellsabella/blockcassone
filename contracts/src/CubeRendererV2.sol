@@ -120,7 +120,9 @@ contract CubeRendererV2 is ICubeRenderer {
             data.agentic ? "true" : "false",
             ",agentId:",
             data.agentId.toString(),
-            ",raw:'",
+            ",seed:'",
+            Strings.toHexString(uint256(data.seed), 32),
+            "',raw:'",
             _rawImageBase64(data),
             "'};</script>"
         );
