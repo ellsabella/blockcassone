@@ -64,8 +64,9 @@ contract CubeThumbnailRendererV1 {
             '<rect width="1200" height="1200" fill="#020203"/>',
             _thumbnailDefs(bitmapPath, outlinePath, labelPath, axis, planeColor),
             _forestLayer(data, planeColor, layout),
+            _thumbnailBitmap(bitmapPath, outlinePath, planeColor),
             _glassLayer(raw, data.sourceTokenId),
-            _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
+            _labelLayer(labelPath, planeColor),
             frame.render(data.seed, data.sourceTokenId, layout, axis),
             "</svg>"
         );
@@ -207,7 +208,6 @@ contract CubeThumbnailRendererV1 {
     function _thumbnailBitmap(
         string memory bitmapPath,
         string memory outlinePath,
-        string memory labelPath,
         string memory planeColor
     )
         private
@@ -235,15 +235,25 @@ contract CubeThumbnailRendererV1 {
             planeColor,
             '" stroke-width=".27" opacity=".95" filter="url(#gf)"/>',
             '<use href="#o" fill="none" stroke="#fff" stroke-width=".026" opacity=".92"/>',
-            bytes(labelPath).length == 0
-                ? ""
-                : string.concat(
-                    '<use href="#l" fill="none" stroke="',
-                    planeColor,
-                    '" stroke-width=".32" opacity=".88" filter="url(#nt)"/><use href="#l" fill="none" stroke="',
-                    planeColor,
-                    '" stroke-width=".26" opacity=".95" filter="url(#gf)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".028" opacity=".84"/>'
-                ),
+            "</g>"
+        );
+    }
+
+    // The Normie number (#l), drawn as its own layer ON TOP of the glass so it
+    // stays legible. Same neon treatment as the figure lines.
+    function _labelLayer(string memory labelPath, string memory planeColor)
+        private
+        pure
+        returns (string memory)
+    {
+        if (bytes(labelPath).length == 0) return "";
+        return string.concat(
+            '<g transform="translate(100 85) scale(25)" stroke-linecap="round" stroke-linejoin="round">',
+            '<use href="#l" fill="none" stroke="', planeColor,
+            '" stroke-width=".32" opacity=".88" filter="url(#nt)"/>',
+            '<use href="#l" fill="none" stroke="', planeColor,
+            '" stroke-width=".26" opacity=".95" filter="url(#gf)"/>',
+            '<use href="#l" fill="none" stroke="#fff" stroke-width=".028" opacity=".84"/>',
             "</g>"
         );
     }
