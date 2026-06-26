@@ -81,16 +81,25 @@ edge-point identity. This is the crux that makes move/merge coherent.
 
 ## Build sequence (all pre-launch)
 
-1. **Environment model** — `CubeEnv` + `Environment` trait + biome weights + JS
-   parity. *(in progress)*
-2. **Per-street view in the token HTML** (foundation for merged-street rendering).
-3. **Population trait** everywhere. *(done for cubes)*
-4. **Plot allocation** — clustering allocator replacing sequential slots.
-5. **Move** — `moveCube` + UI.
+1. **Environment model** — `CubeEnv` + `Environment` trait + weights + JS parity. **✅ DONE**
+2. **Per-street view in the token HTML** — street view, continuous Hilbert spine,
+   V/arrows toggle, gated strictly on `TOKEN.plots`; `preview:street` test tool. **✅ DONE**
+   *(open: biome placeholders don't yet render in the street view, AND their
+   aesthetics need a review — see Biome placeholders below.)*
+3. **Population trait** — `1` cubes, `N` merged. **✅ DONE (cubes)**
+4. **Plot allocation** — clustering allocator (≤3/wallet/street) replacing
+   sequential slots. *(next launch-critical; allocation algorithm to finalize)*
+5. **Move** — `moveCube(cubeId, vacantSlot)` + UI.
 6. **Merge** — kind flag, 8→1 burn, street-record store, street SVG + HTML,
-   placeholders.
+   placeholders. *(produces the `TOKEN.plots` the street view consumes)*
 7. **Customization** — flatten + store + UI; CC0 review.
 8. **WebUI** — explore tab, customize tab, move/merge flows.
+
+### Biome placeholders (to revisit)
+- They don't currently render on vacant plots in the street preview — needs a
+  look (likely the empty-slot floor/accent setup in the token render context).
+- The biome visuals themselves need an **aesthetic pass** (not happy with them).
+- Ties to the environment model (#1) and the merged-street render (#6).
 
 ## Status snapshot (already built)
 
