@@ -171,10 +171,16 @@ any vacant in-range slot.
 
 ## 6. Customization (post-mint re-base)
 
-A holder re-bases a cube they own onto a **new flattened artwork** (any owned
-asset or approved CC0 project). The cube keeps its `seed` and `slot` but **adopts
-the new source** — number label, frame, and glass detailing all re-derive.
-Re-basable **any number of times**.
+A holder re-bases a cube they own onto a **new flattened artwork**. The cube
+keeps its `seed` and `slot` but **adopts the new source** — number label, frame,
+and glass detailing all re-derive. Re-basable **any number of times**.
+
+**The source is always a wallet-held on-chain token** — an NFT the holder owns or
+a token from an approved CC0 collection — *not* a freeform image upload. The UI
+loads it via the connected wallet; the attestation binds `(sourceContract,
+sourceTokenId)`, which is what gives the re-based cube its new identity (the label
+is the new token's id). "Flatten any PNG/WEBP/JPEG" refers only to the off-chain
+flattener accepting whatever format that token's art is in.
 
 **Art format** (`lib/NonNormieArt.sol`): a 40×40 grid, 2 bits/cell (4 tonal
 bands) = **400 bytes** (`tonalBands2Bit`), content-hashed. Renderers consume the
