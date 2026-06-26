@@ -87,8 +87,17 @@ edge-point identity. This is the crux that makes move/merge coherent.
    *(open: biome placeholders don't yet render in the street view, AND their
    aesthetics need a review — see Biome placeholders below.)*
 3. **Population trait** — `1` cubes, `N` merged. **✅ DONE (cubes)**
-4. **Plot allocation** — clustering allocator (≤3/wallet/street) replacing
-   sequential slots. *(next launch-critical; allocation algorithm to finalize)*
+4. **Plot allocation** — **🟡 BUILT, pending WSL test.** Replaces `slot =
+   mintedCount` in `NormieGenesisMinter._consumeAndMint` with `_allocateSlot`:
+   a **new wallet anchors the lowest street with zero mints** (spreads wallets
+   one-per-street across the world); **once every street has ≥1 mint we wrap** and
+   new wallets backfill the lowest non-full street. Either way a wallet packs
+   **≤3 plots/street** and **spills forward** (contiguous run), so a full street
+   ends up shared by ~3 wallets. O(1): `seedCursor` (anchor phase) + `frontierStreet`
+   (wrap) + per-wallet `(street, count)`; `_streetCapacity` handles a non-multiple-
+   of-8 final street. Caveat: togetherness is **per-transaction** (split mints far
+   apart land wherever the cursor then sits). `NoVacantPlot` guards the >1536-per-
+   wallet edge.
 5. **Move** — `moveCube(cubeId, vacantSlot)` + UI.
 6. **Merge** — kind flag, 8→1 burn, street-record store, street SVG + HTML,
    placeholders. *(produces the `TOKEN.plots` the street view consumes)*
