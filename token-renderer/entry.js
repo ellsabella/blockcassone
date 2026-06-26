@@ -19,6 +19,7 @@ import {
 import { loadMaterialFromSource } from '../renderer/src/materials.js';
 import { buildCubeDetailScene } from '../viewer/detail-scene-builder.js';
 import { buildEmptySlotItems } from '../viewer/environments.js';
+import { buildHilbertPathRange } from '../viewer/hilbert-lines.js';
 import { buildEdgePointDebug } from '../viewer/materials/debug-edge-points.js';
 import { setCubeAssignmentResolver } from '../viewer/assignment.js';
 import { hydrateNormieRawBytes, initNormiesManager } from '../viewer/normies-manager.js';
@@ -419,7 +420,7 @@ async function main() {
           showEdgePoints: true,
           showStoneWalker: true,
           showVoxels: true,
-          showHilbertLines: true,
+          showHilbertLines: scene.mode === 'cube', // street: one continuous spine instead (below)
           showCardioid: true,
           showForest: true,
           showNormieOutline: true,
@@ -432,6 +433,12 @@ async function main() {
         })
       : buildEmptySlotItems(p.motifIdx, planesForMotif(p.motifIdx), cubeAABB(hilbert, p.motifIdx), gl, meshes);
     for (const it of built) items.push(it);
+  }
+
+  // Street: one continuous Hilbert spine through all 8 plots, so the line
+  // connects the cubes and runs across the vacant (biome) plots too.
+  if (scene.mode === 'street') {
+    for (const it of buildHilbertPathRange(hilbert, scene.base, 8, gl, meshes)) items.push(it);
   }
 
   // Camera: street overview frames all 8 plots; focus frames one cube. 'V'
