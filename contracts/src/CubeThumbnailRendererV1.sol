@@ -133,38 +133,11 @@ contract CubeThumbnailRendererV1 {
         return string.concat(r, " 0 0 0 0 0 ", g, " 0 0 0 0 0 ", b, " 0 0 0 0 0 ", a, " 0");
     }
 
-    // The wide figure glow (#gf). Red/green use the reference's generic white
-    // bloom (tight blur). Blue (axis 2) keeps a colour-specific boost + wider blur
-    // — under a white halo it washes out, so it gets its own coloured glow.
-    function _gfFilter(uint256 axis) private pure returns (string memory) {
-        return string.concat(
-            '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
-            _gfBody(axis),
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-        );
-    }
-
-    // The two blur+colour-matrix layers of #gf. axis 2 (blue) = colour-specific
-    // boost + wider blur; red/green = generic white bloom (reference).
-    function _gfBody(uint256 axis) private pure returns (string memory) {
-        if (axis == 2) {
-            return string.concat(
-                '<feGaussianBlur in="SourceGraphic" stdDeviation="2" result="t"/><feColorMatrix in="t" type="matrix" values="',
-                _neonVals(2, "8", "1.9", "1"),
-                '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="4.7" result="m"/><feColorMatrix in="m" type="matrix" values="',
-                _neonVals(2, "5.5", "1.4", ".72"),
-                '" result="mc"/>'
-            );
-        }
-        return string.concat(
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/><feColorMatrix in="t" type="matrix" values="',
-            _neonVals(axis, "5", "5", "1"),
-            '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/><feColorMatrix in="m" type="matrix" values="',
-            _neonVals(axis, "3", "3", ".62"),
-            '" result="mc"/>'
-        );
-    }
-
+    // Builds the whole <defs> block. Uses the O(n) byte buffer (each _bufCat is a
+    // shallow 2-arg call) rather than one giant string.concat, which overflowed
+    // the legacy stack limit. The only axis-dependent parts are #nt (colour-
+    // specific tube) and #gf (generic white for red/green; colour-specific for
+    // blue, which washes out under a white halo).
     function _thumbnailDefs(
         string memory bitmapPath,
         string memory outlinePath,
@@ -177,99 +150,58 @@ contract CubeThumbnailRendererV1 {
         returns (string memory)
     {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
-        return string.concat(
-            '<defs>',
-            _glowDefs(),
-            _ntFilter(axis),
-            _tFilter(),
-            _gfFilter(axis),
-            _forestDefs(planeColor),
-            _pathDefs(bitmapPath, outlinePath, labelPath),
-            "</defs>"
+        bytes memory buf = _bufNew(
+            8192 + bytes(bitmapPath).length + bytes(outlinePath).length + bytes(labelPath).length
         );
-    }
-
-    // #g/#p/#h: the shared white-ish glow tiers (border + nodes + glass).
-    function _glowDefs() private pure returns (string memory) {
-        return string.concat(
-            '<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/>',
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
-            '<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/>',
-            '<feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
-            '<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/>',
-            '<feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge></filter>'
-        );
-    }
-
-    // #nt: the figure neon tube (pure colour-specific core).
-    function _ntFilter(uint256 axis) private pure returns (string memory) {
-        return string.concat(
-            '<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".21" result="r"/>',
-            '<feColorMatrix in="r" type="matrix" values="', _neonVals(axis, "30", "2", ".99"), '" result="rc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "28", "2.4", ".38"), '" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".24" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "15", "1.4", ".025"), '" result="mc"/>',
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-        );
-    }
-
-    // #t: extra figure glow tier (literals).
-    function _tFilter() private pure returns (string memory) {
-        return string.concat(
-            '<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".8" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 7 0 0 0 0 0 7 0 0 0 0 0 1 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 .85 0" result="mc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="8" result="w"/>',
-            '<feColorMatrix in="w" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .45 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-        );
-    }
-
-    // #pc forest particle filter + #cg plane-colour cloud gradient.
-    function _forestDefs(string memory planeColor) private pure returns (string memory) {
-        return string.concat(
-            '<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">',
-            '<feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/>',
-            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/>',
-            '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
-            '<feGaussianBlur in="clip" stdDeviation="5" result="gr"/>',
-            '<feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/>',
-            '<feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>',
-            '<radialGradient id="cg"><stop offset="0" stop-color="', planeColor, '" stop-opacity=".82"/>',
-            '<stop offset=".4" stop-color="', planeColor, '" stop-opacity=".36"/>',
-            '<stop offset="1" stop-color="', planeColor, '" stop-opacity="0"/></radialGradient>'
-        );
-    }
-
-    // The motif/outline/label path data referenced by <use>.
-    function _pathDefs(string memory bitmapPath, string memory outlinePath, string memory labelPath)
-        private
-        pure
-        returns (string memory)
-    {
-        return string.concat(
-            '<path id="n" d="', bitmapPath, '"/>',
-            '<path id="o" d="', outlinePath, '"/>',
-            '<path id="l" d="', labelPath, '"/>'
-        );
+        _bufCat(buf, '<defs>');
+        // shared white-ish glow tiers #g / #p / #h
+        _bufCat(buf, '<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/><feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/><feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        _bufCat(buf, '<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/><feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/><feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        _bufCat(buf, '<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/><feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge></filter>');
+        // figure neon tube #nt (pure colour-specific core)
+        _bufCat(buf, '<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".21" result="r"/><feColorMatrix in="r" type="matrix" values="');
+        _bufCat(buf, _neonVals(axis, "30", "2", ".99"));
+        _bufCat(buf, '" result="rc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/><feColorMatrix in="t" type="matrix" values="');
+        _bufCat(buf, _neonVals(axis, "28", "2.4", ".38"));
+        _bufCat(buf, '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".24" result="m"/><feColorMatrix in="m" type="matrix" values="');
+        _bufCat(buf, _neonVals(axis, "15", "1.4", ".025"));
+        _bufCat(buf, '" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        // extra figure glow tier #t
+        _bufCat(buf, '<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".8" result="t"/><feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 7 0 0 0 0 0 7 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="m"/><feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 .85 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="w"/><feColorMatrix in="w" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .45 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        // wide figure glow #gf — generic white for red/green, colour-specific for blue
+        _bufCat(buf, '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">');
+        if (axis == 2) {
+            _bufCat(buf, '<feGaussianBlur in="SourceGraphic" stdDeviation="2" result="t"/><feColorMatrix in="t" type="matrix" values="');
+            _bufCat(buf, _neonVals(2, "8", "1.9", "1"));
+            _bufCat(buf, '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="4.7" result="m"/><feColorMatrix in="m" type="matrix" values="');
+            _bufCat(buf, _neonVals(2, "5.5", "1.4", ".72"));
+            _bufCat(buf, '" result="mc"/>');
+        } else {
+            _bufCat(buf, '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/><feColorMatrix in="t" type="matrix" values="');
+            _bufCat(buf, _neonVals(axis, "5", "5", "1"));
+            _bufCat(buf, '" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/><feColorMatrix in="m" type="matrix" values="');
+            _bufCat(buf, _neonVals(axis, "3", "3", ".62"));
+            _bufCat(buf, '" result="mc"/>');
+        }
+        _bufCat(buf, '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        // forest particle filter #pc + plane-colour cloud gradient #cg
+        _bufCat(buf, '<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/><feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/><feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/><feGaussianBlur in="clip" stdDeviation="5" result="gr"/><feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/><feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>');
+        _bufCat(buf, '<radialGradient id="cg"><stop offset="0" stop-color="');
+        _bufCat(buf, planeColor);
+        _bufCat(buf, '" stop-opacity=".82"/><stop offset=".4" stop-color="');
+        _bufCat(buf, planeColor);
+        _bufCat(buf, '" stop-opacity=".36"/><stop offset="1" stop-color="');
+        _bufCat(buf, planeColor);
+        _bufCat(buf, '" stop-opacity="0"/></radialGradient>');
+        // path data referenced by <use>
+        _bufCat(buf, '<path id="n" d="');
+        _bufCat(buf, bitmapPath);
+        _bufCat(buf, '"/><path id="o" d="');
+        _bufCat(buf, outlinePath);
+        _bufCat(buf, '"/><path id="l" d="');
+        _bufCat(buf, labelPath);
+        _bufCat(buf, '"/></defs>');
+        return _bufStr(buf);
     }
 
     function _thumbnailBitmap(
