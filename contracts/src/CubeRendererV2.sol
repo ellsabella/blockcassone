@@ -7,6 +7,7 @@ import { CubeNFT } from "./CubeNFT.sol";
 import { ICubeRenderer } from "./interfaces/ICubeRenderer.sol";
 import { RendererAssetStore } from "./RendererAssetStore.sol";
 import { StrBuf } from "./lib/StrBuf.sol";
+import { CubeEnv } from "./lib/CubeEnv.sol";
 
 interface INormieRawImageStorage {
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
@@ -146,32 +147,38 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function _attributesJSON(CubeNFT.CubeData memory data) private view returns (string memory) {
-        return string.concat(
-            _trait("plot", uint256(data.slot).toString()),
-            ",",
-            _trait("region", regionForSlot(data.slot).toString()),
-            ",",
-            _trait("neighbourhood", neighbourhoodForSlot(data.slot).toString()),
-            ",",
-            _trait("street", streetForSlot(data.slot).toString()),
-            ",",
-            _trait(
-                "Source Kind",
-                data.sourceKind == cubes.SOURCE_KIND_NORMIE() ? "Normie" : "External ERC-721"
-            ),
-            ",",
-            _trait("Source Contract", Strings.toHexString(uint160(data.sourceContract), 20)),
-            ",",
-            _trait("Source Token ID", data.sourceTokenId.toString()),
-            ",",
-            _trait("Agentic", data.agentic ? "Y" : "N"),
-            ",",
-            _trait("Agent ID", data.agentId.toString()),
-            ",",
-            _trait("Renderer Version", "2"),
-            ",",
-            _trait("Payload Version", uint256(data.payloadVersion).toString())
-        );
+        // Built into the shared O(n) buffer: many trait calls in one concat risk
+        // the legacy stack limit (no via-IR).
+        uint256 street = streetForSlot(data.slot);
+        bytes memory buf = StrBuf.alloc(2048);
+        buf.cat(_trait("plot", uint256(data.slot).toString()));
+        buf.cat(",");
+        buf.cat(_trait("region", regionForSlot(data.slot).toString()));
+        buf.cat(",");
+        buf.cat(_trait("neighbourhood", neighbourhoodForSlot(data.slot).toString()));
+        buf.cat(",");
+        buf.cat(_trait("street", street.toString()));
+        buf.cat(",");
+        buf.cat(_trait("Environment", CubeEnv.nameForStreet(street)));
+        buf.cat(",");
+        // Population is 1 for a single cube; a merged-street token reports its
+        // occupied-plot count instead.
+        buf.cat(_trait("Population", "1"));
+        buf.cat(",");
+        buf.cat(_trait("Source Kind", data.sourceKind == cubes.SOURCE_KIND_NORMIE() ? "Normie" : "External ERC-721"));
+        buf.cat(",");
+        buf.cat(_trait("Source Contract", Strings.toHexString(uint160(data.sourceContract), 20)));
+        buf.cat(",");
+        buf.cat(_trait("Source Token ID", data.sourceTokenId.toString()));
+        buf.cat(",");
+        buf.cat(_trait("Agentic", data.agentic ? "Y" : "N"));
+        buf.cat(",");
+        buf.cat(_trait("Agent ID", data.agentId.toString()));
+        buf.cat(",");
+        buf.cat(_trait("Renderer Version", "2"));
+        buf.cat(",");
+        buf.cat(_trait("Payload Version", uint256(data.payloadVersion).toString()));
+        return buf.str();
     }
 
     function _trait(string memory traitType, string memory value)
