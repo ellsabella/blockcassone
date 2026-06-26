@@ -62,7 +62,7 @@ contract CubeRendererV2 is ICubeRenderer {
             animationURI(tokenId),
             '",',
             '"attributes":[',
-            _attributesJSON(data),
+            _attributesJSON(tokenId, data),
             "]}"
         );
     }
@@ -100,11 +100,20 @@ contract CubeRendererV2 is ICubeRenderer {
         return uint256(slot) / 8;
     }
 
+    function _sourceKindLabel(uint8 sourceKind) private view returns (string memory) {
+        if (sourceKind == cubes.SOURCE_KIND_NORMIE()) return "Normie";
+        if (sourceKind == cubes.SOURCE_KIND_MERGED_STREET()) return "Merged Street";
+        return "External ERC-721";
+    }
+
     function _tokenConfig(uint256 tokenId, CubeNFT.CubeData memory data)
         private
         view
         returns (string memory)
     {
+        if (data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET()) {
+            return _streetTokenConfig(tokenId);
+        }
         return string.concat(
             "<script>window.BLOCKCASSONE_TOKEN={",
             "tokenId:",
@@ -131,6 +140,62 @@ contract CubeRendererV2 is ICubeRenderer {
         );
     }
 
+    /// Street tokens inject `{kind:'street', plots:[...8...]}` so the renderer's
+    /// per-street view (entry.js) lights up. Each plot carries the source facts of
+    /// its (now-burned) cube; vacant plots carry only their slot.
+    function _streetTokenConfig(uint256 tokenId) private view returns (string memory) {
+        (uint32 street, uint8 occ, uint256[8] memory plotIds) = cubes.streetPlots(tokenId);
+        uint256 base = uint256(street) * 8;
+
+        // Pre-fetch each occupied plot's data + raw base64 so the buffer can be
+        // sized exactly (raw image data dominates and is variable length).
+        CubeNFT.CubeData[8] memory pds;
+        string[8] memory raws;
+        uint256 total = 512;
+        for (uint256 k = 0; k < 8; k++) {
+            if (plotIds[k] != 0) {
+                pds[k] = cubes.cubeDataUnchecked(plotIds[k]);
+                raws[k] = _rawImageBase64(pds[k]);
+            }
+            total += bytes(raws[k]).length + 192;
+        }
+
+        bytes memory buf = StrBuf.alloc(total + 64);
+        buf.cat("<script>window.BLOCKCASSONE_TOKEN={kind:'street',tokenId:");
+        buf.cat(tokenId.toString());
+        buf.cat(",street:");
+        buf.cat(uint256(street).toString());
+        buf.cat(",population:");
+        buf.cat(uint256(occ).toString());
+        buf.cat(",normieStorage:'");
+        buf.cat(Strings.toHexString(uint160(normieStorage), 20));
+        buf.cat("',plots:[");
+        for (uint256 k = 0; k < 8; k++) {
+            if (k != 0) buf.cat(",");
+            if (plotIds[k] == 0) {
+                buf.cat("{occupied:false,slot:");
+                buf.cat((base + k).toString());
+                buf.cat("}");
+            } else {
+                buf.cat("{occupied:true,slot:");
+                buf.cat(uint256(pds[k].slot).toString());
+                buf.cat(",sourceTokenId:");
+                buf.cat(pds[k].sourceTokenId.toString());
+                buf.cat(",seed:'");
+                buf.cat(Strings.toHexString(uint256(pds[k].seed), 32));
+                buf.cat("',agentic:");
+                buf.cat(pds[k].agentic ? "true" : "false");
+                buf.cat(",agentId:");
+                buf.cat(pds[k].agentId.toString());
+                buf.cat(",raw:'");
+                buf.cat(raws[k]);
+                buf.cat("'}");
+            }
+        }
+        buf.cat("]};</script>");
+        return buf.str();
+    }
+
     function _rawImageBase64(CubeNFT.CubeData memory data) private view returns (string memory) {
         return Base64.encode(_rawImageBytes(data));
     }
@@ -146,10 +211,18 @@ contract CubeRendererV2 is ICubeRenderer {
         }
     }
 
-    function _attributesJSON(CubeNFT.CubeData memory data) private view returns (string memory) {
+    function _attributesJSON(uint256 tokenId, CubeNFT.CubeData memory data) private view returns (string memory) {
         // Built into the shared O(n) buffer: many trait calls in one concat risk
         // the legacy stack limit (no via-IR).
+        bool isStreet = data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET();
         uint256 street = streetForSlot(data.slot);
+        // Population is 1 for a single cube; a merged-street token reports its
+        // occupied-plot count.
+        string memory population = "1";
+        if (isStreet) {
+            (, uint8 occ,) = cubes.streetPlots(tokenId);
+            population = uint256(occ).toString();
+        }
         bytes memory buf = StrBuf.alloc(2048);
         buf.cat(_trait("plot", uint256(data.slot).toString()));
         buf.cat(",");
@@ -161,11 +234,11 @@ contract CubeRendererV2 is ICubeRenderer {
         buf.cat(",");
         buf.cat(_trait("Environment", CubeEnv.nameForStreet(street)));
         buf.cat(",");
-        // Population is 1 for a single cube; a merged-street token reports its
-        // occupied-plot count instead.
-        buf.cat(_trait("Population", "1"));
+        buf.cat(_trait("Population", population));
         buf.cat(",");
-        buf.cat(_trait("Source Kind", data.sourceKind == cubes.SOURCE_KIND_NORMIE() ? "Normie" : "External ERC-721"));
+        buf.cat(_trait("Merged", isStreet ? "Y" : "N"));
+        buf.cat(",");
+        buf.cat(_trait("Source Kind", _sourceKindLabel(data.sourceKind)));
         buf.cat(",");
         buf.cat(_trait("Source Contract", Strings.toHexString(uint160(data.sourceContract), 20)));
         buf.cat(",");

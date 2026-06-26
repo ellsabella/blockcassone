@@ -211,6 +211,52 @@ contract CubeRendererV2Test is Test {
         return true;
     }
 
+    function testMergedStreetMetadataReportsPopulationAndMerged() public {
+        bytes memory raw2 = new bytes(64);
+        raw2[0] = hex"40";
+        normies.mint(MINTER, 6723, raw2);
+
+        // Street 0 = slots 0,1; occupy both, then merge.
+        vm.startPrank(MINTER);
+        cubes.mintNormieCube(6722, 0, bytes32("seed-a"));
+        cubes.mintNormieCube(6723, 1, bytes32("seed-b"));
+        uint256 streetId = cubes.mergeStreet(0);
+        vm.stopPrank();
+
+        string memory json = renderer.metadataJSON(streetId);
+        assertTrue(_contains(json, '"trait_type":"Population","value":"2"'));
+        assertTrue(_contains(json, '"trait_type":"Merged","value":"Y"'));
+        assertTrue(_contains(json, '"trait_type":"Source Kind","value":"Merged Street"'));
+        assertTrue(_contains(json, '"trait_type":"street","value":"0"'));
+        // Leader (lowest occupied plot) drives the SVG thumbnail.
+        assertTrue(_contains(json, '"image":"data:image/svg+xml;base64,'));
+    }
+
+    function testMergedStreetAnimationInjectsPlotsArray() public {
+        bytes memory raw2 = new bytes(64);
+        raw2[0] = hex"40";
+        normies.mint(MINTER, 6723, raw2);
+
+        vm.startPrank(MINTER);
+        cubes.mintNormieCube(6722, 0, bytes32("seed-a"));
+        cubes.mintNormieCube(6723, 1, bytes32("seed-b"));
+        uint256 streetId = cubes.mergeStreet(0);
+        vm.stopPrank();
+
+        string memory html = renderer.animationHTML(streetId);
+        assertTrue(_contains(html, "kind:'street'"));
+        assertTrue(_contains(html, "street:0"));
+        assertTrue(_contains(html, "population:2"));
+        assertTrue(_contains(html, "plots:["));
+        assertTrue(_contains(html, "occupied:true"));
+        assertTrue(_contains(html, "occupied:false")); // slots 2..7 are vacant
+        assertTrue(_contains(html, "sourceTokenId:6722"));
+        assertTrue(_contains(html, "sourceTokenId:6723"));
+        assertTrue(_contains(html, Base64.encode(normies.getTokenRawImageData(6722))));
+        // No network references leak into the merged-street payload.
+        assertFalse(_contains(html, "api.normies.art"));
+    }
+
     function _contains(string memory value, string memory needle) private pure returns (bool) {
         bytes memory valueBytes = bytes(value);
         bytes memory needleBytes = bytes(needle);

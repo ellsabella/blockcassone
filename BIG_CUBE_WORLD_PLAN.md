@@ -92,6 +92,16 @@ edge-point identity. This is the crux that makes move/merge coherent.
 5. **Move** — `moveCube(cubeId, vacantSlot)` + UI.
 6. **Merge** — kind flag, 8→1 burn, street-record store, street SVG + HTML,
    placeholders. *(produces the `TOKEN.plots` the street view consumes)*
+   **🟡 BUILT, pending WSL test.** `mergeStreet(street)` in `CubeNFT`: caller must
+   solely own every occupied plot; occupied plot cubes are burned (CubeData +
+   source/normie mappings retained), all 8 slots lock to the new street token.
+   Leader = lowest occupied plot (drives the SVG thumbnail). Irreversible v1 (data
+   preserved for a future un-merge). `SOURCE_KIND_MERGED_STREET = 3`; `StreetInfo`
+   record + `streetPlots()` / `cubeDataUnchecked()` getters. `CubeRendererV2`:
+   street tokens emit `{kind:'street', plots:[…8…]}` (matches `preview:street`),
+   `Merged`/`Population`/`Source Kind = "Merged Street"` traits; thumbnail renderer
+   treats kind 3 like its Normie leader. *(v1 assumes Normie leaders — true for
+   genesis.)*
 7. **Customization** — flatten + store + UI; CC0 review.
 8. **WebUI** — explore tab, customize tab, move/merge flows.
 

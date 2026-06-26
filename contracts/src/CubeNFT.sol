@@ -16,6 +16,7 @@ interface IAgentStatusRegistry {
 contract CubeNFT is ERC721, Ownable {
     uint8 public constant SOURCE_KIND_NORMIE = 1;
     uint8 public constant SOURCE_KIND_EXTERNAL_ERC721 = 2;
+    uint8 public constant SOURCE_KIND_MERGED_STREET = 3;
 
     struct CubeData {
         uint32 slot;
@@ -335,6 +336,103 @@ contract CubeNFT is ERC721, Ownable {
             data.agentic = agentic;
             data.agentId = agentId;
         }
+    }
+
+    // ---- Street merge (8 -> 1) ----------------------------------------------
+    // A wallet that solely owns every occupied plot of a street can merge it into
+    // a single "street" token. The plot cubes are burned, but their CubeData (and
+    // the source/normie mappings) are retained so the street can still be rendered
+    // and so the source assets stay "used". The street token locks all 8 slots.
+
+    struct StreetInfo {
+        uint32 street; // 0 .. (totalSlots / 8 - 1)
+        uint8 occupiedCount; // population: occupied plots that were merged
+        uint256[8] plotCubeIds; // original cubeId per plot (0 = vacant)
+    }
+
+    mapping(uint256 streetTokenId => StreetInfo) private _streetInfo;
+
+    error EmptyStreet(uint32 street);
+    error NotStreetOwner(uint32 street, uint256 cubeId);
+    error StreetAlreadyMerged(uint32 street);
+
+    event StreetMerged(
+        uint256 indexed streetTokenId,
+        address indexed owner,
+        uint32 indexed street,
+        uint8 occupiedCount
+    );
+
+    /// @notice Merge every occupied plot of `street` (all owned by the caller)
+    ///         into one street token. The occupied plot cubes are burned and all
+    ///         8 slots become owned by the new street token.
+    /// @dev Reverts unless the caller solely owns every occupied plot. The leader
+    ///      (street SVG) is the lowest occupied plot. Irreversible in v1, but plot
+    ///      CubeData is preserved so an un-merge could be added later.
+    function mergeStreet(uint32 street) external returns (uint256 streetTokenId) {
+        uint256 base = uint256(street) * 8;
+        if (base + 8 > totalSlots) revert InvalidSlot(uint32(base));
+
+        uint256[8] memory plots;
+        uint256 occ;
+        uint256 leader;
+        for (uint256 k = 0; k < 8; k++) {
+            uint256 cid = cubeForSlot[uint32(base + k)];
+            if (cid == 0) continue;
+            if (_cubeData[cid].sourceKind == SOURCE_KIND_MERGED_STREET) {
+                revert StreetAlreadyMerged(street);
+            }
+            if (ownerOf(cid) != msg.sender) revert NotStreetOwner(street, cid);
+            plots[k] = cid;
+            if (leader == 0) leader = cid; // lowest occupied plot leads
+            occ++;
+        }
+        if (occ == 0) revert EmptyStreet(street);
+
+        streetTokenId = _nextCubeId++;
+        CubeData memory ld = _cubeData[leader];
+        _cubeData[streetTokenId] = CubeData({
+            slot: ld.slot, // leader's slot drives the street thumbnail (colour/geometry)
+            sourceKind: SOURCE_KIND_MERGED_STREET,
+            rendererVersion: ld.rendererVersion,
+            payloadVersion: ld.payloadVersion,
+            agentic: false,
+            agentId: 0,
+            mintedAt: uint64(block.timestamp),
+            sourceChainId: block.chainid,
+            sourceContract: ld.sourceContract,
+            sourceTokenId: ld.sourceTokenId, // leader Normie -> street SVG thumbnail
+            seed: ld.seed
+        });
+
+        StreetInfo storage si = _streetInfo[streetTokenId];
+        si.street = street;
+        si.occupiedCount = uint8(occ);
+        for (uint256 k = 0; k < 8; k++) {
+            si.plotCubeIds[k] = plots[k];
+            if (plots[k] != 0) _burn(plots[k]); // CubeData retained for rendering
+            cubeForSlot[uint32(base + k)] = streetTokenId; // street locks all 8 slots
+        }
+
+        _safeMint(msg.sender, streetTokenId);
+        emit StreetMerged(streetTokenId, msg.sender, street, uint8(occ));
+    }
+
+    /// @notice CubeData for a (possibly burned) cube, with no ownership check.
+    /// @dev For the renderer to read merged-street plot cubes after they're burned.
+    function cubeDataUnchecked(uint256 cubeId) external view returns (CubeData memory) {
+        return _cubeData[cubeId];
+    }
+
+    /// @notice The street index, population, and 8 plot cube ids (0 = vacant) of a
+    ///         merged-street token.
+    function streetPlots(uint256 streetTokenId)
+        external
+        view
+        returns (uint32 street, uint8 occupiedCount, uint256[8] memory plotCubeIds)
+    {
+        StreetInfo storage si = _streetInfo[streetTokenId];
+        return (si.street, si.occupiedCount, si.plotCubeIds);
     }
 
     function setRenderer(address newRenderer) external onlyOwner {
