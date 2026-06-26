@@ -15,18 +15,18 @@ pragma solidity ^0.8.26;
 library CubeEnv {
     bytes32 internal constant WORLD_SEED = keccak256("blockcassone-environments-v1");
 
-    // Rarity weights out of 100 (first pass — tune freely):
-    //   commons  grass 28, forest 24
-    //   uncommon desert 18, water 16
-    //   rare     mountain 9, ice 5
+    // Rarity weights out of 100:
+    //   commons   grass 34, forest 30, water 20
+    //   uncommon  desert 12
+    //   rare      mountain 3, ice 1
     function idForStreet(uint256 street) internal pure returns (uint256) {
         uint256 r = uint256(keccak256(abi.encodePacked(WORLD_SEED, street))) % 100;
-        if (r < 28) return 2; // grass
-        if (r < 52) return 3; // forest
-        if (r < 70) return 0; // desert
-        if (r < 86) return 1; // water
-        if (r < 95) return 4; // mountain
-        return 5; // ice
+        if (r < 34) return 2; // grass 34
+        if (r < 64) return 3; // forest 30
+        if (r < 84) return 1; // water 20
+        if (r < 96) return 0; // desert 12
+        if (r < 99) return 4; // mountain 3
+        return 5; // ice 1
     }
 
     function nameForStreet(uint256 street) internal pure returns (string memory) {

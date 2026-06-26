@@ -39,12 +39,12 @@ edge-point identity. This is the crux that makes move/merge coherent.
 ### 2. Environment (biome) — street-level, rarity-weighted
 - One environment per **street**; all 8 plots share it.
 - Deterministic + permanent: `id = weightedPick(keccak(WORLD_SEED, street))`.
-- 6 biomes (`desert, water, grass, forest, mountain, ice`), first-pass weights
-  (out of 100): grass 28, forest 24, desert 18, water 16, mountain 9, ice 5.
+- 6 biomes (`desert, water, grass, forest, mountain, ice`), weights (out of 100):
+  grass 34, forest 30, water 20, desert 12, mountain 3, ice 1.
 - `Environment` metadata trait + renderer biome visuals. JS viewer must mirror
   the same WORLD_SEED + weights (sidePlan-style parity).
-- **Status: on-chain `CubeEnv` lib + `Environment` trait done; weights + JS
-  parity pending.**
+- **Status: on-chain `CubeEnv` lib + `Environment` trait done; weights confirmed;
+  JS parity pending.**
 
 ### 3. Move
 - Holder moves a cube they own from its plot to **any vacant plot** via the UI.
@@ -103,6 +103,5 @@ edge-point identity. This is the crux that makes move/merge coherent.
 ## Open decisions
 
 - Finalize the **plot-allocation algorithm** (≤3/wallet/street, keep-together).
-- **Environment weights** (confirm/tune the first pass).
 - Merge **"leader" rule** + whether merge is reversible.
 - Customization **flatten format** + the source allow-list policy.
