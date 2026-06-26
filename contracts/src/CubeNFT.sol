@@ -55,6 +55,9 @@ contract CubeNFT is ERC721, Ownable {
     error ExternalSourceIsNormie();
     error InvalidAgentBinding(bool agentic, uint256 agentId);
     error NonexistentCube(uint256 cubeId);
+    error MovesDisabled();
+    error NotCubeOwner(uint256 cubeId, address caller);
+    error CannotMoveStreet(uint256 cubeId);
     error RendererNotSet();
 
     event CubeMinted(
@@ -70,6 +73,8 @@ contract CubeNFT is ERC721, Ownable {
     );
     event RendererUpdated(address indexed oldRenderer, address indexed newRenderer);
     event AgentStatusRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
+    event CubeMoved(uint256 indexed cubeId, uint32 indexed fromSlot, uint32 indexed toSlot, address owner);
+    event MovesEnabledUpdated(bool enabled);
 
     address public immutable normieContract;
     uint32 public immutable totalSlots;
@@ -77,6 +82,11 @@ contract CubeNFT is ERC721, Ownable {
 
     uint256 private _nextCubeId = 1;
     address public agentStatusRegistry;
+
+    // Post-mint move game. Off during the genesis mint so a moved cube can't land
+    // on a slot the allocator will target (which would brick a mint tx); the owner
+    // flips it on once the mint is done.
+    bool public movesEnabled;
 
     mapping(uint256 cubeId => CubeData data) private _cubeData;
     mapping(uint32 slot => uint256 cubeId) public cubeForSlot;
@@ -433,6 +443,39 @@ contract CubeNFT is ERC721, Ownable {
     {
         StreetInfo storage si = _streetInfo[streetTokenId];
         return (si.street, si.occupiedCount, si.plotCubeIds);
+    }
+
+    // ---- Move ----------------------------------------------------------------
+    // The cube keeps its seed (its edge-point identity) but takes a new slot, so
+    // its colour, geometry, street, and environment follow the destination.
+
+    function setMovesEnabled(bool enabled) external onlyOwner {
+        movesEnabled = enabled;
+        emit MovesEnabledUpdated(enabled);
+    }
+
+    /// @notice Move a cube you own to any vacant slot. Merged-street tokens are
+    ///         anchored and cannot be moved.
+    function moveCube(uint256 cubeId, uint32 newSlot) external {
+        if (!movesEnabled) revert MovesDisabled();
+
+        address owner = _ownerOf(cubeId);
+        if (owner == address(0)) revert NonexistentCube(cubeId);
+        if (owner != msg.sender) revert NotCubeOwner(cubeId, msg.sender);
+
+        CubeData storage data = _cubeData[cubeId];
+        if (data.sourceKind == SOURCE_KIND_MERGED_STREET) revert CannotMoveStreet(cubeId);
+        if (newSlot >= totalSlots) revert InvalidSlot(newSlot);
+
+        uint256 occupant = cubeForSlot[newSlot];
+        if (occupant != 0) revert SlotOccupied(newSlot, occupant);
+
+        uint32 oldSlot = data.slot;
+        cubeForSlot[oldSlot] = 0;
+        cubeForSlot[newSlot] = cubeId;
+        data.slot = newSlot;
+
+        emit CubeMoved(cubeId, oldSlot, newSlot, msg.sender);
     }
 
     function setRenderer(address newRenderer) external onlyOwner {

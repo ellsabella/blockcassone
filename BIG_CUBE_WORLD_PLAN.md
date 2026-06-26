@@ -98,7 +98,13 @@ edge-point identity. This is the crux that makes move/merge coherent.
    of-8 final street. Caveat: togetherness is **per-transaction** (split mints far
    apart land wherever the cursor then sits). `NoVacantPlot` guards the >1536-per-
    wallet edge.
-5. **Move** — `moveCube(cubeId, vacantSlot)` + UI.
+5. **Move** — **🟡 BUILT (contract), pending WSL test; UI later.** `moveCube(cubeId,
+   newSlot)` in `CubeNFT`: owner-only, cube keeps its `seed` but takes a new slot,
+   so colour/geometry/street/environment follow. Gated behind owner-flipped
+   `movesEnabled` (off during mint so a move can't collide with an allocator-
+   targeted slot). Merged-street tokens are anchored (`CannotMoveStreet`); target
+   must be a vacant in-range slot. Frees the old slot for reuse / street
+   consolidation before a merge.
 6. **Merge** — kind flag, 8→1 burn, street-record store, street SVG + HTML,
    placeholders. *(produces the `TOKEN.plots` the street view consumes)*
    **🟡 BUILT, pending WSL test.** `mergeStreet(street)` in `CubeNFT`: caller must
