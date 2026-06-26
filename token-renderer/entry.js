@@ -18,6 +18,7 @@ import {
 } from '../renderer/src/math.js';
 import { loadMaterialFromSource } from '../renderer/src/materials.js';
 import { buildCubeDetailScene } from '../viewer/detail-scene-builder.js';
+import { buildEmptySlotItems } from '../viewer/environments.js';
 import { buildEdgePointDebug } from '../viewer/materials/debug-edge-points.js';
 import { setCubeAssignmentResolver } from '../viewer/assignment.js';
 import { hydrateNormieRawBytes, initNormiesManager } from '../viewer/normies-manager.js';
@@ -89,10 +90,12 @@ function setUniformByName(gl, loc, name, value) {
   else if (arr.length === 4) gl.uniform4fv(loc, arr);
 }
 
-function createOrbit(canvas, target, distance) {
+function createOrbit(canvas, target0, distance0) {
   let yaw = Math.PI * 0.22;
   let pitch = Math.PI * 0.12;
-  let dist = distance;
+  let target = Array.from(target0);
+  let baseDist = distance0;
+  let dist = distance0;
   let drag = false;
   let lastX = 0;
   let lastY = 0;
@@ -116,10 +119,17 @@ function createOrbit(canvas, target, distance) {
   });
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    dist = Math.max(distance * 0.45, Math.min(distance * 3.0, dist * Math.exp(e.deltaY * 0.001)));
+    dist = Math.max(baseDist * 0.45, Math.min(baseDist * 3.0, dist * Math.exp(e.deltaY * 0.001)));
   }, { passive: false });
 
   return {
+    // Recentre on a new target/distance (used to toggle street overview vs a
+    // focused cube). Keeps the current yaw/pitch.
+    retarget(newTarget, newDist) {
+      target = Array.from(newTarget);
+      baseDist = newDist;
+      dist = newDist;
+    },
     camera(aspect) {
       const pos = new Float32Array([
         target[0] + Math.sin(yaw) * Math.cos(pitch) * dist,
@@ -298,6 +308,48 @@ function drawScene({ gl, items, cam, materials, meshes, envTex, t }) {
   gl.bindVertexArray(null);
 }
 
+// A single cube renders one occupied plot; a merged-street token renders the
+// street's 8 plots (occupied cubes + vacant biome placeholders). For local
+// testing without the merge contract, append #street to the URL to synthesize a
+// mock street (this cube on plots 0-2, the rest vacant).
+function readPlots() {
+  const plotFrom = (p, motifIdx) => ({
+    motifIdx,
+    occupied: Boolean(p && p.raw),
+    normieId: Number((p && p.sourceTokenId) || 0),
+    seed: p && p.seed,
+    raw: p && p.raw,
+    traits: (p && p.traits) || null,
+    agentic: Boolean(p && p.agentic),
+    agentId: p && p.agentId ? String(p.agentId) : '',
+  });
+
+  if (Array.isArray(TOKEN.plots) && TOKEN.plots.length) {
+    const base = (TOKEN.street != null ? Number(TOKEN.street) : Number(TOKEN.plots[0].slot || 0) >> 3) * 8;
+    return { mode: 'street', base, plots: TOKEN.plots.slice(0, 8).map((p, k) => plotFrom(p, base + k)) };
+  }
+
+  if (location.hash.toLowerCase().includes('street')) {
+    const base = Number(TOKEN.slot || 0) & ~7;
+    const plots = [];
+    for (let k = 0; k < 8; k++) plots.push(plotFrom(k < 3 ? TOKEN : null, base + k));
+    return { mode: 'street', base, plots };
+  }
+
+  const motifIdx = Number(TOKEN.slot || 0);
+  return { mode: 'cube', base: motifIdx, plots: [plotFrom(TOKEN, motifIdx)] };
+}
+
+function unionAABB(hilbert, motifs) {
+  const mn = [Infinity, Infinity, Infinity];
+  const mx = [-Infinity, -Infinity, -Infinity];
+  for (const m of motifs) {
+    const b = cubeAABB(hilbert, m);
+    for (let i = 0; i < 3; i++) { mn[i] = Math.min(mn[i], b.mn[i]); mx[i] = Math.max(mx[i], b.mx[i]); }
+  }
+  return { mn, mx };
+}
+
 async function main() {
   const canvas = document.getElementById('c');
   const label = document.getElementById('h');
@@ -312,32 +364,23 @@ async function main() {
     return;
   }
 
-  const motifIdx = Number(TOKEN.slot || 0);
-  const normieId = Number(TOKEN.sourceTokenId || 0);
-  const nft = {
-    isNormie: true,
-    normieId,
-    agentic: Boolean(TOKEN.agentic),
-    agentId: TOKEN.agentId ? String(TOKEN.agentId) : '',
-  };
-  setCubeAssignmentResolver(idx => Number(idx) === motifIdx ? nft : null);
+  const scene = readPlots();
+  const occupied = scene.plots.filter(p => p.occupied);
 
-  const raw = rawBytesFromBase64(TOKEN.raw);
-  hydrateNormieRawBytes({
-    id: normieId,
-    raw,
-    traits: TOKEN.traits || null,
-    agentic: Boolean(TOKEN.agentic),
-    agentId: TOKEN.agentId ? String(TOKEN.agentId) : '',
-  });
+  // One nft per occupied plot (resolved by motif); hydrate each Normie's bytes.
+  const nftByMotif = new Map();
+  for (const p of occupied) {
+    nftByMotif.set(p.motifIdx, { isNormie: true, normieId: p.normieId, agentic: p.agentic, agentId: p.agentId });
+    hydrateNormieRawBytes({ id: p.normieId, raw: rawBytesFromBase64(p.raw), traits: p.traits, agentic: p.agentic, agentId: p.agentId });
+  }
+  setCubeAssignmentResolver(idx => nftByMotif.get(Number(idx)) || null);
 
   const hilbert = generateHilbert3D(ORDER);
   assignPlaneProperties(hilbert, new Random('0x' + '12345678'.repeat(8)));
-  // Per-cube edge points — the same sidePlan as the 2D thumbnail and the dev
-  // viewer — keyed on the token's on-chain seed, so the 3D cube's owned edge
-  // points (which sprout the forest strands) match its image exactly.
-  if (TOKEN.seed) {
-    assignMotifEdgePoints(hilbert.planes.slice(motifIdx * 3, motifIdx * 3 + 3), TOKEN.seed);
+  // Per-cube edge points (sidePlan) keyed on each plot's on-chain seed, so the
+  // 3D cubes' owned edge points match their 2D thumbnails.
+  for (const p of occupied) {
+    if (p.seed) assignMotifEdgePoints(hilbert.planes.slice(p.motifIdx * 3, p.motifIdx * 3 + 3), p.seed);
   }
   buildPlaneEdges(hilbert);
   const blocks = buildBlocks(hilbert);
@@ -360,32 +403,62 @@ async function main() {
   };
   const envTex = makePlaceholderTexture(gl, [8, 8, 10, 255]);
 
-  const box = cubeAABB(hilbert, motifIdx);
-  const target = centerOfAABB(box);
-  const orbit = createOrbit(canvas, target, sizeOfAABB(box) * 2.35);
-  const items = buildCubeDetailScene({
-    motifIdx,
-    hilbert,
-    serializedPlanes,
-    planesForMotif,
-    gl,
-    meshes,
-    cubeCtx: { motifIdx, focused: true },
-    showCubeGlass: false,
-    showEdgePoints: true,
-    showStoneWalker: true,
-    showVoxels: true,
-    showHilbertLines: true,
-    showCardioid: true,
-    showForest: true,
-    showNormieOutline: true,
-    showNormieIdLabel: true,
-    showNormieTraitsBanner: true,
-    showPlaneOutline: false,
-    buildEdgePointDebug,
-    isAgenticNonNormieCube: () => false,
-    categoryForMotif: () => TOKEN.agentic ? 3 : 1,
-  });
+  // Build every plot: occupied -> full cube detail; vacant -> biome placeholder.
+  const items = [];
+  for (const p of scene.plots) {
+    const built = p.occupied
+      ? buildCubeDetailScene({
+          motifIdx: p.motifIdx,
+          hilbert,
+          serializedPlanes,
+          planesForMotif,
+          gl,
+          meshes,
+          cubeCtx: { motifIdx: p.motifIdx, focused: true },
+          showCubeGlass: false,
+          showEdgePoints: true,
+          showStoneWalker: true,
+          showVoxels: true,
+          showHilbertLines: true,
+          showCardioid: true,
+          showForest: true,
+          showNormieOutline: true,
+          showNormieIdLabel: true,
+          showNormieTraitsBanner: scene.mode === 'cube',
+          showPlaneOutline: false,
+          buildEdgePointDebug,
+          isAgenticNonNormieCube: () => false,
+          categoryForMotif: () => p.agentic ? 3 : 1,
+        })
+      : buildEmptySlotItems(p.motifIdx, planesForMotif(p.motifIdx), cubeAABB(hilbert, p.motifIdx), gl, meshes);
+    for (const it of built) items.push(it);
+  }
+
+  // Camera: street overview frames all 8 plots; focus frames one cube. 'V'
+  // toggles street<->cube; arrows / 1-8 cycle the occupied cubes.
+  const cubeView = (m) => { const b = cubeAABB(hilbert, m); return { target: centerOfAABB(b), dist: sizeOfAABB(b) * 2.35 }; };
+  const overBox = unionAABB(hilbert, scene.plots.map(p => p.motifIdx));
+  const overview = { target: centerOfAABB(overBox), dist: sizeOfAABB(overBox) * 1.7 };
+  const focusable = occupied.map(p => p.motifIdx);
+
+  const startView = scene.mode === 'cube' ? cubeView(focusable[0]) : overview;
+  const orbit = createOrbit(canvas, startView.target, startView.dist);
+
+  let viewMode = scene.mode === 'cube' ? 'cube' : 'street';
+  let focusIdx = 0;
+  function applyView() {
+    if (viewMode === 'cube' && focusable.length) { const v = cubeView(focusable[focusIdx]); orbit.retarget(v.target, v.dist); }
+    else orbit.retarget(overview.target, overview.dist);
+  }
+  if (scene.mode === 'street') {
+    addEventListener('keydown', (e) => {
+      const k = e.key.toLowerCase();
+      if (k === 'v') { if (focusable.length) { viewMode = viewMode === 'street' ? 'cube' : 'street'; applyView(); } }
+      else if (viewMode === 'cube' && (k === 'arrowright' || k === ' ')) { focusIdx = (focusIdx + 1) % focusable.length; applyView(); }
+      else if (viewMode === 'cube' && k === 'arrowleft') { focusIdx = (focusIdx - 1 + focusable.length) % focusable.length; applyView(); }
+      else if (/^[1-8]$/.test(k) && Number(k) <= focusable.length) { viewMode = 'cube'; focusIdx = Number(k) - 1; applyView(); }
+    });
+  }
 
   const start = performance.now();
   function resize() {
@@ -406,7 +479,14 @@ async function main() {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const cam = orbit.camera(canvas.width / Math.max(1, canvas.height));
     drawScene({ gl, items, cam, materials, meshes, envTex, t });
-    label.textContent = `Cube #${TOKEN.tokenId} / Normie #${normieId} / plot ${motifIdx}`;
+    if (scene.mode === 'street') {
+      const street = scene.base >> 3;
+      label.textContent = viewMode === 'street'
+        ? `Street #${street}  ·  ${occupied.length}/8 cubes  ·  press V for cube view`
+        : `Street #${street}  ·  cube ${focusIdx + 1}/${focusable.length} (Normie #${nftByMotif.get(focusable[focusIdx])?.normieId})  ·  V street  ←→ cycle`;
+    } else {
+      label.textContent = `Cube #${TOKEN.tokenId} / Normie #${occupied[0]?.normieId} / plot ${scene.base}`;
+    }
     requestAnimationFrame(frame);
   }
   frame();
