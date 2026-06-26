@@ -58,6 +58,8 @@ contract CubeNFT is ERC721, Ownable {
     error MovesDisabled();
     error NotCubeOwner(uint256 cubeId, address caller);
     error CannotMoveStreet(uint256 cubeId);
+    error OnlyCustomizer(address caller);
+    error CannotCustomizeStreet(uint256 cubeId);
     error RendererNotSet();
 
     event CubeMinted(
@@ -75,6 +77,13 @@ contract CubeNFT is ERC721, Ownable {
     event AgentStatusRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event CubeMoved(uint256 indexed cubeId, uint32 indexed fromSlot, uint32 indexed toSlot, address owner);
     event MovesEnabledUpdated(bool enabled);
+    event CustomizerUpdated(address indexed oldCustomizer, address indexed newCustomizer);
+    event CubeCustomized(
+        uint256 indexed cubeId,
+        address indexed sourceContract,
+        uint256 sourceTokenId,
+        uint8 payloadVersion
+    );
 
     address public immutable normieContract;
     uint32 public immutable totalSlots;
@@ -87,6 +96,11 @@ contract CubeNFT is ERC721, Ownable {
     // on a slot the allocator will target (which would brick a mint tx); the owner
     // flips it on once the mint is done.
     bool public movesEnabled;
+
+    // Authorized to re-base a cube's displayed source (post-mint customization).
+    // Set to the customization controller, which verifies cube ownership and a
+    // flattening attestation before calling.
+    address public customizer;
 
     mapping(uint256 cubeId => CubeData data) private _cubeData;
     mapping(uint32 slot => uint256 cubeId) public cubeForSlot;
@@ -476,6 +490,39 @@ contract CubeNFT is ERC721, Ownable {
         data.slot = newSlot;
 
         emit CubeMoved(cubeId, oldSlot, newSlot, msg.sender);
+    }
+
+    // ---- Customization (post-mint re-base) -----------------------------------
+    // The cube keeps its seed (identity) and slot (location/colour/geometry) but
+    // adopts a new displayed source. Art payload + ownership/attestation checks
+    // live in the customization controller; this only re-bases the source facts.
+
+    function setCustomizer(address newCustomizer) external onlyOwner {
+        emit CustomizerUpdated(customizer, newCustomizer);
+        customizer = newCustomizer;
+    }
+
+    /// @notice Re-base a cube's displayed source. Sets it to an external source
+    ///         with a recorded art payload (`payloadVersion`), preserving seed and
+    ///         slot. Callable only by the customizer.
+    function customizeCubeSource(
+        uint256 cubeId,
+        address sourceContract,
+        uint256 sourceTokenId,
+        uint8 payloadVersion
+    ) external {
+        if (msg.sender != customizer) revert OnlyCustomizer(msg.sender);
+        if (_ownerOf(cubeId) == address(0)) revert NonexistentCube(cubeId);
+
+        CubeData storage data = _cubeData[cubeId];
+        if (data.sourceKind == SOURCE_KIND_MERGED_STREET) revert CannotCustomizeStreet(cubeId);
+
+        data.sourceKind = SOURCE_KIND_EXTERNAL_ERC721;
+        data.sourceContract = sourceContract;
+        data.sourceTokenId = sourceTokenId;
+        data.payloadVersion = payloadVersion;
+
+        emit CubeCustomized(cubeId, sourceContract, sourceTokenId, payloadVersion);
     }
 
     function setRenderer(address newRenderer) external onlyOwner {

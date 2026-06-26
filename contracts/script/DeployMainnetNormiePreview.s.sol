@@ -111,7 +111,8 @@ contract DeployMainnetNormiePreview is Script {
                 deployment.cubes,
                 deployment.assetStore,
                 NormieAddresses.NORMIES_STORAGE,
-                address(deployment.thumbnailRenderer)
+                address(deployment.thumbnailRenderer),
+                address(0)
             );
 
         vm.broadcast();

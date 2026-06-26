@@ -17,6 +17,10 @@ interface ICubeThumbnailRenderer {
     function thumbnailSVG(uint256 tokenId) external view returns (string memory);
 }
 
+interface INonNormieArtStore {
+    function imageBytesForCube(uint256 cubeId) external view returns (bytes memory);
+}
+
 contract CubeRendererV2 is ICubeRenderer {
     using Strings for uint256;
     using StrBuf for bytes;
@@ -29,17 +33,20 @@ contract CubeRendererV2 is ICubeRenderer {
     RendererAssetStore public immutable assets;
     address public immutable normieStorage;
     address public immutable thumbnailRenderer;
+    address public immutable nonNormieStore;
 
     constructor(
         CubeNFT cubes_,
         RendererAssetStore assets_,
         address normieStorage_,
-        address thumbnailRenderer_
+        address thumbnailRenderer_,
+        address nonNormieStore_
     ) {
         cubes = cubes_;
         assets = assets_;
         normieStorage = normieStorage_;
         thumbnailRenderer = thumbnailRenderer_;
+        nonNormieStore = nonNormieStore_;
     }
 
     function tokenURI(uint256 tokenId) external view returns (string memory) {
@@ -135,7 +142,7 @@ contract CubeRendererV2 is ICubeRenderer {
             ",seed:'",
             Strings.toHexString(uint256(data.seed), 32),
             "',raw:'",
-            _rawImageBase64(data),
+            _rawImageBase64(tokenId, data),
             "'};</script>"
         );
     }
@@ -155,7 +162,7 @@ contract CubeRendererV2 is ICubeRenderer {
         for (uint256 k = 0; k < 8; k++) {
             if (plotIds[k] != 0) {
                 pds[k] = cubes.cubeDataUnchecked(plotIds[k]);
-                raws[k] = _rawImageBase64(pds[k]);
+                raws[k] = _rawImageBase64(plotIds[k], pds[k]);
             }
             total += bytes(raws[k]).length + 192;
         }
@@ -196,19 +203,41 @@ contract CubeRendererV2 is ICubeRenderer {
         return buf.str();
     }
 
-    function _rawImageBase64(CubeNFT.CubeData memory data) private view returns (string memory) {
-        return Base64.encode(_rawImageBytes(data));
+    function _rawImageBase64(uint256 cubeId, CubeNFT.CubeData memory data)
+        private
+        view
+        returns (string memory)
+    {
+        return Base64.encode(_rawImageBytes(cubeId, data));
     }
 
-    function _rawImageBytes(CubeNFT.CubeData memory data) private view returns (bytes memory) {
-        if (data.sourceKind != cubes.SOURCE_KIND_NORMIE() || normieStorage == address(0)) return "";
-        try INormieRawImageStorage(normieStorage).getTokenRawImageData(data.sourceTokenId) returns (
-            bytes memory raw
-        ) {
-            return raw;
-        } catch {
-            return "";
+    function _rawImageBytes(uint256 cubeId, CubeNFT.CubeData memory data)
+        private
+        view
+        returns (bytes memory)
+    {
+        if (data.sourceKind == cubes.SOURCE_KIND_NORMIE()) {
+            if (normieStorage == address(0)) return "";
+            try INormieRawImageStorage(normieStorage).getTokenRawImageData(data.sourceTokenId) returns (
+                bytes memory raw
+            ) {
+                return raw;
+            } catch {
+                return "";
+            }
         }
+        // External / customized cubes pull the store's recorded art (already the
+        // 1-bit bitmap the 3D view expects). Same source as the thumbnail.
+        if (nonNormieStore != address(0)) {
+            try INonNormieArtStore(nonNormieStore).imageBytesForCube(cubeId) returns (
+                bytes memory bitmap
+            ) {
+                return bitmap;
+            } catch {
+                return "";
+            }
+        }
+        return "";
     }
 
     function _attributesJSON(uint256 tokenId, CubeNFT.CubeData memory data) private view returns (string memory) {

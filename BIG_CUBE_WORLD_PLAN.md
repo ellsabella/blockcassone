@@ -117,7 +117,16 @@ edge-point identity. This is the crux that makes move/merge coherent.
    `Merged`/`Population`/`Source Kind = "Merged Street"` traits; thumbnail renderer
    treats kind 3 like its Normie leader. *(v1 assumes Normie leaders — true for
    genesis.)*
-7. **Customization** — flatten + store + UI; CC0 review.
+7. **Customization** — **🟡 BUILT (contract), pending WSL test; UI + CC0 review
+   later.** `CubeMintController.customizeCube`: holder re-bases a cube they own
+   onto a new flattened 40×40 artwork (400-byte 2-bit payload) via an EIP-712
+   flattening attestation. Cube keeps seed + slot but **adopts the new source**
+   (`CubeNFT.customizeCubeSource`, `customizer`-gated → `sourceKind=EXTERNAL`);
+   re-basable any number of times (`NonNormieArtStore.updateTonalBands2Bit` upsert).
+   Both renderers now serve the store art (closed V2's 3D non-Normie gap via
+   `nonNormieStore.imageBytesForCube`). Trust: ownership/CC0 enforced off-chain by
+   the flattening signer. *(Open: CC0 registry `data/cc0-projects.json` review;
+   the off-chain flatten + signer service; customize UI.)*
 8. **WebUI** — explore tab, customize tab, move/merge flows.
 
 ### Biome placeholders (to revisit)

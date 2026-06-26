@@ -11,6 +11,7 @@ import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
+import { NonNormieArtStore } from "../src/NonNormieArtStore.sol";
 
 contract RendererV2MockNormies is ERC721 {
     mapping(uint256 tokenId => bytes rawImageData) private _rawImageData;
@@ -37,20 +38,23 @@ contract CubeRendererV2Test is Test {
     RendererAssetStore private assets;
     CubeThumbnailRendererV1 private thumbnailRenderer;
     CubeRendererV2 private renderer;
+    NonNormieArtStore private store;
 
     function setUp() public {
         normies = new RendererV2MockNormies();
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
+        store = new NonNormieArtStore(address(this)); // test acts as store owner
         thumbnailRenderer = new CubeThumbnailRendererV1(
             cubes,
             address(normies),
-            address(0),
+            address(store),
             address(new CubeHilbertGeometry()),
             address(new CubeFrameLayer())
         );
-        renderer = new CubeRendererV2(cubes, assets, address(normies), address(thumbnailRenderer));
+        renderer =
+            new CubeRendererV2(cubes, assets, address(normies), address(thumbnailRenderer), address(store));
 
         bytes memory raw = new bytes(200);
         raw[0] = hex"80";
@@ -255,6 +259,35 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(html, Base64.encode(normies.getTokenRawImageData(6722))));
         // No network references leak into the merged-street payload.
         assertFalse(_contains(html, "api.normies.art"));
+    }
+
+    function testCustomizedCubeRendersStoreArt() public {
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
+
+        // Re-base: record a flattened payload + flip the source (test = store owner
+        // + customizer; the controller/attestation flow is covered separately).
+        bytes memory payload = new bytes(400);
+        for (uint256 i = 0; i < 400; i++) {
+            payload[i] = 0xFF; // every cell "on" -> a full 200-byte bitmap, distinct from the mock Normie raw
+        }
+        store.recordTonalBands2Bit(cubeId, payload);
+        vm.prank(OWNER);
+        cubes.setCustomizer(address(this));
+        cubes.customizeCubeSource(cubeId, address(0xABCD), 42, 1);
+
+        // Metadata adopts the new source.
+        string memory json = renderer.metadataJSON(cubeId);
+        assertTrue(_contains(json, '"trait_type":"Source Kind","value":"External ERC-721"'));
+        assertTrue(_contains(json, '"trait_type":"Source Token ID","value":"42"'));
+
+        // The 3D/animation raw is the store bitmap, not the Normie raw.
+        string memory html = renderer.animationHTML(cubeId);
+        assertTrue(_contains(html, Base64.encode(store.imageBytesForCube(cubeId))));
+        assertFalse(_contains(html, Base64.encode(normies.getTokenRawImageData(6722))));
+
+        // Image still renders (thumbnail external path) without reverting.
+        assertTrue(_contains(renderer.imageURI(cubeId), "data:image/svg+xml;base64,"));
     }
 
     function _contains(string memory value, string memory needle) private pure returns (bool) {

@@ -44,4 +44,19 @@ library NonNormieArt {
         if (col >= GRID_SIZE) revert InvalidCellIndex(col);
         return tonalBandAt(payload, uint256(row) * GRID_SIZE + col);
     }
+
+    /// @notice Collapse the 2-bit tonal payload to the 1-bit (on/off) 200-byte
+    ///         bitmap the renderers consume (same format as a Normie raw image):
+    ///         any non-zero tonal band is "on". Returns empty on bad length.
+    function toBinaryBitmap(bytes memory payload) internal pure returns (bytes memory) {
+        if (payload.length != TONAL_BANDS_2BIT_BYTE_LENGTH) return "";
+        bytes memory out = new bytes(CELL_COUNT / 8); // 1600 cells / 8 = 200 bytes
+        for (uint256 cell = 0; cell < CELL_COUNT; cell++) {
+            uint8 band = uint8(uint8(payload[cell >> 2]) >> ((cell & 3) << 1)) & 3;
+            if (band > 0) {
+                out[cell >> 3] |= bytes1(uint8(1) << uint8(7 - (cell & 7)));
+            }
+        }
+        return out;
+    }
 }

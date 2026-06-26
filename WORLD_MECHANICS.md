@@ -169,6 +169,60 @@ any vacant in-range slot.
 
 ---
 
+## 6. Customization (post-mint re-base)
+
+A holder re-bases a cube they own onto a **new flattened artwork** (any owned
+asset or approved CC0 project). The cube keeps its `seed` and `slot` but **adopts
+the new source** — number label, frame, and glass detailing all re-derive.
+Re-basable **any number of times**.
+
+**Art format** (`lib/NonNormieArt.sol`): a 40×40 grid, 2 bits/cell (4 tonal
+bands) = **400 bytes** (`tonalBands2Bit`), content-hashed. Renderers consume the
+1-bit (on/off) **200-byte bitmap** via `NonNormieArt.toBinaryBitmap` (same format
+as a Normie raw image).
+
+**Flow** (`CubeMintController.customizeCube`):
+1. Off-chain: flatten the artwork → 400-byte payload; the **flattening signer**
+   issues an EIP-712 `Attestation { minter, sourceContract, sourceTokenId,
+   payloadVersion, payloadHash, nonce, deadline, … }`. The signer is the trusted
+   oracle that the source is **owned-by-minter or approved CC0** (CC0 registry:
+   `data/cc0-projects.json`).
+2. On-chain `customizeCube(cubeId, sourceContract, sourceTokenId, payload,
+   attestation, signature)`: requires `cubes.ownerOf(cubeId) == msg.sender`
+   (`CubeOwnerMismatch`); checks the attestation matches the source + payload
+   hash; `FlatteningAttestation.consumeAttestation` (nonce burn; the controller is
+   the `authorizedConsumer`); `artStore.updateTonalBands2Bit` (upsert);
+   `cubes.customizeCubeSource` re-bases the cube.
+
+**`CubeNFT.customizeCubeSource(cubeId, sourceContract, sourceTokenId,
+payloadVersion)`** — `customizer`-only (set to the controller). Sets
+`sourceKind = EXTERNAL_ERC721` + the new source + `payloadVersion`, **preserving
+seed and slot**. Merged-street tokens can't be customized
+(`CannotCustomizeStreet`). `event CubeCustomized(...)`.
+
+**Store** (`NonNormieArtStore`, owner = controller): `recordTonalBands2Bit`
+(record-once, mint path), `updateTonalBands2Bit` (upsert, re-base path),
+`payloadForCube`, and `imageBytesForCube` (the 1-bit bitmap, empty if none).
+
+**Rendering** — a recorded payload is the cube's render source. Both renderers
+fetch it for non-Normie cubes: `CubeThumbnailRendererV1` (image) and
+`CubeRendererV2` (`_rawImageBytes` → `nonNormieStore.imageBytesForCube`, closing
+the prior 3D/animation gap where external/customized cubes showed no art). The
+label/frame/glass follow the new `sourceTokenId`; colour/geometry stay slot-derived.
+
+**Trust model:** on-chain verifies only the signature + payload hash; ownership /
+CC0 eligibility is enforced **off-chain by the flattening signer**. Same model as
+the mint-time `mintExternalERC721CubeWithPayload` path.
+
+**Deployment wiring** (post-genesis; genesis deploys pass `nonNormieStore =
+address(0)`): deploy `NonNormieArtStore` + `FlatteningAttestation` +
+`CubeMintController`; then `cubes.setCustomizer(controller)`,
+`artStore.transferOwnership(controller)`,
+`attestation.setAuthorizedConsumer(controller)`, and deploy renderers pointing at
+the store (`CubeThumbnailRendererV1` 3rd arg, `CubeRendererV2` 5th arg).
+
+---
+
 ## Metadata traits (summary)
 
 `CubeRendererV2._attributesJSON`: `plot`, `region`, `neighbourhood`, `street`,
@@ -187,6 +241,9 @@ any vacant in-range slot.
 ## Errors
 
 `CubeNFT`: `EmptyStreet`, `NotStreetOwner`, `StreetAlreadyMerged`,
-`MovesDisabled`, `NotCubeOwner`, `CannotMoveStreet`, `SlotOccupied`,
-`InvalidSlot`, `NonexistentCube`.
+`MovesDisabled`, `NotCubeOwner`, `CannotMoveStreet`, `OnlyCustomizer`,
+`CannotCustomizeStreet`, `SlotOccupied`, `InvalidSlot`, `NonexistentCube`.
+`CubeMintController`: `CubeOwnerMismatch`, `AttestationMinterMismatch`,
+`AttestationSourceMismatch`, `AttestationPayloadVersionMismatch`,
+`PayloadHashMismatch`.
 `NormieGenesisMinter`: `NoVacantPlot`.

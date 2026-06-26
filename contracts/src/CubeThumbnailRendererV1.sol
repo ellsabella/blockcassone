@@ -10,7 +10,7 @@ interface IThumbnailNormieRawImageStorage {
 }
 
 interface IThumbnailNonNormieArtStore {
-    function payloadForCube(uint256 cubeId) external view returns (bytes memory);
+    function imageBytesForCube(uint256 cubeId) external view returns (bytes memory);
 }
 
 // Swappable render modules (see contracts/src/render/). The orchestrator holds
@@ -101,10 +101,12 @@ contract CubeThumbnailRendererV1 {
             }
         }
         if (data.sourceKind == cubes.SOURCE_KIND_EXTERNAL_ERC721() && nonNormieStore != address(0)) {
-            try IThumbnailNonNormieArtStore(nonNormieStore).payloadForCube(cubeId) returns (
-                bytes memory payload
+            // External / customized cubes render the store's recorded art (the
+            // 2-bit tonal payload collapsed to the 1-bit bitmap). Empty if none.
+            try IThumbnailNonNormieArtStore(nonNormieStore).imageBytesForCube(cubeId) returns (
+                bytes memory bitmap
             ) {
-                return _tonalToBinary(payload);
+                return bitmap;
             } catch {
                 return "";
             }
@@ -112,21 +114,6 @@ contract CubeThumbnailRendererV1 {
         return "";
     }
 
-    // Threshold a 400-byte 2-bit tonal-band payload (4 luminance bands, 40x40,
-    // row-major) into the 200-byte 1-bit silhouette the bitmap/outline path
-    // expects: any non-zero band is foreground. Bit layout matches _bitmapBit
-    // (index = row*40+col; byte index/8; bit 7-(index%8)).
-    function _tonalToBinary(bytes memory payload) private pure returns (bytes memory) {
-        if (payload.length != 400) return "";
-        bytes memory out = new bytes(200);
-        for (uint256 cell = 0; cell < 1600; cell++) {
-            uint8 band = uint8(uint8(payload[cell >> 2]) >> ((cell & 3) << 1)) & 3;
-            if (band > 0) {
-                out[cell >> 3] |= bytes1(uint8(1) << uint8(7 - (cell & 7)));
-            }
-        }
-        return out;
-    }
     // Build a diagonal feColorMatrix "values" string that boosts the cube's own
     // colour channel (axis 0=R,1=G,2=B) by `dom` and the other two by `sec`, with
     // alpha `a`. This makes the neon glow saturate in the cube's hue (red cubes

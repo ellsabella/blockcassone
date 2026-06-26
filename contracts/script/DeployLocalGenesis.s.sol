@@ -125,7 +125,7 @@ contract DeployLocalGenesis is Script {
 
         vm.broadcast();
         d.renderer = new CubeRendererV2(
-            d.cubes, d.assetStore, address(d.normies), address(d.thumbnailRenderer)
+            d.cubes, d.assetStore, address(d.normies), address(d.thumbnailRenderer), address(0)
         );
 
         vm.broadcast();
