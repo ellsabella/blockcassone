@@ -127,7 +127,15 @@ edge-point identity. This is the crux that makes move/merge coherent.
    `nonNormieStore.imageBytesForCube`). Trust: ownership/CC0 enforced off-chain by
    the flattening signer. *(Open: CC0 registry `data/cc0-projects.json` review;
    the off-chain flatten + signer service; customize UI.)*
-8. **WebUI** — explore tab, customize tab, move/merge flows.
+8. **WebUI** — explore tab, customize tab, move/merge flows. **🟡 IN PROGRESS.**
+   Customize/Update Cube as a **separate page** (`viewer/update.html` +
+   `update-cube.js`), same aesthetic, nav-linked from the explore HUD. Enabler:
+   `CubeThumbnailRendererV1.previewThumbnailSVG` (stateless on-chain SVG preview).
+   Slices: (1) ✅ wallet art list — paginated 50-at-a-time, lazy images (only the
+   visible page loads, sparing the OpenSea API), selection. (2) live cube + SVG
+   panels (3D plane + eth_call previewThumbnailSVG). (3) JS tonal encoder
+   (grid→400-byte payload, on-chain parity). (4) "cubes you own" row + target
+   select + confirm (Cancel/LFG) → flatten→attestation→customizeCube.
 
 ### Biome placeholders (to revisit)
 - They don't currently render on vacant plots in the street preview — needs a
