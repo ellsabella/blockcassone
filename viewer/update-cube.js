@@ -197,12 +197,15 @@ function stageError(stage, text) {
 
 // --- Cubes you already own (local chain) -----------------------------------
 async function loadOwned() {
+  console.error('[update-cube] loadOwned: reading local-chain cubes…');
   els.ownedEmpty.textContent = 'loading your cubes…';
   els.ownedEmpty.style.display = '';
   try {
     state.ownedCubes = await loadOwnedCubes(); // all local cubes (dev); prod filters by wallet
+    console.error('[update-cube] owned cubes loaded:', state.ownedCubes.length, state.ownedCubes);
     renderOwned();
   } catch (err) {
+    console.error('[update-cube] loadOwned FAILED:', err);
     els.ownedList.querySelectorAll('.owned-card').forEach(c => c.remove());
     els.ownedEmpty.textContent = `couldn't load cubes: ${msg(err)}`;
     els.ownedEmpty.style.display = '';
