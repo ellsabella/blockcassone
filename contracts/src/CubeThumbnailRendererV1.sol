@@ -81,22 +81,50 @@ contract CubeThumbnailRendererV1 {
         view
         returns (string memory)
     {
-        string memory labelPath = _labelPath(data.sourceTokenId);
-        string memory bitmapPath = _bitmapPath(raw);
-        string memory outlinePath = _outlinePath(raw, data.sourceTokenId);
         uint256 axis = geometry.mainAxis(uint256(data.slot));
         uint256 layout = geometry.motifLayout(uint256(data.slot));
         string memory planeColor = _colour(axis);
+        string memory labelPath = _labelPath(data.sourceTokenId);
+        string memory bitmapPath = _bitmapPath(raw);
+        string memory outlinePath = _outlinePath(raw, data.sourceTokenId);
+        // Split into two shallow sub-concats: one 9-arg concat with these locals
+        // live overflows the legacy stack (no via-IR). Output is unchanged.
+        return string.concat(
+            _svgOpen(bitmapPath, outlinePath, labelPath, axis, planeColor),
+            _svgFigure(data, raw, bitmapPath, outlinePath, labelPath, planeColor, layout),
+            frame.render(data.seed, data.sourceTokenId, layout, axis),
+            "</svg>"
+        );
+    }
+
+    function _svgOpen(
+        string memory bitmapPath,
+        string memory outlinePath,
+        string memory labelPath,
+        uint256 axis,
+        string memory planeColor
+    ) private pure returns (string memory) {
         return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
             '<rect width="1200" height="1200" fill="#020203"/>',
-            _thumbnailDefs(bitmapPath, outlinePath, labelPath, axis, planeColor),
+            _thumbnailDefs(bitmapPath, outlinePath, labelPath, axis, planeColor)
+        );
+    }
+
+    function _svgFigure(
+        CubeNFT.CubeData memory data,
+        bytes memory raw,
+        string memory bitmapPath,
+        string memory outlinePath,
+        string memory labelPath,
+        string memory planeColor,
+        uint256 layout
+    ) private pure returns (string memory) {
+        return string.concat(
             _forestLayer(data, planeColor, layout),
             _thumbnailBitmap(bitmapPath, outlinePath, planeColor),
             _glassLayer(raw, data.sourceTokenId),
-            _labelLayer(labelPath, planeColor),
-            frame.render(data.seed, data.sourceTokenId, layout, axis),
-            "</svg>"
+            _labelLayer(labelPath, planeColor)
         );
     }
 
