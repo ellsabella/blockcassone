@@ -7,7 +7,7 @@
 
 import { loadWalletNftsAcrossChains } from './wallet-nfts.js';
 import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
-import { previewThumbnailSVG } from './preview-chain.js';
+import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes } from './preview-chain.js';
 
 const PAGE_SIZE = 50;
 // Until a target cube is picked (slice 4) the SVG preview renders on a *demo* cube.
@@ -26,6 +26,8 @@ const els = {
   stageSvg: document.getElementById('stage-svg'),
   cubeFrame: document.getElementById('cube-frame'),
   cubeEmpty: document.getElementById('cube-empty'),
+  ownedList: document.getElementById('owned-list'),
+  ownedEmpty: document.getElementById('owned-empty'),
   updateBtn: document.getElementById('update-btn'),
   overlay: document.getElementById('confirm-overlay'),
   confirmCancel: document.getElementById('confirm-cancel'),
@@ -36,7 +38,9 @@ const state = {
   nfts: [],
   page: 0,
   selectedKey: null, // contract:tokenId of selected wallet art
-  ownedCubeId: null, // target cube to overwrite (slice 4)
+  selectedNft: null, // the selected wallet art
+  ownedCubes: [], // cubes on the local chain (candidate targets)
+  target: null, // the owned cube chosen to overwrite { cubeId, seed, slot }
 };
 
 const keyOf = (n) => `${n.chain}:${n.contract}:${n.tokenId}`;
@@ -116,6 +120,13 @@ function renderList() {
 
 let previewToken = 0;
 
+// Seed + slot the preview renders on: the chosen target cube's identity once one
+// is picked (a true "after" preview), else a demo cube derived from the art.
+function previewIdentity(nft) {
+  if (state.target) return { seed: state.target.seed, slot: Number(state.target.slot) };
+  return { seed: '0x' + safeBig(nft.tokenId).toString(16).padStart(64, '0'), slot: demoSlotFor(nft.tokenId) };
+}
+
 async function selectNft(nft) {
   state.selectedKey = keyOf(nft);
   state.selectedNft = nft;
@@ -123,17 +134,23 @@ async function selectNft(nft) {
     row.classList.toggle('selected', row.dataset.key === state.selectedKey);
   }
   refreshCommitState();
+  await renderPreviews();
+}
 
+async function renderPreviews() {
+  const nft = state.selectedNft;
+  if (!nft) return;
   const token = ++previewToken; // guard against out-of-order results on rapid clicks
   if (!nft.imageUrl) {
     showCubeEmpty('no image for this item');
     els.stageSvg.innerHTML = '<span class="preview-empty">no image for this item</span>';
     return;
   }
+  const { seed, slot } = previewIdentity(nft);
 
   // Cube view: the dev-only preview iframe fetches + flattens the art and renders
   // the real 3D non-Normie cube via the token-renderer pipeline.
-  showCubeFrame(nft);
+  showCubeFrame(nft, seed, slot);
 
   // SVG view: flatten here for the authoritative on-chain preview eth_call.
   els.stageSvg.innerHTML = '<span class="preview-empty">rendering on-chain…</span>';
@@ -148,8 +165,7 @@ async function selectNft(nft) {
     return;
   }
   try {
-    const seed = '0x' + safeBig(nft.tokenId).toString(16).padStart(64, '0');
-    const svg = await previewThumbnailSVG({ seed, slot: demoSlotFor(nft.tokenId), sourceTokenId: safeBig(nft.tokenId), payload });
+    const svg = await previewThumbnailSVG({ seed, slot, sourceTokenId: safeBig(nft.tokenId), payload });
     if (token !== previewToken) return;
     els.stageSvg.innerHTML = svg && svg.includes('<svg') ? svg : '<span class="preview-empty">empty SVG returned</span>';
     resetSvgZoom();
@@ -159,14 +175,8 @@ async function selectNft(nft) {
   }
 }
 
-function showCubeFrame(nft) {
-  const seed = '0x' + safeBig(nft.tokenId).toString(16).padStart(64, '0');
-  const q = new URLSearchParams({
-    art: nft.imageUrl,
-    slot: String(demoSlotFor(nft.tokenId)),
-    seed,
-    src: String(nft.tokenId),
-  });
+function showCubeFrame(nft, seed, slot) {
+  const q = new URLSearchParams({ art: nft.imageUrl, slot: String(slot), seed, src: String(nft.tokenId) });
   els.cubeEmpty.style.display = 'none';
   els.cubeFrame.style.display = 'block';
   els.cubeFrame.src = '/viewer/cube-preview.html?' + q.toString();
@@ -185,9 +195,62 @@ function stageError(stage, text) {
   stage.innerHTML = `<span class="preview-empty" style="color:#ff9a9a;padding:10px;text-align:center">${text}</span>`;
 }
 
+// --- Cubes you already own (local chain) -----------------------------------
+async function loadOwned() {
+  els.ownedEmpty.textContent = 'loading your cubes…';
+  els.ownedEmpty.style.display = '';
+  try {
+    state.ownedCubes = await loadOwnedCubes(); // all local cubes (dev); prod filters by wallet
+    renderOwned();
+  } catch (err) {
+    els.ownedList.querySelectorAll('.owned-card').forEach(c => c.remove());
+    els.ownedEmpty.textContent = `couldn't load cubes: ${msg(err)}`;
+    els.ownedEmpty.style.display = '';
+  }
+}
+
+function renderOwned() {
+  els.ownedList.querySelectorAll('.owned-card').forEach(c => c.remove());
+  if (!state.ownedCubes.length) {
+    els.ownedEmpty.textContent = 'no cubes owned';
+    els.ownedEmpty.style.display = '';
+    return;
+  }
+  els.ownedEmpty.style.display = 'none';
+  const frag = document.createDocumentFragment();
+  for (const cube of state.ownedCubes) {
+    const card = document.createElement('div');
+    card.className = 'owned-card';
+    card.dataset.cubeId = String(cube.cubeId);
+    const tile = document.createElement('div');
+    tile.className = 'owned-tile';
+    tile.innerHTML = '<span class="preview-empty" style="font-size:10px">…</span>';
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:10px;color:#9f9fa8;align-self:center;padding:0 6px;white-space:nowrap';
+    label.innerHTML = `Cube&nbsp;#${cube.cubeId}<br>slot&nbsp;${cube.slot}`;
+    card.append(tile, label);
+    card.addEventListener('click', () => selectTarget(cube));
+    frag.appendChild(card);
+    cubeThumbnailSVG(cube.cubeId)
+      .then(svg => { if (svg && svg.includes('<svg')) tile.innerHTML = svg; })
+      .catch(() => { tile.innerHTML = '<span class="preview-empty" style="font-size:9px;color:#ff9a9a">err</span>'; });
+  }
+  els.ownedList.appendChild(frag);
+}
+
+function selectTarget(cube) {
+  state.target = cube;
+  for (const card of els.ownedList.querySelectorAll('.owned-card')) {
+    card.classList.toggle('selected', card.dataset.cubeId === String(cube.cubeId));
+  }
+  refreshCommitState();
+  setStatus(`target: Cube #${cube.cubeId} (slot ${cube.slot})`);
+  renderPreviews(); // re-render the top preview on the target cube's identity
+}
+
 function refreshCommitState() {
   // Enabled only once both a source artwork and a target cube are chosen.
-  els.updateBtn.disabled = !(state.selectedKey && state.ownedCubeId);
+  els.updateBtn.disabled = !(state.selectedKey && state.target);
 }
 
 function openConfirm() {
@@ -244,3 +307,6 @@ els.updateBtn.addEventListener('click', openConfirm);
 els.confirmCancel.addEventListener('click', closeConfirm);
 els.confirmLfg.addEventListener('click', commit);
 els.overlay.addEventListener('click', (e) => { if (e.target === els.overlay) closeConfirm(); });
+
+// Load the cubes on the local chain (the overwrite targets) on page open.
+loadOwned();

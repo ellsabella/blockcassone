@@ -4,8 +4,11 @@
 // byte-identical to what re-basing onto that art would store. The thumbnail
 // renderer address is derived from the V2 `renderer` in chain-config.json.
 
+import { loadChainMintRecords } from './chain-cubes.js';
+
 const THUMBNAIL_RENDERER_SELECTOR = 'ad125d79'; // thumbnailRenderer()
 const PREVIEW_SELECTOR = 'f3d3c20b'; // previewThumbnailSVG(bytes32,uint32,uint256,bytes)
+const THUMBNAIL_SVG_SELECTOR = '1df76ecc'; // thumbnailSVG(uint256)
 
 let configPromise = null;
 let thumbAddrPromise = null;
@@ -64,6 +67,24 @@ function decodeString(ret) {
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) bytes[i] = parseInt(dataHex.slice(i * 2, i * 2 + 2) || '00', 16);
   return new TextDecoder().decode(bytes);
+}
+
+// The on-chain thumbnail SVG of an existing cube (the owned-cubes row).
+export async function cubeThumbnailSVG(cubeId) {
+  const cfg = await loadConfig();
+  if (!cfg.renderer) throw new Error('chain-config.json has no "renderer" address');
+  return decodeString(await ethCall(cfg, cfg.renderer, '0x' + THUMBNAIL_SVG_SELECTOR + word(cubeId)));
+}
+
+// Cubes minted on the local chain. For dev, optionally filter by owner; the
+// returned cubes are the candidate targets to overwrite (cubeId + seed + slot).
+export async function loadOwnedCubes(owner) {
+  const result = await loadChainMintRecords();
+  const records = (result && result.records) || [];
+  const own = owner ? String(owner).toLowerCase() : null;
+  return records
+    .filter(r => !own || String(r.wallet || '').toLowerCase() === own)
+    .map(r => ({ cubeId: r.cubeId, slot: r.slot, seed: r.seed, sourceTokenId: r.source?.tokenId, owner: r.wallet }));
 }
 
 // seed: 0x bytes32 (or any hex). slot/sourceTokenId: number|bigint. payload: Uint8Array(400).
