@@ -413,6 +413,12 @@ export async function main(deps = {}) {
     }
   }
   setCubeAssignmentResolver(idx => nftByMotif.get(Number(idx)) || null);
+  if (nonNormie) {
+    // The non-Normie grid lookup (getNonNormieGridForCube -> getWalletAssignmentForCube)
+    // reads this global rather than the assignment resolver, so mirror it here or the
+    // flattened grid is never found (no plane art / voxels).
+    globalThis.__PIPELINE_MINT_SOURCE_FOR_SLOT__ = idx => nftByMotif.get(Number(idx)) || null;
+  }
 
   const hilbert = generateHilbert3D(ORDER);
   assignPlaneProperties(hilbert, new Random('0x' + '12345678'.repeat(8)));
@@ -458,7 +464,7 @@ export async function main(deps = {}) {
           showEdgePoints: true,
           showStoneWalker: true,
           showVoxels: true,
-          showHilbertLines: scene.mode === 'cube' && !p.nonNormie, // keep the preview cube clean
+          showHilbertLines: scene.mode === 'cube',
           showCardioid: true,
           showForest: true,
           showNonNormieArtwork: true,
