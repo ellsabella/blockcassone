@@ -6,8 +6,13 @@
 // are wired in later slices.
 
 import { loadWalletNftsAcrossChains } from './wallet-nfts.js';
+import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
+import { previewThumbnailSVG } from './preview-chain.js';
 
 const PAGE_SIZE = 50;
+// Until a target cube is picked (slice 4) the SVG preview renders on a neutral demo
+// cube; slot 1734 has a green unique-axis. Seed varies per source for variety.
+const DEMO_SLOT = 1734;
 
 const els = {
   addr: document.getElementById('wallet-addr'),
@@ -107,24 +112,73 @@ function renderList() {
   els.next.disabled = state.page >= pageCount() - 1;
 }
 
-function selectNft(nft) {
+let previewToken = 0;
+
+async function selectNft(nft) {
   state.selectedKey = keyOf(nft);
+  state.selectedNft = nft;
   for (const row of els.list.querySelectorAll('.wallet-item')) {
     row.classList.toggle('selected', row.dataset.key === state.selectedKey);
   }
-  // Slice 1: show the source art in both stages. Slice 2 swaps these for the real
-  // 3D cube + the on-chain previewThumbnailSVG render.
-  renderStagePlaceholder(els.stageCube, nft);
-  renderStagePlaceholder(els.stageSvg, nft);
   refreshCommitState();
+
+  const token = ++previewToken; // guard against out-of-order results on rapid clicks
+  if (!nft.imageUrl) {
+    els.stageCube.innerHTML = els.stageSvg.innerHTML = '<span class="preview-empty">no image for this item</span>';
+    return;
+  }
+  els.stageCube.innerHTML = '<span class="preview-empty">flattening…</span>';
+  els.stageSvg.innerHTML = '<span class="preview-empty">rendering on-chain…</span>';
+
+  let payload;
+  try {
+    const grid = await imageUrlToBinaryGrid(nft.imageUrl);
+    if (token !== previewToken) return;
+    payload = gridToTonalPayload(grid);
+    drawBands(els.stageCube, payload);
+  } catch (err) {
+    if (token !== previewToken) return;
+    stageError(els.stageCube, `flatten failed: ${msg(err)}`);
+    stageError(els.stageSvg, '—');
+    return;
+  }
+
+  // Authoritative SVG from the on-chain preview view.
+  try {
+    const seed = '0x' + safeBig(nft.tokenId).toString(16).padStart(64, '0');
+    const svg = await previewThumbnailSVG({ seed, slot: DEMO_SLOT, sourceTokenId: safeBig(nft.tokenId), payload });
+    if (token !== previewToken) return;
+    els.stageSvg.innerHTML = svg && svg.includes('<svg') ? svg : '<span class="preview-empty">empty SVG returned</span>';
+  } catch (err) {
+    if (token !== previewToken) return;
+    stageError(els.stageSvg, `SVG preview failed: ${msg(err)}`);
+  }
 }
 
-function renderStagePlaceholder(stage, nft) {
-  if (!nft.imageUrl) { stage.innerHTML = '<span class="preview-empty">no image for this item</span>'; return; }
-  const img = document.createElement('img');
-  img.src = nft.imageUrl;
-  img.alt = nft.name || '';
-  stage.replaceChildren(img);
+function safeBig(v) { try { return BigInt(v); } catch { return 0n; } }
+function msg(err) { return String(err?.message || err).slice(0, 90); }
+function stageError(stage, text) {
+  stage.innerHTML = `<span class="preview-empty" style="color:#ff9a9a;padding:10px;text-align:center">${text}</span>`;
+}
+
+// Interim cube view: draw the 40×40 tonal bands as pixels (band 0 background).
+// Slice 2b swaps this for the real 3D non-Normie cube.
+function drawBands(stage, payload) {
+  const N = 40, scale = 7;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = N * scale;
+  canvas.style.imageRendering = 'pixelated';
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#050507';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const shades = ['#050507', '#2f6f47', '#9affb0'];
+  for (let i = 0; i < N * N; i++) {
+    const band = (payload[i >> 2] >> ((i & 3) << 1)) & 3;
+    if (band === 0) continue;
+    ctx.fillStyle = shades[band] || shades[2];
+    ctx.fillRect((i % N) * scale, ((i / N) | 0) * scale, scale, scale);
+  }
+  stage.replaceChildren(canvas);
 }
 
 function refreshCommitState() {

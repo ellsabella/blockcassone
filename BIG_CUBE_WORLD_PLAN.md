@@ -132,10 +132,14 @@ edge-point identity. This is the crux that makes move/merge coherent.
    `update-cube.js`), same aesthetic, nav-linked from the explore HUD. Enabler:
    `CubeThumbnailRendererV1.previewThumbnailSVG` (stateless on-chain SVG preview).
    Slices: (1) ✅ wallet art list — paginated 50-at-a-time, lazy images (only the
-   visible page loads, sparing the OpenSea API), selection. (2) live cube + SVG
-   panels (3D plane + eth_call previewThumbnailSVG). (3) JS tonal encoder
-   (grid→400-byte payload, on-chain parity). (4) "cubes you own" row + target
-   select + confirm (Cancel/LFG) → flatten→attestation→customizeCube.
+   visible page loads, sparing the OpenSea API), selection. (2) ✅ tonal encoder
+   (`gridToTonalPayload` in nft-art-grid — same 2-level-Otsu bands as the cube
+   outline) + **live on-chain SVG panel** via `preview-chain.js` eth_call to
+   `previewThumbnailSVG` (derives the thumbnail renderer from the V2 `renderer` in
+   chain-config.json). Cube panel = interim 2D banded preview. *(needs a local
+   deploy of the updated contracts with chain-config.json `renderer` pointing at
+   it.)* (2b) real 3D cube panel. (4) "cubes you own" row + target select + confirm
+   (Cancel/LFG) → flatten→attestation→customizeCube.
 
 ### Biome placeholders (to revisit)
 - They don't currently render on vacant plots in the street preview — needs a
