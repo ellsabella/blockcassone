@@ -216,6 +216,14 @@ fetch it for non-Normie cubes: `CubeThumbnailRendererV1` (image) and
 the prior 3D/animation gap where external/customized cubes showed no art). The
 label/frame/glass follow the new `sourceTokenId`; colour/geometry stay slot-derived.
 
+**Live preview** — `CubeThumbnailRendererV1.previewThumbnailSVG(seed, slot,
+sourceTokenId, tonalPayload)` is a stateless `view` that renders the exact SVG a
+re-base would store, with no stored cube. The customize UI calls it (eth_call)
+with the target cube's seed + slot, the chosen source's tokenId, and the flattened
+400-byte payload, to show a faithful "after" thumbnail before committing. It
+shares the same internal `_renderSVG` core as `thumbnailSVG`, so preview and
+stored output are byte-identical (covered by a parity test).
+
 **Trust model:** on-chain verifies only the signature + payload hash; ownership /
 CC0 eligibility is enforced **off-chain by the flattening signer**. Same model as
 the mint-time `mintExternalERC721CubeWithPayload` path.

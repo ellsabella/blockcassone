@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import { CubeNFT } from "./CubeNFT.sol";
 import { StrBuf } from "./lib/StrBuf.sol";
+import { NonNormieArt } from "./NonNormieArt.sol";
 
 interface IThumbnailNormieRawImageStorage {
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
@@ -54,7 +55,32 @@ contract CubeThumbnailRendererV1 {
 
     function thumbnailSVG(uint256 tokenId) public view returns (string memory) {
         CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
-        bytes memory raw = _rawImageBytes(data, tokenId);
+        return _renderSVG(data, _rawImageBytes(data, tokenId));
+    }
+
+    /// @notice Render the thumbnail SVG for arbitrary art with no stored cube. The
+    ///         customization UI passes the target cube's `seed` + `slot`, the new
+    ///         source's `sourceTokenId`, and a 400-byte 2-bit tonal payload, and
+    ///         gets back the exact SVG that re-basing onto that art would store.
+    ///         Stateless and free (view) — for live previews.
+    function previewThumbnailSVG(
+        bytes32 seed,
+        uint32 slot,
+        uint256 sourceTokenId,
+        bytes calldata tonalPayload
+    ) external view returns (string memory) {
+        CubeNFT.CubeData memory data;
+        data.seed = seed;
+        data.slot = slot;
+        data.sourceTokenId = sourceTokenId;
+        return _renderSVG(data, NonNormieArt.toBinaryBitmap(tonalPayload));
+    }
+
+    function _renderSVG(CubeNFT.CubeData memory data, bytes memory raw)
+        private
+        view
+        returns (string memory)
+    {
         string memory labelPath = _labelPath(data.sourceTokenId);
         string memory bitmapPath = _bitmapPath(raw);
         string memory outlinePath = _outlinePath(raw, data.sourceTokenId);

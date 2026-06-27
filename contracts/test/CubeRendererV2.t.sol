@@ -290,6 +290,26 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(renderer.imageURI(cubeId), "data:image/svg+xml;base64,"));
     }
 
+    function testPreviewThumbnailMatchesStoredCustomizedCube() public {
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
+
+        bytes memory payload = new bytes(400);
+        for (uint256 i = 0; i < 400; i++) {
+            payload[i] = 0xA5;
+        }
+        store.recordTonalBands2Bit(cubeId, payload);
+        vm.prank(OWNER);
+        cubes.setCustomizer(address(this));
+        cubes.customizeCubeSource(cubeId, address(0xABCD), 42, 1);
+
+        // The stateless preview must be byte-identical to what re-basing stores.
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
+        string memory stored = thumbnailRenderer.thumbnailSVG(cubeId);
+        string memory preview = thumbnailRenderer.previewThumbnailSVG(data.seed, data.slot, 42, payload);
+        assertEq(stored, preview);
+    }
+
     function _contains(string memory value, string memory needle) private pure returns (bool) {
         bytes memory valueBytes = bytes(value);
         bytes memory needleBytes = bytes(needle);
