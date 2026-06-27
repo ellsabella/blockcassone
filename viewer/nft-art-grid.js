@@ -669,8 +669,17 @@ export function gridToTonalPayload(grid) {
   const bands = gridToBands40(grid);
   const payload = new Uint8Array(400);
   if (!bands) return payload;
+  // The on-chain art + glass land on band>0 (the "foreground"). Otsu makes the
+  // lit region band>0, but for a light-background image that's the background —
+  // so glass blankets it and looks poor. Keep the foreground the SPARSER half
+  // (usually the subject): if the lit region is the majority, make the dark
+  // region the foreground instead.
+  let lit = 0;
+  for (let i = 0; i < bands.length; i++) if (bands[i] > 0) lit++;
+  const flip = lit > bands.length - lit;
   for (let i = 0; i < bands.length; i++) {
-    payload[i >> 2] |= (bands[i] & 3) << ((i & 3) << 1);
+    const b = flip ? (bands[i] > 0 ? 0 : 2) : bands[i];
+    if (b) payload[i >> 2] |= (b & 3) << ((i & 3) << 1);
   }
   return payload;
 }

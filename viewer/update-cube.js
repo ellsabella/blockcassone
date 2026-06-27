@@ -152,6 +152,7 @@ async function selectNft(nft) {
     const svg = await previewThumbnailSVG({ seed, slot: demoSlotFor(nft.tokenId), sourceTokenId: safeBig(nft.tokenId), payload });
     if (token !== previewToken) return;
     els.stageSvg.innerHTML = svg && svg.includes('<svg') ? svg : '<span class="preview-empty">empty SVG returned</span>';
+    resetSvgZoom();
   } catch (err) {
     if (token !== previewToken) return;
     stageError(els.stageSvg, `SVG preview failed: ${msg(err)}`);
@@ -199,6 +200,41 @@ function commit() {
   closeConfirm();
   setStatus('commit flow lands in a later slice');
 }
+
+// --- SVG panel zoom + pan (wheel to zoom, drag to pan) ---------------------
+const svgZoom = { scale: 1, x: 0, y: 0 };
+function applySvgZoom() {
+  const svg = els.stageSvg.querySelector('svg');
+  if (!svg) return;
+  svg.style.transformOrigin = 'center center';
+  svg.style.transform = `translate(${svgZoom.x}px, ${svgZoom.y}px) scale(${svgZoom.scale})`;
+}
+function resetSvgZoom() { svgZoom.scale = 1; svgZoom.x = 0; svgZoom.y = 0; applySvgZoom(); }
+
+els.stageSvg.style.cursor = 'grab';
+els.stageSvg.addEventListener('wheel', (e) => {
+  if (!els.stageSvg.querySelector('svg')) return;
+  e.preventDefault();
+  svgZoom.scale = Math.max(0.5, Math.min(12, svgZoom.scale * Math.exp(-e.deltaY * 0.0016)));
+  applySvgZoom();
+}, { passive: false });
+let svgDrag = false, svgLastX = 0, svgLastY = 0;
+els.stageSvg.addEventListener('pointerdown', (e) => {
+  if (!els.stageSvg.querySelector('svg')) return;
+  svgDrag = true; svgLastX = e.clientX; svgLastY = e.clientY;
+  els.stageSvg.style.cursor = 'grabbing';
+  els.stageSvg.setPointerCapture(e.pointerId);
+});
+els.stageSvg.addEventListener('pointermove', (e) => {
+  if (!svgDrag) return;
+  svgZoom.x += e.clientX - svgLastX; svgZoom.y += e.clientY - svgLastY;
+  svgLastX = e.clientX; svgLastY = e.clientY;
+  applySvgZoom();
+});
+const endSvgDrag = () => { svgDrag = false; els.stageSvg.style.cursor = 'grab'; };
+els.stageSvg.addEventListener('pointerup', endSvgDrag);
+els.stageSvg.addEventListener('pointercancel', endSvgDrag);
+els.stageSvg.addEventListener('dblclick', resetSvgZoom);
 
 els.load.addEventListener('click', loadWallet);
 els.addr.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadWallet(); });

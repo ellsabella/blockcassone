@@ -110,6 +110,9 @@ contract CubeThumbnailRendererV1 {
     }
 
     function _svgForest(CubeNFT.CubeData memory data) private view returns (string memory) {
+        // Forest strands are Normie-only; non-Normie / customized cubes show only
+        // the bare edge-point orbs (drawn by the frame layer).
+        if (data.sourceKind != cubes.SOURCE_KIND_NORMIE()) return "";
         return _forestLayer(
             data,
             _colour(geometry.mainAxis(uint256(data.slot))),
