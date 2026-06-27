@@ -61,7 +61,7 @@ function decodeAbiBytes(hex) {
 
 async function loadChainConfig() {
   if (configCache) return configCache;
-  configCache = fetch('/data/chain-config.json')
+  configCache = fetch('/data/chain-config.json', { cache: 'no-store' })
     .then(res => res.ok ? res.json() : null)
     .then(raw => {
       const cubeNft = normalizeAddress(raw?.cubeNft);

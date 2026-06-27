@@ -15,7 +15,7 @@ let thumbAddrPromise = null;
 
 async function loadConfig() {
   if (!configPromise) {
-    configPromise = fetch('/data/chain-config.json')
+    configPromise = fetch('/data/chain-config.json', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : {}))
       .catch(() => ({}));
   }
@@ -80,6 +80,11 @@ export async function cubeThumbnailSVG(cubeId) {
 // returned cubes are the candidate targets to overwrite (cubeId + seed + slot).
 export async function loadOwnedCubes(owner) {
   const result = await loadChainMintRecords();
+  console.info('[preview-chain] loadChainMintRecords →', {
+    enabled: result?.enabled,
+    cubeNft: result?.config?.cubeNft,
+    count: result?.records?.length || 0,
+  });
   const records = (result && result.records) || [];
   const own = owner ? String(owner).toLowerCase() : null;
   return records
