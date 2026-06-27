@@ -236,7 +236,10 @@ function renderOwned() {
     frag.appendChild(card);
     cubeThumbnailSVG(cube.cubeId)
       .then(svg => { if (svg && svg.includes('<svg')) tile.innerHTML = svg; })
-      .catch(() => { tile.innerHTML = '<span class="preview-empty" style="font-size:9px;color:#ff9a9a">err</span>'; });
+      .catch((err) => {
+        console.error(`[update-cube] thumbnail #${cube.cubeId} failed:`, err);
+        tile.innerHTML = '<span class="preview-empty" style="font-size:9px;color:#ff9a9a">err</span>';
+      });
   }
   els.ownedList.appendChild(frag);
 }
