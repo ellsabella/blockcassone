@@ -332,6 +332,30 @@ function readPlots() {
     return { mode: 'street', base, plots: TOKEN.plots.slice(0, 8).map((p, k) => plotFrom(p, base + k)) };
   }
 
+  // Non-Normie preview (Update Cube dev page only): an art URL to flatten into a
+  // tonal cube. Requires deps.nonNormie (passed by the dev preview entry); the
+  // production bundle never sees TOKEN.artUrl, so it stays network-free.
+  if (TOKEN.artUrl) {
+    const motifIdx = Number(TOKEN.slot || 0);
+    return {
+      mode: 'cube',
+      base: motifIdx,
+      plots: [{
+        motifIdx,
+        occupied: true,
+        nonNormie: true,
+        artUrl: String(TOKEN.artUrl),
+        seed: TOKEN.seed,
+        sourceTokenId: Number(TOKEN.sourceTokenId || 0),
+        normieId: 0,
+        raw: null,
+        traits: null,
+        agentic: false,
+        agentId: '',
+      }],
+    };
+  }
+
   const motifIdx = Number(TOKEN.slot || 0);
   return { mode: 'cube', base: motifIdx, plots: [plotFrom(TOKEN, motifIdx)] };
 }
@@ -346,7 +370,10 @@ function unionAABB(hilbert, motifs) {
   return { mn, mx };
 }
 
-async function main() {
+export async function main(deps = {}) {
+  // Non-Normie rendering is injected by the dev preview entry only, so the
+  // production bundle imports no network code and stays forbiddenPatterns-clean.
+  const nonNormie = deps.nonNormie || null;
   const canvas = document.getElementById('c');
   const label = document.getElementById('h');
   const gl = canvas.getContext('webgl2', {
@@ -363,11 +390,27 @@ async function main() {
   const scene = readPlots();
   const occupied = scene.plots.filter(p => p.occupied);
 
-  // One nft per occupied plot (resolved by motif); hydrate each Normie's bytes.
+  // One nft per occupied plot (resolved by motif). Normie plots hydrate raw bytes;
+  // a non-Normie preview plot flattens its art URL into the cached grid (dev only).
   const nftByMotif = new Map();
   for (const p of occupied) {
-    nftByMotif.set(p.motifIdx, { isNormie: true, normieId: p.normieId, agentic: p.agentic, agentId: p.agentId });
-    hydrateNormieRawBytes({ id: p.normieId, raw: rawBytesFromBase64(p.raw), traits: p.traits, agentic: p.agentic, agentId: p.agentId });
+    if (p.nonNormie && nonNormie) {
+      const nft = {
+        isNormie: false,
+        contract: 'preview',
+        tokenId: String(p.sourceTokenId),
+        chain: 'preview',
+        name: 'preview',
+        imageUrl: p.artUrl,
+        agentic: false,
+        agentId: '',
+      };
+      nftByMotif.set(p.motifIdx, nft);
+      await nonNormie.prepareGrid(nft); // flatten + cache (getNonNormieGridForCube reads it)
+    } else {
+      nftByMotif.set(p.motifIdx, { isNormie: true, normieId: p.normieId, agentic: p.agentic, agentId: p.agentId });
+      hydrateNormieRawBytes({ id: p.normieId, raw: rawBytesFromBase64(p.raw), traits: p.traits, agentic: p.agentic, agentId: p.agentId });
+    }
   }
   setCubeAssignmentResolver(idx => nftByMotif.get(Number(idx)) || null);
 
@@ -415,14 +458,18 @@ async function main() {
           showEdgePoints: true,
           showStoneWalker: true,
           showVoxels: true,
-          showHilbertLines: scene.mode === 'cube', // street: one continuous spine instead (below)
+          showHilbertLines: scene.mode === 'cube' && !p.nonNormie, // keep the preview cube clean
           showCardioid: true,
           showForest: true,
+          showNonNormieArtwork: true,
           showNormieOutline: true,
           showNormieIdLabel: true,
-          showNormieTraitsBanner: scene.mode === 'cube',
+          showNormieTraitsBanner: scene.mode === 'cube' && !p.nonNormie,
           showPlaneOutline: false,
           buildEdgePointDebug,
+          buildNonNormieArtworkPlane: nonNormie?.buildArtworkPlane || null,
+          buildNonNormieWalker: nonNormie?.buildWalker || null,
+          buildNonNormieBanner: nonNormie?.buildBanner || null,
           isAgenticNonNormieCube: () => false,
           categoryForMotif: () => p.agentic ? 3 : 1,
         })
@@ -493,9 +540,3 @@ async function main() {
   }
   frame();
 }
-
-main().catch(err => {
-  const label = document.getElementById('h');
-  if (label) label.textContent = String(err?.message || err);
-  console.error(err);
-});

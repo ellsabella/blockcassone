@@ -23,8 +23,9 @@ const els = {
   prev: document.getElementById('wallet-prev'),
   next: document.getElementById('wallet-next'),
   page: document.getElementById('wallet-page'),
-  stageCube: document.getElementById('stage-cube'),
   stageSvg: document.getElementById('stage-svg'),
+  cubeFrame: document.getElementById('cube-frame'),
+  cubeEmpty: document.getElementById('cube-empty'),
   updateBtn: document.getElementById('update-btn'),
   overlay: document.getElementById('confirm-overlay'),
   confirmCancel: document.getElementById('confirm-cancel'),
@@ -125,26 +126,27 @@ async function selectNft(nft) {
 
   const token = ++previewToken; // guard against out-of-order results on rapid clicks
   if (!nft.imageUrl) {
-    els.stageCube.innerHTML = els.stageSvg.innerHTML = '<span class="preview-empty">no image for this item</span>';
+    showCubeEmpty('no image for this item');
+    els.stageSvg.innerHTML = '<span class="preview-empty">no image for this item</span>';
     return;
   }
-  els.stageCube.innerHTML = '<span class="preview-empty">flattening…</span>';
-  els.stageSvg.innerHTML = '<span class="preview-empty">rendering on-chain…</span>';
 
+  // Cube view: the dev-only preview iframe fetches + flattens the art and renders
+  // the real 3D non-Normie cube via the token-renderer pipeline.
+  showCubeFrame(nft);
+
+  // SVG view: flatten here for the authoritative on-chain preview eth_call.
+  els.stageSvg.innerHTML = '<span class="preview-empty">rendering on-chain…</span>';
   let payload;
   try {
     const grid = await imageUrlToBinaryGrid(nft.imageUrl);
     if (token !== previewToken) return;
     payload = gridToTonalPayload(grid);
-    drawBands(els.stageCube, payload);
   } catch (err) {
     if (token !== previewToken) return;
-    stageError(els.stageCube, `flatten failed: ${msg(err)}`);
-    stageError(els.stageSvg, '—');
+    stageError(els.stageSvg, `flatten failed: ${msg(err)}`);
     return;
   }
-
-  // Authoritative SVG from the on-chain preview view.
   try {
     const seed = '0x' + safeBig(nft.tokenId).toString(16).padStart(64, '0');
     const svg = await previewThumbnailSVG({ seed, slot: demoSlotFor(nft.tokenId), sourceTokenId: safeBig(nft.tokenId), payload });
@@ -156,30 +158,30 @@ async function selectNft(nft) {
   }
 }
 
+function showCubeFrame(nft) {
+  const seed = '0x' + safeBig(nft.tokenId).toString(16).padStart(64, '0');
+  const q = new URLSearchParams({
+    art: nft.imageUrl,
+    slot: String(demoSlotFor(nft.tokenId)),
+    seed,
+    src: String(nft.tokenId),
+  });
+  els.cubeEmpty.style.display = 'none';
+  els.cubeFrame.style.display = 'block';
+  els.cubeFrame.src = '/viewer/cube-preview.html?' + q.toString();
+}
+
+function showCubeEmpty(text) {
+  els.cubeFrame.style.display = 'none';
+  els.cubeFrame.removeAttribute('src');
+  els.cubeEmpty.textContent = text;
+  els.cubeEmpty.style.display = '';
+}
+
 function safeBig(v) { try { return BigInt(v); } catch { return 0n; } }
 function msg(err) { return String(err?.message || err).slice(0, 90); }
 function stageError(stage, text) {
   stage.innerHTML = `<span class="preview-empty" style="color:#ff9a9a;padding:10px;text-align:center">${text}</span>`;
-}
-
-// Interim cube view: draw the 40×40 tonal bands as pixels (band 0 background).
-// Slice 2b swaps this for the real 3D non-Normie cube.
-function drawBands(stage, payload) {
-  const N = 40, scale = 7;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = N * scale;
-  canvas.style.imageRendering = 'pixelated';
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#050507';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const shades = ['#050507', '#2f6f47', '#9affb0'];
-  for (let i = 0; i < N * N; i++) {
-    const band = (payload[i >> 2] >> ((i & 3) << 1)) & 3;
-    if (band === 0) continue;
-    ctx.fillStyle = shades[band] || shades[2];
-    ctx.fillRect((i % N) * scale, ((i / N) | 0) * scale, scale, scale);
-  }
-  stage.replaceChildren(canvas);
 }
 
 function refreshCommitState() {

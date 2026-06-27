@@ -138,8 +138,14 @@ edge-point identity. This is the crux that makes move/merge coherent.
    `previewThumbnailSVG` (derives the thumbnail renderer from the V2 `renderer` in
    chain-config.json). Cube panel = interim 2D banded preview. *(needs a local
    deploy of the updated contracts with chain-config.json `renderer` pointing at
-   it.)* (2b) real 3D cube panel. (4) "cubes you own" row + target select + confirm
-   (Cancel/LFG) → flatten→attestation→customizeCube.
+   it.)* (2b) 🟡 real 3D cube panel via a **dev-only token-renderer preview bundle**:
+   `entry.js` now exports a parameterized `main(deps)`; `entry-main.js` is the
+   network-free production entry, `preview-entry.js` injects the non-Normie pipeline
+   (`buildNonNormie*` + `wallet-nfts` fetch). Build emits `preview.bundle.js` (no
+   forbiddenPatterns check); `cube-preview.html` iframes it; the cube panel sets its
+   src per selection. *(untested — needs `npm run build:token-renderer` + WSL; also
+   re-verify the production renderer via `preview:normie`.)* (4) "cubes you own" row
+   + target select + confirm (Cancel/LFG) → flatten→attestation→customizeCube.
 
 ### Biome placeholders (to revisit)
 - They don't currently render on vacant plots in the street preview — needs a

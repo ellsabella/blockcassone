@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cube preview</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #050507; overflow: hidden; }
+    #c { width: 100vw; height: 100vh; display: block; }
+    #h { position: fixed; left: 8px; bottom: 6px; color: #9adf9a; font: 11px 'Courier New', monospace; opacity: 0.7; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="h"></div>
+  <!-- Bridge the query string into the token the dev preview bundle reads at load,
+       then load the dev-only (non-Normie, network-using) preview bundle. -->
+  <script>
+    (function () {
+      const q = new URLSearchParams(location.search);
+      window.BLOCKCASSONE_TOKEN = {
+        tokenId: 0,
+        slot: Number(q.get('slot') || 0),
+        seed: q.get('seed') || '0x'.padEnd(66, '0'),
+        sourceTokenId: Number(q.get('src') || 0),
+        artUrl: q.get('art') || '',
+      };
+    })();
+  </script>
+  <script src="/dist/token-renderer/preview.bundle.js"></script>
+</body>
+</html>
