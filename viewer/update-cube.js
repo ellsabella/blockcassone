@@ -10,9 +10,10 @@ import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
 import { previewThumbnailSVG } from './preview-chain.js';
 
 const PAGE_SIZE = 50;
-// Until a target cube is picked (slice 4) the SVG preview renders on a neutral demo
-// cube; slot 1734 has a green unique-axis. Seed varies per source for variety.
-const DEMO_SLOT = 1734;
+// Until a target cube is picked (slice 4) the SVG preview renders on a *demo* cube.
+// Colour is slot-derived (unique axis), so vary the slot per item rather than
+// locking one hue — the real colour will be the target cube's once one is chosen.
+const demoSlotFor = (tokenId) => Number(safeBig(tokenId) % 4096n);
 
 const els = {
   addr: document.getElementById('wallet-addr'),
@@ -146,7 +147,7 @@ async function selectNft(nft) {
   // Authoritative SVG from the on-chain preview view.
   try {
     const seed = '0x' + safeBig(nft.tokenId).toString(16).padStart(64, '0');
-    const svg = await previewThumbnailSVG({ seed, slot: DEMO_SLOT, sourceTokenId: safeBig(nft.tokenId), payload });
+    const svg = await previewThumbnailSVG({ seed, slot: demoSlotFor(nft.tokenId), sourceTokenId: safeBig(nft.tokenId), payload });
     if (token !== previewToken) return;
     els.stageSvg.innerHTML = svg && svg.includes('<svg') ? svg : '<span class="preview-empty">empty SVG returned</span>';
   } catch (err) {
