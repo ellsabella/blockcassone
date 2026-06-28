@@ -5,7 +5,6 @@
 // renderer address is derived from the V2 `renderer` in chain-config.json.
 
 import { loadChainMintRecords } from './chain-cubes.js';
-import { keccak256 } from '/core/keccak.js';
 
 const CUSTOMIZE_SELECTOR = 'c029bfed'; // customizeCube(uint256,address,uint256,bytes,(...),bytes)
 const THUMBNAIL_RENDERER_SELECTOR = 'ad125d79'; // thumbnailRenderer()
@@ -92,7 +91,12 @@ export async function customizeCube({ cubeId, owner, sourceContract, sourceToken
   if (!cfg.cubeMintController || !cfg.flatteningAttestation || !cfg.attestationSigner) {
     throw new Error('chain-config.json missing customize addresses — redeploy with the customize stack');
   }
-  const payloadHash = '0x' + keccak256(payload);
+  // Hash the payload on the node (web3_sha3) so it equals the on-chain
+  // keccak256(tonalBands2Bit) byte-for-byte (the browser keccak diverged on the
+  // 400-byte multi-block input).
+  let phex = '';
+  for (let i = 0; i < payload.length; i++) phex += payload[i].toString(16).padStart(2, '0');
+  const payloadHash = await rpcRaw(cfg, 'web3_sha3', ['0x' + phex]);
   const att = {
     minter: owner,
     sourceContract,
