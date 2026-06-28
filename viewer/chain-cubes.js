@@ -136,6 +136,7 @@ function recordFromChain(config, cubeId, owner, dataHex) {
     slot,
     wallet: owner,
     sourceKind,
+    sourceKindNumber, // 1=normie, 2=external, 3=merged street
     source: {
       chain: numberWord(row[7]) === 1 ? 'ethereum' : `chain-${numberWord(row[7])}`,
       chainId: numberWord(row[7]),

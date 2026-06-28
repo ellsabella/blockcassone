@@ -7,7 +7,7 @@
 
 import { loadWalletNftsAcrossChains } from './wallet-nfts.js';
 import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
-import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes, customizeCube, moveCube, mergeStreet } from './preview-chain.js';
+import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes, customizeCube, moveCube } from './preview-chain.js';
 
 const PAGE_SIZE = 50;
 // Until a target cube is picked (slice 4) the SVG preview renders on a *demo* cube.
@@ -31,7 +31,6 @@ const els = {
   ownedActions: document.getElementById('owned-actions'),
   moveSlot: document.getElementById('move-slot'),
   moveBtn: document.getElementById('move-btn'),
-  mergeStreets: document.getElementById('merge-streets'),
   updateBtn: document.getElementById('update-btn'),
   overlay: document.getElementById('confirm-overlay'),
   confirmCancel: document.getElementById('confirm-cancel'),
@@ -247,7 +246,6 @@ function renderOwned() {
   }
   els.ownedEmpty.style.display = 'none';
   els.ownedActions.style.display = 'flex';
-  renderMergeStreets();
   const frag = document.createDocumentFragment();
   for (const cube of state.ownedCubes) {
     const card = document.createElement('div');
@@ -283,21 +281,6 @@ function selectTarget(cube) {
   renderPreviews(); // re-render the top preview on the target cube's identity
 }
 
-// One merge button per street present in the owned cubes (dev: all owned, so all
-// are mergeable; mergeStreet reverts if the wallet doesn't own every occupied plot).
-function renderMergeStreets() {
-  const streets = [...new Set(state.ownedCubes.map(c => c.slot >> 3))].sort((a, b) => a - b);
-  els.mergeStreets.replaceChildren();
-  for (const street of streets) {
-    const cubes = state.ownedCubes.filter(c => (c.slot >> 3) === street);
-    const btn = document.createElement('button');
-    btn.textContent = `#${street} (${cubes.length})`;
-    btn.title = `merge street ${street} into one street token`;
-    btn.addEventListener('click', () => mergeFlow(street, cubes[0].owner));
-    els.mergeStreets.appendChild(btn);
-  }
-}
-
 async function moveFlow() {
   if (!state.target) { setStatus('select a cube to move'); return; }
   const slot = Number(els.moveSlot.value);
@@ -312,19 +295,6 @@ async function moveFlow() {
     console.error('[update-cube] move failed', err);
     setStatus(`move failed: ${msg(err)}`);
     els.moveBtn.disabled = false;
-  }
-}
-
-async function mergeFlow(street, owner) {
-  if (!window.confirm(`Merge street ${street}? This burns its cubes into one street token (irreversible).`)) return;
-  setStatus(`merging street ${street}…`);
-  try {
-    await mergeStreet({ street, owner });
-    setStatus(`street ${street} merged into a street token`);
-    await loadOwned();
-  } catch (err) {
-    console.error('[update-cube] merge failed', err);
-    setStatus(`merge failed: ${msg(err)}`);
   }
 }
 

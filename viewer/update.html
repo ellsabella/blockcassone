@@ -165,6 +165,7 @@
     <div class="tabs">
       <a href="/viewer/index.html"><button>Big Cube</button></a>
       <button class="active">Update Cube</button>
+      <a href="/viewer/streets.html"><button>Streets</button></a>
     </div>
     <span class="spacer"></span>
     <input id="wallet-addr" placeholder="0x… wallet address" spellcheck="false" />
@@ -198,15 +199,14 @@
     </div>
 
     <div id="owned-col" class="panel">
-      <div class="panel-title">Cubes you already own — pick one to overwrite, move, or merge</div>
+      <div class="panel-title">Cubes you already own — pick one to overwrite or move</div>
       <div id="owned-list"><div id="owned-empty">Connect / load a wallet that owns Blockcassone cubes.</div></div>
       <div id="owned-actions" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;border-top:1px solid rgba(120,120,140,0.2)">
         <span style="font-size:11px;color:#9f9fa8">move selected →</span>
         <input id="move-slot" type="number" min="0" placeholder="slot" style="width:90px" />
         <button id="move-btn" disabled>Move</button>
         <span style="flex:1"></span>
-        <span style="font-size:11px;color:#9f9fa8">merge street:</span>
-        <span id="merge-streets" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+        <a href="/viewer/streets.html" style="text-decoration:none;font-size:11px;color:#9f9fa8">merge streets ▸</a>
       </div>
     </div>
 
