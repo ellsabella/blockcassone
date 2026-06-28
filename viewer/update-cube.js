@@ -7,7 +7,7 @@
 
 import { loadWalletNftsAcrossChains } from './wallet-nfts.js';
 import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
-import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes } from './preview-chain.js';
+import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes, customizeCube } from './preview-chain.js';
 
 const PAGE_SIZE = 50;
 // Until a target cube is picked (slice 4) the SVG preview renders on a *demo* cube.
@@ -40,7 +40,8 @@ const state = {
   selectedKey: null, // contract:tokenId of selected wallet art
   selectedNft: null, // the selected wallet art
   ownedCubes: [], // cubes on the local chain (candidate targets)
-  target: null, // the owned cube chosen to overwrite { cubeId, seed, slot }
+  target: null, // the owned cube chosen to overwrite { cubeId, seed, slot, owner }
+  payload: null, // flattened 400-byte tonal payload of the selected art (for commit)
 };
 
 const keyOf = (n) => `${n.chain}:${n.contract}:${n.tokenId}`;
@@ -130,6 +131,7 @@ function previewIdentity(nft) {
 async function selectNft(nft) {
   state.selectedKey = keyOf(nft);
   state.selectedNft = nft;
+  state.payload = null; // cleared until the new art finishes flattening
   for (const row of els.list.querySelectorAll('.wallet-item')) {
     row.classList.toggle('selected', row.dataset.key === state.selectedKey);
   }
@@ -159,6 +161,7 @@ async function renderPreviews() {
     const grid = await imageUrlToBinaryGrid(nft.imageUrl);
     if (token !== previewToken) return;
     payload = gridToTonalPayload(grid);
+    state.payload = payload; // reused by the commit
   } catch (err) {
     if (token !== previewToken) return;
     stageError(els.stageSvg, `flatten failed: ${msg(err)}`);
@@ -264,10 +267,32 @@ function openConfirm() {
   els.overlay.style.display = 'flex';
 }
 function closeConfirm() { els.overlay.style.display = 'none'; }
-function commit() {
-  // Slice 4: flatten -> attestation -> customizeCube. Stubbed for now.
-  closeConfirm();
-  setStatus('commit flow lands in a later slice');
+
+async function commit() {
+  if (!state.selectedNft || !state.target || !state.payload) {
+    setStatus('pick wallet art + a target cube first');
+    closeConfirm();
+    return;
+  }
+  els.confirmLfg.disabled = true;
+  setStatus(`customizing cube #${state.target.cubeId}…`);
+  try {
+    const tx = await customizeCube({
+      cubeId: state.target.cubeId,
+      owner: state.target.owner,
+      sourceContract: state.selectedNft.contract,
+      sourceTokenId: state.selectedNft.tokenId,
+      payload: state.payload,
+    });
+    closeConfirm();
+    setStatus(`cube #${state.target.cubeId} customized · tx ${String(tx).slice(0, 12)}…`);
+    await loadOwned(); // the target's thumbnail now renders the new art
+  } catch (err) {
+    console.error('[update-cube] customize failed', err);
+    setStatus(`customize failed: ${msg(err)}`);
+  } finally {
+    els.confirmLfg.disabled = false;
+  }
 }
 
 // --- SVG panel zoom + pan (wheel to zoom, drag to pan) ---------------------

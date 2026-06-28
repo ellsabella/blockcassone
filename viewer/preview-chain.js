@@ -5,7 +5,9 @@
 // renderer address is derived from the V2 `renderer` in chain-config.json.
 
 import { loadChainMintRecords } from './chain-cubes.js';
+import { keccak256 } from '/core/keccak.js';
 
+const CUSTOMIZE_SELECTOR = 'c029bfed'; // customizeCube(uint256,address,uint256,bytes,(...),bytes)
 const THUMBNAIL_RENDERER_SELECTOR = 'ad125d79'; // thumbnailRenderer()
 const PREVIEW_SELECTOR = 'f3d3c20b'; // previewThumbnailSVG(bytes32,uint32,uint256,bytes)
 const THUMBNAIL_SVG_SELECTOR = '1df76ecc'; // thumbnailSVG(uint256)
@@ -47,6 +49,107 @@ async function thumbnailRendererAddress(cfg) {
 
 const word = (n) => BigInt(n).toString(16).padStart(64, '0');
 const seedWord = (seed) => String(seed).replace(/^0x/, '').padStart(64, '0').slice(-64);
+const addrWord = (a) => String(a).replace(/^0x/, '').toLowerCase().padStart(64, '0');
+
+// Generic JSON-RPC (eth_signTypedData_v4 / eth_sendTransaction), via the proxy.
+async function rpcRaw(cfg, method, params) {
+  const endpoint = cfg.directRpc ? (cfg.rpcUrl || 'http://127.0.0.1:8545') : '/api/chain-rpc';
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+  const j = await res.json();
+  if (j.error) throw new Error(j.error.message || `${method} error`);
+  return j.result;
+}
+
+// ABI-encode customizeCube. The Attestation struct is all-static (10 words), so it
+// inlines in the head; only tonalBands2Bit + signature are dynamic tails.
+function encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, signature) {
+  let tonalHex = '';
+  for (let i = 0; i < payload.length; i++) tonalHex += payload[i].toString(16).padStart(2, '0');
+  const tonalEnc = word(payload.length) + padRight32(tonalHex);
+  const sigHex = String(signature).replace(/^0x/, '');
+  const sigEnc = word(sigHex.length / 2) + padRight32(sigHex);
+  const offsetTonal = 15 * 32; // 4 leading words + 10 attestation words + 1 sig-offset word
+  const offsetSig = offsetTonal + tonalEnc.length / 2;
+  const head =
+    word(cubeId) + addrWord(sourceContract) + word(sourceTokenId) + word(offsetTonal)
+    + addrWord(att.minter) + addrWord(att.sourceContract) + word(att.sourceTokenId)
+    + word(att.payloadVersion) + word(att.agentic ? 1 : 0) + word(att.agentId)
+    + word(att.flatteningVersion) + seedWord(att.payloadHash) + word(att.nonce) + word(att.deadline)
+    + word(offsetSig);
+  return '0x' + CUSTOMIZE_SELECTOR + head + tonalEnc + sigEnc;
+}
+
+// Re-base cube `cubeId` (owned by `owner`) onto the wallet token
+// (sourceContract,sourceTokenId) with the flattened `payload`. Dev flow: Anvil
+// signs the EIP-712 attestation (unlocked signer) and sends the tx (unlocked owner).
+export async function customizeCube({ cubeId, owner, sourceContract, sourceTokenId, payload }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeMintController || !cfg.flatteningAttestation || !cfg.attestationSigner) {
+    throw new Error('chain-config.json missing customize addresses — redeploy with the customize stack');
+  }
+  const payloadHash = '0x' + keccak256(payload);
+  const att = {
+    minter: owner,
+    sourceContract,
+    sourceTokenId: BigInt(sourceTokenId),
+    payloadVersion: 1,
+    agentic: false,
+    agentId: 0n,
+    flatteningVersion: 1,
+    payloadHash,
+    nonce: BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000)),
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 3600),
+  };
+  const typedData = {
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      Attestation: [
+        { name: 'minter', type: 'address' },
+        { name: 'sourceContract', type: 'address' },
+        { name: 'sourceTokenId', type: 'uint256' },
+        { name: 'payloadVersion', type: 'uint8' },
+        { name: 'agentic', type: 'bool' },
+        { name: 'agentId', type: 'uint256' },
+        { name: 'flatteningVersion', type: 'uint16' },
+        { name: 'payloadHash', type: 'bytes32' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'deadline', type: 'uint256' },
+      ],
+    },
+    primaryType: 'Attestation',
+    domain: {
+      name: 'BlockcassoneFlattening',
+      version: '1',
+      chainId: Number(cfg.chainId || 1),
+      verifyingContract: cfg.flatteningAttestation,
+    },
+    message: {
+      minter: att.minter,
+      sourceContract: att.sourceContract,
+      sourceTokenId: att.sourceTokenId.toString(),
+      payloadVersion: att.payloadVersion,
+      agentic: att.agentic,
+      agentId: att.agentId.toString(),
+      flatteningVersion: att.flatteningVersion,
+      payloadHash: att.payloadHash,
+      nonce: att.nonce.toString(),
+      deadline: att.deadline.toString(),
+    },
+  };
+  const signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, typedData]);
+  const data = encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, signature);
+  return rpcRaw(cfg, 'eth_sendTransaction', [{ from: owner, to: cfg.cubeMintController, data }]);
+}
 
 function bytesToHex(u8) {
   let s = '';
