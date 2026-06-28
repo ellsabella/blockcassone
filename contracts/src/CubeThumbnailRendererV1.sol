@@ -104,7 +104,6 @@ contract CubeThumbnailRendererV1 {
             _bitmapPath(raw),
             _outlinePath(raw, data.sourceTokenId),
             _labelPath(data.sourceTokenId),
-            axis,
             _colour(axis)
         );
     }
@@ -139,9 +138,11 @@ contract CubeThumbnailRendererV1 {
     }
 
     function _colour(uint256 axis) private pure returns (string memory) {
-        if (axis == 0) return "#ff1919"; // x -> red
-        if (axis == 1) return "#1fff3a"; // y -> green (strengthened, purer)
-        return "#1f3bff"; // z -> blue (strengthened, deeper)
+        // Pure axis hues (match the WebGL cube + the line-lab tuning). The neon
+        // filter is hue-preserving, so the glow stays the source hue.
+        if (axis == 0) return "#ff0000"; // x -> red
+        if (axis == 1) return "#00ff00"; // y -> green
+        return "#0000ff"; // z -> blue
     }
 
     // Returns a 200-byte (40x40, 1 bit/cell) binary silhouette for either source
@@ -178,31 +179,14 @@ contract CubeThumbnailRendererV1 {
         return "";
     }
 
-    // Build a diagonal feColorMatrix "values" string that boosts the cube's own
-    // colour channel (axis 0=R,1=G,2=B) by `dom` and the other two by `sec`, with
-    // alpha `a`. This makes the neon glow saturate in the cube's hue (red cubes
-    // glow red, blue glow blue) instead of washing toward white.
-    function _neonVals(uint256 axis, string memory dom, string memory sec, string memory a)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory r = axis == 0 ? dom : sec;
-        string memory g = axis == 1 ? dom : sec;
-        string memory b = axis == 2 ? dom : sec;
-        return string.concat(r, " 0 0 0 0 0 ", g, " 0 0 0 0 0 ", b, " 0 0 0 0 0 ", a, " 0");
-    }
-
     // Builds the whole <defs> block. Uses the shared O(n) StrBuf (each buf.cat is
-    // a shallow call) rather than one giant string.concat, which overflowed
-    // the legacy stack limit. The only axis-dependent parts are #nt (colour-
-    // specific tube) and #gf (generic white for red/green; colour-specific for
-    // blue, which washes out under a white halo).
+    // a shallow call) rather than one giant string.concat, which overflowed the
+    // legacy stack limit. All neon filters are hue-preserving (the source stroke
+    // supplies the colour), so they're shared across axes.
     function _thumbnailDefs(
         string memory bitmapPath,
         string memory outlinePath,
         string memory labelPath,
-        uint256 axis,
         string memory planeColor
     )
         private
@@ -218,32 +202,18 @@ contract CubeThumbnailRendererV1 {
         buf.cat('<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/><feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/><feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
         buf.cat('<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/><feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/><feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
         buf.cat('<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/><feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge></filter>');
-        // figure neon tube #nt (pure colour-specific core)
-        buf.cat('<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".21" result="r"/><feColorMatrix in="r" type="matrix" values="');
-        buf.cat(_neonVals(axis, "30", "2", ".99"));
-        buf.cat('" result="rc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/><feColorMatrix in="t" type="matrix" values="');
-        buf.cat(_neonVals(axis, "28", "2.4", ".38"));
-        buf.cat('" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".24" result="m"/><feColorMatrix in="m" type="matrix" values="');
-        buf.cat(_neonVals(axis, "15", "1.4", ".025"));
-        buf.cat('" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
-        // extra figure glow tier #t
-        buf.cat('<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".8" result="t"/><feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 7 0 0 0 0 0 7 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="m"/><feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 .85 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="w"/><feColorMatrix in="w" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .45 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
-        // wide figure glow #gf — generic white for red/green, colour-specific for blue
-        buf.cat('<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">');
-        if (axis == 2) {
-            buf.cat('<feGaussianBlur in="SourceGraphic" stdDeviation="2" result="t"/><feColorMatrix in="t" type="matrix" values="');
-            buf.cat(_neonVals(2, "8", "1.9", "1"));
-            buf.cat('" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="4.7" result="m"/><feColorMatrix in="m" type="matrix" values="');
-            buf.cat(_neonVals(2, "5.5", "1.4", ".72"));
-            buf.cat('" result="mc"/>');
-        } else {
-            buf.cat('<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="t"/><feColorMatrix in="t" type="matrix" values="');
-            buf.cat(_neonVals(axis, "5", "5", "1"));
-            buf.cat('" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="m"/><feColorMatrix in="m" type="matrix" values="');
-            buf.cat(_neonVals(axis, "3", "3", ".62"));
-            buf.cat('" result="mc"/>');
-        }
-        buf.cat('<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        // Figure neon (#nfN): wide soft + tight bright, screen-composited (additive)
+        // and hue-preserving. Applied inside scale(25), so stdDeviation is in grid
+        // units. #wfN softens the white core. (Tuned in tmp/line-lab.html.)
+        buf.cat('<filter id="nfN" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".1" result="wb"/><feColorMatrix in="wb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .1 0" result="w"/><feGaussianBlur in="SourceGraphic" stdDeviation=".11" result="tb"/><feColorMatrix in="tb" type="matrix" values="10.5 0 0 0 0 0 10.5 0 0 0 0 0 10.5 0 0 0 0 0 2.7 0" result="t"/><feBlend in="w" in2="t" mode="screen"/></filter>');
+        buf.cat('<filter id="wfN" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".015"/></filter>');
+        // Frame neon (#nfF / #wfF) — drawn in raw 1200-space, so stdDeviation is in
+        // viewBox px (= grid units x 25).
+        buf.cat('<filter id="nfF" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="wb"/><feColorMatrix in="wb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .8 0" result="w"/><feGaussianBlur in="SourceGraphic" stdDeviation="2.75" result="tb"/><feColorMatrix in="tb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1.35 0" result="t"/><feBlend in="w" in2="t" mode="screen"/></filter>');
+        buf.cat('<filter id="wfF" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".75"/></filter>');
+        // Edge-orb glow (#pfP) + soft white core (#pwP), raw 1200-space.
+        buf.cat('<filter id="pfP" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.75" result="b"/><feColorMatrix in="b" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 1.05 0"/></filter>');
+        buf.cat('<filter id="pwP" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".875"/></filter>');
         // forest particle filter #pc + plane-colour cloud gradient #cg
         buf.cat('<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/><feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/><feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/><feGaussianBlur in="clip" stdDeviation="5" result="gr"/><feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/><feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>');
         buf.cat('<radialGradient id="cg"><stop offset="0" stop-color="');
@@ -282,18 +252,19 @@ contract CubeThumbnailRendererV1 {
             );
         }
 
+        // Figure neon stack (tuned in tmp/line-lab.html). Inside scale(25), so
+        // widths/dash are in grid units. fill="none" on the group keeps the open
+        // outline subpaths from filling; the faint #n fill is set explicitly.
+        // Layers: screen glow · glow beads (a dot per cell-vertex) · bright core ·
+        // soft white core · white beads.
         return string.concat(
-            '<g transform="translate(100 85) scale(25)" stroke-linecap="round" stroke-linejoin="round">',
-            '<use href="#n" fill="',
-            planeColor,
-            '" opacity=".003"/>',
-            '<use href="#o" fill="none" stroke="',
-            planeColor,
-            '" stroke-width=".38" opacity=".90" filter="url(#nt)"/>',
-            '<use href="#o" fill="none" stroke="',
-            planeColor,
-            '" stroke-width=".27" opacity=".95" filter="url(#gf)"/>',
-            '<use href="#o" fill="none" stroke="#fff" stroke-width=".026" opacity=".92"/>',
+            '<g transform="translate(100 85) scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">',
+            '<use href="#n" fill="', planeColor, '" opacity=".003"/>',
+            '<use href="#o" stroke="', planeColor, '" stroke-width=".146" filter="url(#nfN)"/>',
+            '<use href="#o" stroke="', planeColor, '" stroke-width=".245" stroke-dasharray="0 1" opacity=".88" filter="url(#nfN)"/>',
+            '<use href="#o" stroke="', planeColor, '" stroke-width=".105" opacity=".95"/>',
+            '<use href="#o" stroke="#fff" stroke-width=".04" opacity=".9" filter="url(#wfN)"/>',
+            '<use href="#o" stroke="#fff" stroke-width=".1" stroke-dasharray="0 1" opacity=".89" filter="url(#wfN)"/>',
             "</g>"
         );
     }
@@ -307,12 +278,12 @@ contract CubeThumbnailRendererV1 {
     {
         if (bytes(labelPath).length == 0) return "";
         return string.concat(
-            '<g transform="translate(100 85) scale(25)" stroke-linecap="round" stroke-linejoin="round">',
-            '<use href="#l" fill="none" stroke="', planeColor,
-            '" stroke-width=".32" opacity=".88" filter="url(#nt)"/>',
-            '<use href="#l" fill="none" stroke="', planeColor,
-            '" stroke-width=".26" opacity=".95" filter="url(#gf)"/>',
-            '<use href="#l" fill="none" stroke="#fff" stroke-width=".028" opacity=".84"/>',
+            '<g transform="translate(100 85) scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">',
+            '<use href="#l" stroke="', planeColor, '" stroke-width=".146" filter="url(#nfN)"/>',
+            '<use href="#l" stroke="', planeColor, '" stroke-width=".245" stroke-dasharray="0 1" opacity=".88" filter="url(#nfN)"/>',
+            '<use href="#l" stroke="', planeColor, '" stroke-width=".105" opacity=".95"/>',
+            '<use href="#l" stroke="#fff" stroke-width=".04" opacity=".9" filter="url(#wfN)"/>',
+            '<use href="#l" stroke="#fff" stroke-width=".1" stroke-dasharray="0 1" opacity=".89" filter="url(#wfN)"/>',
             "</g>"
         );
     }
