@@ -154,7 +154,26 @@ export async function customizeCube({ cubeId, owner, sourceContract, sourceToken
     signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, JSON.stringify(typedData)]);
   }
   const data = encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, signature);
-  return rpcRaw(cfg, 'eth_sendTransaction', [{ from: owner, to: cfg.cubeMintController, data }]);
+  const tx = { from: owner, to: cfg.cubeMintController, data };
+  const txHash = await rpcRaw(cfg, 'eth_sendTransaction', [tx]);
+
+  // eth_sendTransaction returns a hash even when the tx reverts on mine, so verify
+  // the receipt; on revert, replay as eth_call to surface the actual reason.
+  let receipt = null;
+  for (let i = 0; i < 40 && !receipt; i++) {
+    receipt = await rpcRaw(cfg, 'eth_getTransactionReceipt', [txHash]);
+    if (!receipt) await new Promise(r => setTimeout(r, 150));
+  }
+  if (receipt && receipt.status === '0x0') {
+    let reason = 'reverted';
+    try {
+      await rpcRaw(cfg, 'eth_call', [tx, receipt.blockNumber || 'latest']);
+    } catch (e) {
+      reason = String(e?.message || e);
+    }
+    throw new Error('customizeCube reverted: ' + reason);
+  }
+  return txHash;
 }
 
 function bytesToHex(u8) {
