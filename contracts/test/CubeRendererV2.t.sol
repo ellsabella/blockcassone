@@ -107,19 +107,21 @@ contract CubeRendererV2Test is Test {
 
         assertTrue(_contains(svg, '<path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/>'));
         assertTrue(_contains(svg, '<path id="o" d='));
-        // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green (#1fff3a).
-        // (Was #ff1919 under the old slot%3 rule; now uses the unique-axis colour.)
-        assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#1fff3a"'));
-        // Frame border now traces the motif's unique-plane sides (slot 1734 -> TRB,
-        // open left) as separate subpaths rather than the old fixed square path.
+        // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green. Now pure
+        // #00ff00 (matches the WebGL cube + the line-lab neon tuning); the figure
+        // uses the additive-screen #nfN filter, fill="none" hoisted to the group.
+        assertTrue(_contains(svg, '<use href="#o" stroke="#00ff00" stroke-width=".146" filter="url(#nfN)"'));
+        // Frame border traces the motif's unique-plane sides (slot 1734 -> TRB,
+        // open left) as separate subpaths.
         assertTrue(_contains(svg, '<path d="M100 85H1100M1100 85V1085M100 1085H1100"'));
         assertTrue(_contains(svg, '<path id="l" d='));
-        assertTrue(_contains(svg, '<circle cx="100" cy="85" r="14"'));
-        assertTrue(_contains(svg, '<filter id="h"'));
+        // edge-point orbs: additive white-glow group at r=10 (soft core group r=6).
+        assertTrue(_contains(svg, '<circle cx="100" cy="85" r="10"'));
+        assertTrue(_contains(svg, '<filter id="nfN"'));
         // forest strand layer (thin strands + turbulence tip-clouds)
-        assertTrue(_contains(svg, '<g fill="none" stroke="#1fff3a" stroke-width="1.4"'));
+        assertTrue(_contains(svg, '<g fill="none" stroke="#00ff00" stroke-width="1.4"'));
         assertTrue(_contains(svg, 'filter="url(#pc)"'));
-        assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#1fff3a"'));
+        assertTrue(_contains(svg, '<use href="#l" stroke="#00ff00"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));
     }

@@ -251,16 +251,20 @@ contract CubeMintControllerTest is Test {
         bytes memory p1 = _samplePayload();
         FlatteningAttestation.Attestation memory a1 =
             _attestation(MINTER, address(externalNft), 1, 1, p1, block.timestamp + 1 days);
+        // Sign before pranking: _sign() calls hashAttestation() (an external call),
+        // which would otherwise consume the vm.prank meant for customizeCube.
+        bytes memory s1 = _sign(a1);
         vm.prank(MINTER);
-        controller.customizeCube(cubeId, address(externalNft), 1, p1, a1, _sign(a1));
+        controller.customizeCube(cubeId, address(externalNft), 1, p1, a1, s1);
 
         bytes memory p2 = _samplePayload();
         p2[10] = bytes1(uint8(0x55)); // different art
         FlatteningAttestation.Attestation memory a2 =
             _attestation(MINTER, address(externalNft), 2, 1, p2, block.timestamp + 1 days);
         a2.nonce = 2; // fresh nonce
+        bytes memory s2 = _sign(a2); // sign before prank (see above)
         vm.prank(MINTER);
-        controller.customizeCube(cubeId, address(externalNft), 2, p2, a2, _sign(a2));
+        controller.customizeCube(cubeId, address(externalNft), 2, p2, a2, s2);
 
         CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
         assertEq(data.sourceTokenId, 2); // latest source wins
