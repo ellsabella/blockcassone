@@ -283,6 +283,9 @@ function openConfirm() {
 function closeConfirm() { els.overlay.style.display = 'none'; }
 
 async function commit() {
+  console.error('[update-cube] LFG/commit', {
+    hasArt: !!state.selectedNft, hasTarget: !!state.target, hasPayload: !!state.payload,
+  });
   if (!state.selectedNft || !state.target || !state.payload) {
     setStatus('pick wallet art + a target cube first');
     closeConfirm();

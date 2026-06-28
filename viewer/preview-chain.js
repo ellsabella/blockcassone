@@ -146,7 +146,13 @@ export async function customizeCube({ cubeId, owner, sourceContract, sourceToken
       deadline: att.deadline.toString(),
     },
   };
-  const signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, typedData]);
+  // Anvil accepts the typed data as an object; some builds want a JSON string.
+  let signature;
+  try {
+    signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, typedData]);
+  } catch (e) {
+    signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, JSON.stringify(typedData)]);
+  }
   const data = encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, signature);
   return rpcRaw(cfg, 'eth_sendTransaction', [{ from: owner, to: cfg.cubeMintController, data }]);
 }
