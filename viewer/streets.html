@@ -13,6 +13,8 @@
     button:hover:not(:disabled) { background: rgba(46,46,54,0.92); color: #fff; box-shadow: 0 0 12px rgba(255,58,184,0.18); }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
     button.active { background: rgba(72,72,88,0.95); border-color: #ff7dcc; color: #fff; box-shadow: 0 0 14px rgba(255,58,184,0.32); }
+    input { font: 700 12px 'Courier New', monospace; background: rgba(20,20,24,0.88); border: 1px solid rgba(120,120,140,0.38); color: #e8e8ee; padding: 6px 8px; min-height: 29px; }
+    #me { width: 300px; max-width: 34vw; }
 
     #hud { position: fixed; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; gap: 10px;
       padding: 6px 12px; height: 50px; background: linear-gradient(180deg, rgba(5,5,8,0.96), rgba(5,5,8,0.5));
@@ -59,7 +61,17 @@
     .plot-tile img { max-width: 100%; max-height: 100%; }
     .plot-tile.vacant { border-style: dashed; color: #565660; font-size: 10px; text-align: center; }
     .plot-cap { font-size: 9px; color: #7f7f88; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .plot.theirs .plot-tile { border-color: rgba(255,140,80,0.5); }
+    /* cubes owned by someone else on a contested street — they block the merge */
+    .plot.theirs .plot-tile { background: #2a0c0c; border-color: rgba(178,56,56,0.6); }
+    .plot.theirs .plot-cap { color: #c08a8a; }
+    /* your own cubes are draggable (move to consolidate) */
+    .plot.mine .plot-tile { cursor: grab; }
+    .plot.mine .plot-tile:active { cursor: grabbing; }
+    /* bright selection border (matches the big-cube selection) */
+    .plot.selected .plot-tile { border-color: #ff7dcc; box-shadow: 0 0 12px rgba(255,58,184,0.45); }
+    /* drop affordance while dragging a cube */
+    body.dragging .plot-tile.vacant { border-color: rgba(255,125,204,0.55); color: #ff9ad6; }
+    .plot-tile.drop-ok { border-style: solid !important; border-color: #ff7dcc !important; background: rgba(60,18,44,0.55) !important; color: #ff9ad6; }
     .merged-block { display: flex; align-items: center; gap: 14px; }
     .merged-tile { width: 120px; height: 120px; background: #050507; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .merged-tile img { max-width: 100%; max-height: 100%; }
@@ -84,6 +96,8 @@
       <button class="active">Streets</button>
     </div>
     <span class="spacer"></span>
+    <span style="font-size:11px;color:#8f8f98">you are</span>
+    <input id="me" placeholder="0x… (your wallet)" spellcheck="false" />
     <button id="reload">Reload</button>
     <span id="status">loading…</span>
   </div>
@@ -91,7 +105,7 @@
   <div id="main">
     <div id="preview">
       <div class="prev-head">
-        <span class="prev-title">Merge preview — Street #<span id="prev-street">—</span></span>
+        <span class="prev-title" id="prev-title">Merge preview</span>
         <span id="prev-state"></span>
         <button id="prev-merge" disabled>Merge → 1</button>
         <button id="prev-close">✕ close</button>
@@ -112,11 +126,11 @@
 
   <div id="confirm-overlay">
     <div id="confirm-box">
-      <h2>Merge this street?</h2>
+      <h2 id="confirm-title">Are you sure?</h2>
       <p id="confirm-text"></p>
       <div id="confirm-actions">
         <button id="confirm-cancel">Cancel</button>
-        <button id="confirm-go">Merge · LFG</button>
+        <button id="confirm-go">LFG</button>
       </div>
     </div>
   </div>
