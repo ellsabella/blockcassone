@@ -209,6 +209,14 @@ contract DeployLocalGenesis is Script {
 
             vm.broadcast();
             d.genesis.mintPublicFor(initialOwner, sampleMints);
+
+            // Dev: hand cube #1 (slot 0 → street 0) to a second account so street 0
+            // has mixed ownership and the merge "ineligible / consolidate first" flow
+            // is testable. Streets 1+ stay solely owned (mergeable).
+            if (sampleMints >= 3 && vm.envOr("BLOCKCASSONE_DEV_SPLIT_OWNER", true)) {
+                vm.broadcast();
+                d.cubes.transferFrom(initialOwner, DEV_ATTESTATION_SIGNER, 1);
+            }
         }
     }
 
