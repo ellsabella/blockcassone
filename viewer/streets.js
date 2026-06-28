@@ -13,9 +13,17 @@ const els = {
   confirmText: document.getElementById('confirm-text'),
   confirmCancel: document.getElementById('confirm-cancel'),
   confirmGo: document.getElementById('confirm-go'),
+  preview: document.getElementById('preview'),
+  prevStreet: document.getElementById('prev-street'),
+  prevState: document.getElementById('prev-state'),
+  prevMerge: document.getElementById('prev-merge'),
+  prevClose: document.getElementById('prev-close'),
+  prevSvg: document.getElementById('prev-svg-stage'),
+  prevFrame: document.getElementById('prev-frame'),
 };
 
 let pendingMerge = null; // { street, owner }
+let selectedStreet = null; // street number currently in the preview
 
 const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '—');
 const status = (m) => { els.status.textContent = m; };
@@ -48,11 +56,22 @@ async function load() {
   const streets = [...byStreet.values()].sort((a, b) => a.street - b.street);
   status(streets.length ? `${streets.length} street${streets.length === 1 ? '' : 's'}` : 'no cubes on chain');
   for (const s of streets) els.list.appendChild(streetCard(s));
+
+  // Re-populate the preview for the street that was selected before a reload, so
+  // a merge / move leaves the preview pointing at something sensible.
+  const keep = streets.find((s) => s.street === selectedStreet);
+  if (keep && !keep.merged) selectStreet(keep);
+  else hidePreview();
 }
 
 function streetCard(s) {
   const card = document.createElement('div');
   card.className = 'street' + (s.merged ? ' merged' : '');
+  if (!s.merged) {
+    card.style.cursor = 'pointer';
+    if (s.street === selectedStreet) card.style.boxShadow = '0 0 0 1px #ff7dcc, 0 0 14px rgba(255,58,184,0.2)';
+    card.addEventListener('click', () => selectStreet(s));
+  }
 
   const head = document.createElement('div');
   head.className = 'street-head';
@@ -144,6 +163,62 @@ function streetCard(s) {
   return card;
 }
 
+// Selecting a street drives the preview pane: the resulting merged token's SVG
+// (the leader cube = lowest occupied plot) + a large 3D render of the merged
+// street, plus the eligibility state so the "unable to merge" flow is visible.
+function selectStreet(s) {
+  selectedStreet = s.street;
+  // refresh selection highlight without a full reload
+  for (const card of els.list.children) card.style.boxShadow = '';
+  const occupied = s.plots.filter(Boolean);
+  const owners = [...new Set(occupied.map((p) => (p.wallet || '').toLowerCase()))];
+  const mergeable = occupied.length > 0 && owners.length === 1;
+  const leader = occupied.slice().sort((a, b) => a.slot - b.slot)[0] || null;
+
+  els.preview.style.display = 'block';
+  els.prevStreet.textContent = String(s.street);
+
+  if (mergeable) {
+    els.prevState.className = 'eligible';
+    els.prevState.textContent = `eligible · you own all ${occupied.length} occupied plot${occupied.length === 1 ? '' : 's'}`;
+    els.prevMerge.disabled = false;
+    els.prevMerge.textContent = `Merge ${occupied.length} → 1`;
+    els.prevMerge.onclick = () => askMerge(s.street, leader.wallet, occupied.length);
+  } else {
+    els.prevState.className = 'ineligible';
+    els.prevState.textContent = occupied.length === 0
+      ? 'unable to merge · no cubes on this street'
+      : `unable to merge · ${occupied.length} plots across ${owners.length} owners — consolidate first`;
+    els.prevMerge.disabled = true;
+    els.prevMerge.textContent = 'Merge → 1';
+    els.prevMerge.onclick = null;
+  }
+
+  // SVG of the resulting street token = the leader cube's thumbnail
+  els.prevSvg.textContent = leader ? '…' : 'no occupied plots';
+  if (leader) {
+    cubeThumbnailSVG(leader.cubeId)
+      .then((svg) => { if (selectedStreet === s.street && svg && svg.includes('<svg')) els.prevSvg.replaceChildren(svgImg(svg)); })
+      .catch(() => { if (selectedStreet === s.street) els.prevSvg.textContent = 'err'; });
+  }
+
+  // 3D render of the merged street: pass the occupied plots' source + seed so the
+  // bridge can fetch each plot's raw art and assemble the street token.
+  if (occupied.length) {
+    const plots = occupied.map((p) => ({ slot: p.slot, src: Number(p.source.tokenId), seed: p.seed }));
+    const qs = `street=${s.street}&plots=${encodeURIComponent(JSON.stringify(plots))}`;
+    els.prevFrame.src = `/viewer/street-preview.html?${qs}`;
+  } else {
+    els.prevFrame.removeAttribute('src');
+  }
+}
+
+function hidePreview() {
+  selectedStreet = null;
+  els.preview.style.display = 'none';
+  els.prevFrame.removeAttribute('src');
+}
+
 function askMerge(street, owner, count) {
   pendingMerge = { street, owner };
   els.confirmText.textContent =
@@ -168,6 +243,7 @@ async function doMerge() {
 }
 
 els.reload.addEventListener('click', load);
+els.prevClose.addEventListener('click', hidePreview);
 els.confirmCancel.addEventListener('click', () => { pendingMerge = null; els.overlay.style.display = 'none'; });
 els.confirmGo.addEventListener('click', doMerge);
 els.overlay.addEventListener('click', (e) => { if (e.target === els.overlay) { pendingMerge = null; els.overlay.style.display = 'none'; } });

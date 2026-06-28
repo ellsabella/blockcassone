@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>street preview</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #050507; overflow: hidden; }
+    #c { width: 100vw; height: 100vh; display: block; }
+    #h { position: fixed; left: 8px; bottom: 6px; color: #9adf9a; font: 11px 'Courier New', monospace; opacity: 0.7; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="h">building street…</div>
+  <!-- Build the merged-street token's preview: fetch each plot's raw art, assemble
+       the street TOKEN the renderer's street view consumes, then load the dev
+       preview bundle. Mirrors scripts/preview-street.mjs, in-browser. -->
+  <script type="module">
+    const RAW_SELECTOR = '0x6985bf3c'; // getTokenRawImageData(uint256)
+    const q = new URLSearchParams(location.search);
+    const street = Number(q.get('street') || 0);
+    const base = street * 8;
+    let occ = [];
+    try { occ = JSON.parse(q.get('plots') || '[]'); } catch {} // [{slot,src,seed}] occupied only
+
+    const cfg = await fetch('/data/chain-config.json', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
+    const endpoint = cfg.directRpc ? (cfg.rpcUrl || 'http://127.0.0.1:8545') : '/api/chain-rpc';
+
+    async function rawBase64(src) {
+      const data = RAW_SELECTOR + BigInt(src).toString(16).padStart(64, '0');
+      const res = await fetch(endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: cfg.normieStorage, data }, 'latest'] }),
+      });
+      const j = await res.json();
+      const hex = String(j.result || '').replace(/^0x/, '');
+      if (hex.length < 128) return '';
+      const off = Number(BigInt('0x' + hex.slice(0, 64))) * 2;
+      const len = Number(BigInt('0x' + hex.slice(off, off + 64)));
+      const dhex = hex.slice(off + 64, off + 64 + len * 2);
+      let bin = '';
+      for (let i = 0; i < len; i++) bin += String.fromCharCode(parseInt(dhex.slice(i * 2, i * 2 + 2) || '00', 16));
+      return btoa(bin);
+    }
+
+    try {
+      const bySlot = new Map(occ.map(p => [Number(p.slot), p]));
+      const plots = [];
+      for (let k = 0; k < 8; k++) {
+        const p = bySlot.get(base + k);
+        if (p) plots.push({ occupied: true, slot: base + k, sourceTokenId: Number(p.src), seed: p.seed, raw: await rawBase64(p.src), agentic: false, agentId: '' });
+        else plots.push({ occupied: false, slot: base + k });
+      }
+      window.BLOCKCASSONE_TOKEN = { kind: 'street', tokenId: 0, street, population: occ.length, plots };
+      const s = document.createElement('script');
+      s.src = '/dist/token-renderer/preview.bundle.js';
+      document.body.appendChild(s);
+    } catch (err) {
+      document.getElementById('h').textContent = 'preview failed: ' + (err?.message || err);
+    }
+  </script>
+</body>
+</html>
