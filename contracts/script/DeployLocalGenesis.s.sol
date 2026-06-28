@@ -171,6 +171,12 @@ contract DeployLocalGenesis is Script {
         vm.broadcast();
         d.attestation.setAuthorizedConsumer(address(d.customizer));
 
+        // Dev only: enable the post-mint move game now (setMovesEnabled is onlyOwner
+        // and ownership is about to move to the genesis minter, which has no
+        // passthrough). Production needs a real post-mint enable path.
+        vm.broadcast();
+        d.cubes.setMovesEnabled(true);
+
         vm.broadcast();
         d.cubes.transferOwnership(address(d.genesis));
     }

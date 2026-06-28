@@ -159,11 +159,15 @@ export async function customizeCube({ cubeId, owner, sourceContract, sourceToken
     signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, JSON.stringify(typedData)]);
   }
   const data = encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, signature);
-  const tx = { from: owner, to: cfg.cubeMintController, data };
-  const txHash = await rpcRaw(cfg, 'eth_sendTransaction', [tx]);
+  return sendTx(cfg, owner, cfg.cubeMintController, data, 'customizeCube');
+}
 
-  // eth_sendTransaction returns a hash even when the tx reverts on mine, so verify
-  // the receipt; on revert, replay as eth_call to surface the actual reason.
+// Send a tx + wait for the receipt. eth_sendTransaction returns a hash even when
+// the tx reverts on mine, so verify status and, on revert, replay as eth_call to
+// surface the real reason.
+async function sendTx(cfg, from, to, data, label) {
+  const tx = { from, to, data };
+  const txHash = await rpcRaw(cfg, 'eth_sendTransaction', [tx]);
   let receipt = null;
   for (let i = 0; i < 40 && !receipt; i++) {
     receipt = await rpcRaw(cfg, 'eth_getTransactionReceipt', [txHash]);
@@ -171,14 +175,27 @@ export async function customizeCube({ cubeId, owner, sourceContract, sourceToken
   }
   if (receipt && receipt.status === '0x0') {
     let reason = 'reverted';
-    try {
-      await rpcRaw(cfg, 'eth_call', [tx, receipt.blockNumber || 'latest']);
-    } catch (e) {
-      reason = String(e?.message || e);
-    }
-    throw new Error('customizeCube reverted: ' + reason);
+    try { await rpcRaw(cfg, 'eth_call', [tx, receipt.blockNumber || 'latest']); }
+    catch (e) { reason = String(e?.message || e); }
+    throw new Error(`${label || 'tx'} reverted: ${reason}`);
   }
   return txHash;
+}
+
+// Move a cube the caller owns to a vacant slot (CubeNFT.moveCube).
+export async function moveCube({ cubeId, owner, newSlot }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
+  const data = '0x42ba6aa6' + word(cubeId) + word(newSlot);
+  return sendTx(cfg, owner, cfg.cubeNft, data, 'moveCube');
+}
+
+// Merge every occupied plot of a street the caller solely owns (CubeNFT.mergeStreet).
+export async function mergeStreet({ street, owner }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
+  const data = '0x6ea3aa45' + word(street);
+  return sendTx(cfg, owner, cfg.cubeNft, data, 'mergeStreet');
 }
 
 function bytesToHex(u8) {

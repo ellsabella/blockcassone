@@ -7,7 +7,7 @@
 
 import { loadWalletNftsAcrossChains } from './wallet-nfts.js';
 import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
-import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes, customizeCube } from './preview-chain.js';
+import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes, customizeCube, moveCube, mergeStreet } from './preview-chain.js';
 
 const PAGE_SIZE = 50;
 // Until a target cube is picked (slice 4) the SVG preview renders on a *demo* cube.
@@ -28,6 +28,10 @@ const els = {
   cubeEmpty: document.getElementById('cube-empty'),
   ownedList: document.getElementById('owned-list'),
   ownedEmpty: document.getElementById('owned-empty'),
+  ownedActions: document.getElementById('owned-actions'),
+  moveSlot: document.getElementById('move-slot'),
+  moveBtn: document.getElementById('move-btn'),
+  mergeStreets: document.getElementById('merge-streets'),
   updateBtn: document.getElementById('update-btn'),
   overlay: document.getElementById('confirm-overlay'),
   confirmCancel: document.getElementById('confirm-cancel'),
@@ -231,12 +235,19 @@ async function loadOwned() {
 
 function renderOwned() {
   els.ownedList.querySelectorAll('.owned-card').forEach(c => c.remove());
+  // (Re)rendering replaces the cards, so any prior selection is gone.
+  state.target = null;
+  els.moveBtn.disabled = true;
+  refreshCommitState();
   if (!state.ownedCubes.length) {
     els.ownedEmpty.textContent = 'no cubes owned';
     els.ownedEmpty.style.display = '';
+    els.ownedActions.style.display = 'none';
     return;
   }
   els.ownedEmpty.style.display = 'none';
+  els.ownedActions.style.display = 'flex';
+  renderMergeStreets();
   const frag = document.createDocumentFragment();
   for (const cube of state.ownedCubes) {
     const card = document.createElement('div');
@@ -266,9 +277,55 @@ function selectTarget(cube) {
   for (const card of els.ownedList.querySelectorAll('.owned-card')) {
     card.classList.toggle('selected', card.dataset.cubeId === String(cube.cubeId));
   }
+  els.moveBtn.disabled = false;
   refreshCommitState();
   setStatus(`target: Cube #${cube.cubeId} (slot ${cube.slot})`);
   renderPreviews(); // re-render the top preview on the target cube's identity
+}
+
+// One merge button per street present in the owned cubes (dev: all owned, so all
+// are mergeable; mergeStreet reverts if the wallet doesn't own every occupied plot).
+function renderMergeStreets() {
+  const streets = [...new Set(state.ownedCubes.map(c => c.slot >> 3))].sort((a, b) => a - b);
+  els.mergeStreets.replaceChildren();
+  for (const street of streets) {
+    const cubes = state.ownedCubes.filter(c => (c.slot >> 3) === street);
+    const btn = document.createElement('button');
+    btn.textContent = `#${street} (${cubes.length})`;
+    btn.title = `merge street ${street} into one street token`;
+    btn.addEventListener('click', () => mergeFlow(street, cubes[0].owner));
+    els.mergeStreets.appendChild(btn);
+  }
+}
+
+async function moveFlow() {
+  if (!state.target) { setStatus('select a cube to move'); return; }
+  const slot = Number(els.moveSlot.value);
+  if (!Number.isInteger(slot) || slot < 0) { setStatus('enter a target slot'); return; }
+  els.moveBtn.disabled = true;
+  setStatus(`moving cube #${state.target.cubeId} → slot ${slot}…`);
+  try {
+    await moveCube({ cubeId: state.target.cubeId, owner: state.target.owner, newSlot: slot });
+    setStatus(`cube #${state.target.cubeId} moved to slot ${slot}`);
+    await loadOwned();
+  } catch (err) {
+    console.error('[update-cube] move failed', err);
+    setStatus(`move failed: ${msg(err)}`);
+    els.moveBtn.disabled = false;
+  }
+}
+
+async function mergeFlow(street, owner) {
+  if (!window.confirm(`Merge street ${street}? This burns its cubes into one street token (irreversible).`)) return;
+  setStatus(`merging street ${street}…`);
+  try {
+    await mergeStreet({ street, owner });
+    setStatus(`street ${street} merged into a street token`);
+    await loadOwned();
+  } catch (err) {
+    console.error('[update-cube] merge failed', err);
+    setStatus(`merge failed: ${msg(err)}`);
+  }
 }
 
 function refreshCommitState() {
@@ -355,6 +412,8 @@ els.updateBtn.addEventListener('click', openConfirm);
 els.confirmCancel.addEventListener('click', closeConfirm);
 els.confirmLfg.addEventListener('click', commit);
 els.overlay.addEventListener('click', (e) => { if (e.target === els.overlay) closeConfirm(); });
+els.moveBtn.addEventListener('click', moveFlow);
+els.moveSlot.addEventListener('keydown', (e) => { if (e.key === 'Enter') moveFlow(); });
 
 // Load the cubes on the local chain (the overwrite targets) on page open.
 loadOwned();

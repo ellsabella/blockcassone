@@ -170,8 +170,25 @@ edge-point identity. This is the crux that makes move/merge coherent.
   trait 2D/3D parity, agent-status registry, chunked asset store.
 - Shared `StrBuf` string builder.
 
+## To-do / follow-ups
+
+- **Wallet connect** — the dev viewer uses Anvil's unlocked accounts (signs typed
+  data + sends txs directly via RPC). Production needs real wallet connection
+  (MetaMask / WalletConnect) so the holder signs/sends customize, move, and merge
+  txs from their own wallet. (The Update Cube page's `from`/signer wiring becomes
+  the connected account.)
+- **Move + merge UI flows** — IN PROGRESS (on the Update Cube / manage surface,
+  reusing owned-cubes loading + chain helpers + the confirm modal).
+- **`movesEnabled` production gate** — `setMovesEnabled` is `onlyOwner` on CubeNFT,
+  but ownership transfers to the genesis minter, which has no passthrough — so
+  post-mint nobody can enable moves. Needs a genesis passthrough or a post-mint
+  ownership handback. (Dev: `DeployLocalGenesis` flips it on before transfer.)
+- Production off-chain **flatten + attestation signer** service (dev uses Anvil).
+- **`core/keccak.js`** multi-block bug (only bit client-side >136-byte hashing,
+  now routed through `web3_sha3`).
+
 ## Open decisions
 
-- Finalize the **plot-allocation algorithm** (≤3/wallet/street, keep-together).
-- Merge **"leader" rule** + whether merge is reversible.
-- Customization **flatten format** + the source allow-list policy.
+- Merge **"leader" rule** + whether merge is reversible (current: lowest occupied
+  plot; irreversible v1).
+- Customization **source allow-list policy** (CC0 registry `data/cc0-projects.json`).
