@@ -91,7 +91,7 @@ contract CubeThumbnailRendererV1 {
             _svgDefs(data, raw),
             _svgForest(data),
             _svgBitmap(data, raw),
-            _glassLayer(raw, data.sourceTokenId),
+            _glassLayer(raw, data.sourceTokenId, data.seed),
             _svgLabel(data),
             _svgFrame(data),
             "</svg>"
@@ -214,6 +214,9 @@ contract CubeThumbnailRendererV1 {
         // Edge-orb glow (#pfP) + soft white core (#pwP), raw 1200-space.
         buf.cat('<filter id="pfP" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.75" result="b"/><feColorMatrix in="b" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 1.05 0"/></filter>');
         buf.cat('<filter id="pwP" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".875"/></filter>');
+        // Glass soft-halo (#gGlass): glowG1/G2=1 -> no colour amplification, just a
+        // faint blurred halo under the source. The screen blend supplies brightness.
+        buf.cat('<filter id="gGlass" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="1.25" result="m"/><feColorMatrix in="m" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .62 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".5" result="t"/><feColorMatrix in="t" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0" result="tc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
         // forest particle filter #pc + plane-colour cloud gradient #cg
         buf.cat('<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/><feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/><feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/><feGaussianBlur in="clip" stdDeviation="5" result="gr"/><feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/><feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>');
         buf.cat('<radialGradient id="cg"><stop offset="0" stop-color="');
@@ -396,68 +399,49 @@ contract CubeThumbnailRendererV1 {
     }
 
     // --- Glass voxel cells -----------------------------------------------------
-    // Infill some Normie cells with luminous translucent panes, the way the 3D
-    // viewer assigns voxel alpha: 3x3 density bands -> interior dimming -> centre
-    // falloff -> per-cell variety -> visibility floor. Colour comes from a static
-    // RGB light field (red upper-right, green lower-left, blue top), saturated
-    // near a single light and blooming to white where they overlap. All maths is
-    // fixed-point (band/mult/falloff/variety/intensity x1000; light field x10000)
-    // and was validated against the float prototype before porting.
-    // Glass count/placement dials (see _glassLayer).
-    uint256 private constant GLASS_CONVERGE_MIN = 4;  // neigh8 >= this counts as convergent
-    uint256 private constant GLASS_GAIN = 45;         // % of convergent-cell count -> target glass cells (density dial)
-    uint256 private constant GLASS_SPARKLE_MIN = 550; // only the brightest ~4% glint (reference: fill-op >= .55)
-    uint256 private constant GLASS_WHITE = 0;         // % lift toward white; 0 = raw light field (matches the reference exactly; _lightColor still whitens real overlaps)
+    // Bright translucent "glass" cells filling the silhouette body, screen-blended
+    // (mix-blend-mode) so they read as luminous glass over the dark cube, not dim
+    // alpha-over fills. Colour comes from an RGB light field whose three lights sit
+    // on an evenly-spaced 120deg triangle; the triangle's ROTATION is derived from
+    // the cube seed, so every cube lands the rainbow differently. Tuned in
+    // tmp/line-lab.html; lab grid-units x25 -> these viewBox-px constants.
+    uint256 private constant GLASS_CONV_MIN = 5;   // glass where >= this many of 8 neighbours are on (body)
+    uint256 private constant GLASS_COVERAGE = 38;  // % of body cells kept (seeded scatter)
+    int256 private constant GLASS_CX = 600;        // light-triangle centre (viewBox px)
+    int256 private constant GLASS_CY = 585;
+    int256 private constant GLASS_SPREAD = 400;    // light distance from centre (16 grid x25)
+    uint256 private constant GLASS_R2 = 160000;    // light falloff R^2 ((16 grid x25)^2)
 
-    function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
+    function _glassLayer(bytes memory raw, uint256 normieId, bytes32 seed)
+        private
+        pure
+        returns (string memory)
+    {
         if (raw.length != 200) return "";
 
-        // Count from "agreement", placement by scatter.
-        // COUNT: tie how much glass to how solid the silhouette is — count the
-        // "convergent" cells (>= GLASS_CONVERGE_MIN of 8 neighbours on), the 2D
-        // proxy for the 3D multi-plane agreement. GLASS_GAIN scales that into a
-        // target cell count (spin GLASS_GAIN to taste).
-        // PLACEMENT: scatter that target uniformly across ALL foreground cells
-        // via a per-cell seeded gate, instead of clustering at the centre.
-        uint256 fg = 0;
-        uint256 converge = 0;
-        for (uint256 i = 0; i < 1600; i++) {
-            if (!_bitmapBit(raw, i)) continue;
-            if (_isLabelCell(normieId, i / 40, i % 40)) continue;
-            fg++;
-            if (_neigh8(raw, i % 40, i / 40) >= GLASS_CONVERGE_MIN) converge++;
-        }
-        if (fg == 0) return "";
-        uint256 target = converge * GLASS_GAIN / 100;
-        if (target > 600) target = 600; // buffer/visual cap; keeps the scatter even
-        if (target == 0) return "";
-        uint256 prob = target * 1000 / fg; // per-cell scatter probability (x1000)
+        // Per-cube light-triangle rotation (0..359) -> the rainbow lands differently
+        // on every cube. Precompute the three rotated light positions once.
+        uint256 rot = uint256(seed) % 360;
+        uint256[6] memory L = _lights(rot);
 
         bytes memory buf = StrBuf.alloc(131072);
-        buf.cat('<g filter="url(#g)" stroke-width="1.6">'); // tight glow: distinct translucent panes, not a bloomed haze
+        // screen blend = bright luminous glass over the dark cube (alpha-over would
+        // only darken). glowG1/G2 = 1 in the lab -> the filter is just a faint soft
+        // halo (no colour amplification).
+        buf.cat('<g filter="url(#gGlass)" stroke-width="0.3" style="mix-blend-mode:screen">');
         uint256 kept = 0;
-        for (uint256 i = 0; i < 1600 && kept < 600; i++) {
+        for (uint256 i = 0; i < 1600 && kept < 760; i++) {
             if (!_bitmapBit(raw, i)) continue;
-            if (_isLabelCell(normieId, i / 40, i % 40)) continue;
-            if (_scatterCell(buf, normieId, i, prob)) kept++;
+            uint256 col = i % 40;
+            uint256 row = i / 40;
+            if (_isLabelCell(normieId, row, col)) continue;
+            if (_neigh8(raw, col, row) < GLASS_CONV_MIN) continue; // body cell
+            if (uint256(keccak256(abi.encodePacked(seed, col, row))) % 100 >= GLASS_COVERAGE) continue;
+            buf.cat(_glassRect(col, row, L));
+            kept++;
         }
         buf.cat("</g>");
         return buf.str();
-    }
-
-    // Scatter gate + emit for one foreground cell; appends a glass rect and
-    // returns true if the cell wins its seeded gate. Kept as its own shallow
-    // frame so the dense nested call doesn't blow the stack (no via-IR).
-    function _scatterCell(bytes memory buf, uint256 normieId, uint256 i, uint256 prob)
-        private
-        pure
-        returns (bool)
-    {
-        uint256 col = i % 40;
-        uint256 row = i / 40;
-        if (uint256(keccak256(abi.encodePacked(normieId, col, row))) % 1000 >= prob) return false;
-        buf.cat(_glassRect(col, row, _glassDensity(col, row)));
-        return true;
     }
 
     // Per-cell glass brightness (x1000): DENSER cells (more on-neighbours) glow
@@ -477,61 +461,64 @@ contract CubeThumbnailRendererV1 {
         }
     }
 
-    function _glassRect(uint256 col, uint256 row, uint256 intensity)
+    function _glassRect(uint256 col, uint256 row, uint256[6] memory L)
         private
         pure
-        returns (string memory rect)
+        returns (string memory)
     {
-        (string memory fill, string memory stroke) = _glassColors(col, row);
-        uint256 bodyOp = intensity > 880 ? 880 : intensity;
-        uint256 sop = intensity * 2 > 1000 ? 1000 : intensity * 2; // rim glow ~2x the fill
-        rect = string.concat(
-            '<rect x="', (100 + col * 25 + 2).toString(), '" y="', (85 + row * 25 + 2).toString(),
-            '" width="21" height="21" fill="rgb(', fill, ')" fill-opacity="', _dec2(bodyOp),
-            '" stroke="rgb(', stroke, ')" stroke-opacity="', _dec2(sop), '"/>'
-        );
-        // White highlight dot on the brighter cells — the prototype's "sparkle".
-        if (intensity > GLASS_SPARKLE_MIN) rect = string.concat(rect, _glassSparkle(col, row));
-    }
-
-    function _glassSparkle(uint256 col, uint256 row) private pure returns (string memory) {
-        // Small glint, exactly the reference: r1.1, opacity .5, on the brightest
-        // ~4% of cells only.
+        uint256 d = _glassDensity(col, row);  // 65..636 (x1000)
+        uint256 fo = 580 + d * 550 / 1000;    // fillBase .58 + density x fillScale .55
+        if (fo > 1000) fo = 1000;             // fillCap 1
+        uint256 so = fo * 16 / 10;            // rim opacity = fill x rimOp 1.6
+        if (so > 1000) so = 1000;
         return string.concat(
-            '<circle cx="', (100 + col * 25 + 8).toString(), '" cy="', (85 + row * 25 + 8).toString(),
-            '" r="1.1" fill="#fff" opacity=".5"/>'
+            '<rect x="', (101 + col * 25).toString(), '" y="', (86 + row * 25).toString(),
+            '" width="23" height="23" fill="rgb(', _glassFill(col, row, L), ')" fill-opacity="', _dec2(fo),
+            '" stroke="#fff" stroke-opacity="', _dec2(so), '"/>'
         );
     }
 
-    // Fill + stroke "r,g,b" strings for a glass cell — the full saturated
-    // light-field hue (matches the prototype). Split out of _glassRect to keep
-    // that frame shallow (no via-IR).
-    function _glassColors(uint256 col, uint256 row)
+    // "r,g,b" fill for a glass cell: light field -> saturate (bold hue) -> colour
+    // gain (brightness) -> whiten. Matches the lab's col3().
+    function _glassFill(uint256 col, uint256 row, uint256[6] memory L)
         private
         pure
-        returns (string memory fill, string memory stroke)
+        returns (string memory)
     {
-        (uint256 R, uint256 G, uint256 B) = _lightColor(100 + col * 25 + 12, 85 + row * 25 + 12);
-        // Lift toward white so the glass reads as pale glowing glass, not a vivid
-        // colour fill (the prototype's bright cells sit near white with a tint).
-        R = R * (100 - GLASS_WHITE) / 100 + 255 * GLASS_WHITE / 100;
-        G = G * (100 - GLASS_WHITE) / 100 + 255 * GLASS_WHITE / 100;
-        B = B * (100 - GLASS_WHITE) / 100 + 255 * GLASS_WHITE / 100;
-        fill = string.concat(R.toString(), ",", G.toString(), ",", B.toString());
-        stroke = string.concat(_lerp255(R), ",", _lerp255(G), ",", _lerp255(B));
+        (uint256 R, uint256 G, uint256 B) = _lightColor(112 + col * 25, 97 + row * 25, L);
+        (uint256 r, uint256 g, uint256 b) = _glassTone(R, G, B);
+        return string.concat(r.toString(), ",", g.toString(), ",", b.toString());
     }
 
-    // RGB light field at canvas (px,py). Each light contributes a = R^2/(R^2+d^2)
-    // to its channel (R=520). Saturate to the dominant hue, then blend toward
-    // white only where several lights strongly overlap.
-    function _lightColor(uint256 px, uint256 py)
+    function _glassTone(uint256 R, uint256 G, uint256 B)
+        private
+        pure
+        returns (uint256, uint256, uint256)
+    {
+        int256 luma = (299 * int256(R) + 587 * int256(G) + 114 * int256(B)) / 1000;
+        return (_glassChan(int256(R), luma), _glassChan(int256(G), luma), _glassChan(int256(B), luma));
+    }
+
+    // saturate 3, then colour gain 2.6 * (1 - whiten .1) = 2.34, then + 255*.1.
+    // Signed: a saturated channel can dip below 0 before clamping.
+    function _glassChan(int256 c, int256 luma) private pure returns (uint256) {
+        int256 v = (luma + (c - luma) * 3) * 2340 / 1000 + 26;
+        if (v < 0) return 0;
+        if (v > 255) return 255;
+        return uint256(v);
+    }
+
+    // RGB light field at (px,py) for the rotated triangle L = [Rx,Ry,Gx,Gy,Bx,By].
+    // Each light a = R2/(R2+d^2); saturate to the dominant hue, then whiten where
+    // lights overlap (scaled by whiteBloom .15).
+    function _lightColor(uint256 px, uint256 py, uint256[6] memory L)
         private
         pure
         returns (uint256 R8, uint256 G8, uint256 B8)
     {
-        uint256 r = _lightA(px, py, 1010, 300);
-        uint256 g = _lightA(px, py, 210, 770);
-        uint256 b = _lightA(px, py, 660, 120);
+        uint256 r = _lightA(px, py, L[0], L[1]);
+        uint256 g = _lightA(px, py, L[2], L[3]);
+        uint256 b = _lightA(px, py, L[4], L[5]);
         uint256 mx = r;
         if (g > mx) mx = g;
         if (b > mx) mx = b;
@@ -540,7 +527,7 @@ contract CubeThumbnailRendererV1 {
         uint256 G = g * 10000 / mx;
         uint256 B = b * 10000 / mx;
         uint256 sum = r + g + b;
-        uint256 white = sum > 13000 ? (sum - 13000) / 2 : 0;
+        uint256 white = (sum > 13000 ? (sum - 13000) / 2 : 0) * 15 / 100; // whiteBloom .15
         if (white > 10000) white = 10000;
         R = R + (10000 - R) * white / 10000;
         G = G + (10000 - G) * white / 10000;
@@ -553,12 +540,34 @@ contract CubeThumbnailRendererV1 {
     function _lightA(uint256 px, uint256 py, uint256 lx, uint256 ly) private pure returns (uint256) {
         uint256 dx = px > lx ? px - lx : lx - px;
         uint256 dy = py > ly ? py - ly : ly - py;
-        return 270400 * 10000 / (270400 + dx * dx + dy * dy);
+        return GLASS_R2 * 10000 / (GLASS_R2 + dx * dx + dy * dy);
     }
 
-    // bright hue-tinted rim: v lerped 30% toward 255.
-    function _lerp255(uint256 v) private pure returns (string memory) {
-        return (v + (255 - v) * 3 / 10).toString();
+    // Three light positions on a 120deg triangle, rotated `rot` degrees about the
+    // centre. L = [Rx,Ry, Gx,Gy, Bx,By] in viewBox px.
+    function _lights(uint256 rot) private pure returns (uint256[6] memory L) {
+        L[0] = _lpos(GLASS_CX, _cos1e4(rot));       L[1] = _lpos(GLASS_CY, _sin1e4(rot));
+        L[2] = _lpos(GLASS_CX, _cos1e4(rot + 120)); L[3] = _lpos(GLASS_CY, _sin1e4(rot + 120));
+        L[4] = _lpos(GLASS_CX, _cos1e4(rot + 240)); L[5] = _lpos(GLASS_CY, _sin1e4(rot + 240));
+    }
+
+    function _lpos(int256 centre, int256 trig1e4) private pure returns (uint256) {
+        return uint256(centre + GLASS_SPREAD * trig1e4 / 10000); // 200..1000, always > 0
+    }
+
+    // sin(deg) x10000 via Bhaskara I: sin x ~= 4x(180-x)/(40500 - x(180-x)).
+    function _sin1e4(uint256 deg) private pure returns (int256) {
+        deg = deg % 360;
+        bool neg = deg >= 180;
+        uint256 x = neg ? deg - 180 : deg;    // 0..179
+        uint256 num = 4 * x * (180 - x);      // 0..32400
+        uint256 den = 40500 - x * (180 - x);  // 32400..40500
+        int256 s = int256(num * 10000 / den); // 0..10000
+        return neg ? -s : s;
+    }
+
+    function _cos1e4(uint256 deg) private pure returns (int256) {
+        return _sin1e4(deg + 90);
     }
 
     // Format an x1000 opacity fixed-point (0..1000) as an SVG decimal (".07", ".88", "1").
