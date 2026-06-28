@@ -143,9 +143,18 @@ edge-point identity. This is the crux that makes move/merge coherent.
    network-free production entry, `preview-entry.js` injects the non-Normie pipeline
    (`buildNonNormie*` + `wallet-nfts` fetch). Build emits `preview.bundle.js` (no
    forbiddenPatterns check); `cube-preview.html` iframes it; the cube panel sets its
-   src per selection. *(untested — needs `npm run build:token-renderer` + WSL; also
-   re-verify the production renderer via `preview:normie`.)* (4) "cubes you own" row
-   + target select + confirm (Cancel/LFG) → flatten→attestation→customizeCube.
+   src per selection. ✅ (4) ✅ "cubes you own" row + target select + confirm
+   (Cancel/LFG) → flatten→attestation→customizeCube, **working end-to-end on WSL**.
+   Dev commit: `DeployLocalGenesis` deploys + wires the customize stack
+   (NonNormieArtStore/FlatteningAttestation/CubeMintController, signer = Anvil acct
+   #1); `preview-chain.customizeCube` builds the EIP-712 attestation, Anvil signs it
+   (`eth_signTypedData_v4`) + sends the tx (unlocked owner), receipt-checked.
+   payloadHash via `web3_sha3` of `abi.encode(DOMAIN, payload)` (matches
+   `NonNormieArt.hashTonalBands2Bit`). On-chain SVGs rendered as `<img>` data-URIs
+   to isolate shared element IDs. Anvil needs `--gas-limit 100000000` (Normie forest
+   thumbnails exceed the 30M default eth_call cap). **Remaining for #8:** move +
+   merge flow UIs; production off-chain signer service (dev uses Anvil); explore
+   tab is the existing Big Cube page.
 
 ### Biome placeholders (to revisit)
 - They don't currently render on vacant plots in the street preview — needs a
