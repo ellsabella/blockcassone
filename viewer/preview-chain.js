@@ -7,6 +7,8 @@
 import { loadChainMintRecords } from './chain-cubes.js';
 
 const CUSTOMIZE_SELECTOR = 'c029bfed'; // customizeCube(uint256,address,uint256,bytes,(...),bytes)
+// keccak256("BLOCKCASSONE_NON_NORMIE_TONAL_BANDS_2BIT_V1") — NonNormieArt.TONAL_BANDS_2BIT_HASH_DOMAIN
+const TONAL_HASH_DOMAIN = '2424f34564746cf332e7899072209873d7b38b19d87170b49d20de18f6a251dd';
 const THUMBNAIL_RENDERER_SELECTOR = 'ad125d79'; // thumbnailRenderer()
 const PREVIEW_SELECTOR = 'f3d3c20b'; // previewThumbnailSVG(bytes32,uint32,uint256,bytes)
 const THUMBNAIL_SVG_SELECTOR = '1df76ecc'; // thumbnailSVG(uint256)
@@ -91,12 +93,11 @@ export async function customizeCube({ cubeId, owner, sourceContract, sourceToken
   if (!cfg.cubeMintController || !cfg.flatteningAttestation || !cfg.attestationSigner) {
     throw new Error('chain-config.json missing customize addresses — redeploy with the customize stack');
   }
-  // Hash the payload on the node (web3_sha3) so it equals the on-chain
-  // keccak256(tonalBands2Bit) byte-for-byte (the browser keccak diverged on the
-  // 400-byte multi-block input).
-  let phex = '';
-  for (let i = 0; i < payload.length; i++) phex += payload[i].toString(16).padStart(2, '0');
-  const payloadHash = await rpcRaw(cfg, 'web3_sha3', ['0x' + phex]);
+  // On-chain hashTonalBands2Bit = keccak256(abi.encode(DOMAIN, payload)). Rebuild
+  // that exact preimage (domain word + bytes offset/length/data) and hash it on
+  // the node (web3_sha3) so attestation.payloadHash matches byte-for-byte.
+  const preimage = TONAL_HASH_DOMAIN + word(64) + word(payload.length) + padRight32(bytesToHex(payload));
+  const payloadHash = await rpcRaw(cfg, 'web3_sha3', ['0x' + preimage]);
   const att = {
     minter: owner,
     sourceContract,
