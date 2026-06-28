@@ -63,10 +63,12 @@
       <button data-tab="normie" class="on">Normie lines</button>
       <button data-tab="frame">Frame</button>
       <button data-tab="points">Edge points</button>
+      <button data-tab="glass">Glass</button>
     </div>
     <div id="rows_normie"></div>
     <div id="rows_frame" style="display:none"></div>
     <div id="rows_points" style="display:none"></div>
+    <div id="rows_glass" style="display:none"></div>
     <div class="grp">PORTABLE OUTPUT (40-grid units · scale(25))</div>
     <textarea id="dump" readonly></textarea>
     <div class="hint">All widths/σ in 40-grid units → paste straight into the .sol scale(25) group. feBlend screen = on-chain-safe additive. Frame = the plane's 3 border sides; orbs = corners + edge slots.</div>
@@ -101,6 +103,32 @@ function svgPath(g){
   return d;
 }
 // frame = the plane's 3 border sides (top, left, right; bottom open). grid 0..40.
+// ---- glass voxels: selection + RGB light field (ports _glassLayer/_lightColor) ----
+function h32(x){ x=Math.imul(x^(x>>>16),0x45d9f3b); x=Math.imul(x^(x>>>16),0x45d9f3b); return (x^(x>>>16))>>>0; }
+function hashCell(seed,c,r){ return h32((seed*73856093) ^ (c*19349663) ^ (r*83492791)); }
+// light field in GRID units (contract viewBox positions / 25; R^2 = 270400/625).
+function lightA(px,py,lx,ly){ const dx=px-lx,dy=py-ly; return 432.64*10000/(432.64+dx*dx+dy*dy); }
+function lightColor(px,py){
+  const r=lightA(px,py,36.4,8.6), g=lightA(px,py,4.4,27.4), b=lightA(px,py,22.4,1.4);
+  const mx=Math.max(r,g,b)||1; let R=r*10000/mx, G=g*10000/mx, B=b*10000/mx;
+  const sum=r+g+b; let white=sum>13000?(sum-13000)/2:0; if(white>10000)white=10000;
+  R+=(10000-R)*white/10000; G+=(10000-G)*white/10000; B+=(10000-B)*white/10000;
+  return [Math.round(R*255/10000),Math.round(G*255/10000),Math.round(B*255/10000)];
+}
+function densityOf(c,r){ const x=hashCell(7,c,r)%1000; if(x<=900){const t=x*1000/900; return 65+(t*t/1000)*255/1000;} return 320+(x-900)*320/100; }
+// Dense body fill (matches the HTML): every "body" cell (>= convMin lit neighbours)
+// becomes a glass cube, optionally thinned by a coverage gate. No sparse scatter.
+function glassCells(g,p){
+  const lit=(c,r)=> (c<0||c>39||r<0||r>39)?0:g[r*40+c];
+  const cells=[];
+  for(let r=0;r<40;r++)for(let c=0;c<40;c++){ if(!lit(c,r))continue;
+    let n=0; for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(dr||dc) n+=lit(c+dc,r+dr); }
+    if(n < p.convMin) continue;                              // body cell?
+    if(p.coverage < 100 && hashCell(p.seed,c,r)%100 >= p.coverage) continue;
+    const [R,G,B]=lightColor(c+0.5,r+0.5); cells.push({c,r,d:densityOf(c,r),R,G,B}); }
+  return cells;
+}
+
 const FRAME_PATH = 'M0 0H40 M0 0V40 M40 0V40';
 const FRAME_SEGS = [[0,0,1,0],[0,0,0,1],[1,0,1,1]];          // plane [0,1] for WebGL
 // edge orbs: 4 corners + 3 slots per border side (grid multiples of 5/40)
@@ -129,6 +157,32 @@ function sh(t,s){ const o=gl.createShader(t); gl.shaderSource(o,s); gl.compileSh
 const prog=gl.createProgram(); gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS)); gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS)); gl.linkProgram(prog);
 const uTint=gl.getUniformLocation(prog,'uTint'), uAlpha=gl.getUniformLocation(prog,'uAlpha');
 const uCx=gl.getUniformLocation(prog,'uCx'), uCy=gl.getUniformLocation(prog,'uCy'), uZoom=gl.getUniformLocation(prog,'uZoom'), uSpan=gl.getUniformLocation(prog,'uSpan');
+
+// flat per-vertex-colour program for the glass reference (additive coloured quads)
+const VS2=`#version 300 es
+precision highp float;
+layout(location=0) in vec2 aPos; layout(location=1) in vec3 aCol;
+uniform float uCx,uCy,uZoom,uSpan; out vec3 vCol;
+void main(){ vCol=aCol; gl_Position=vec4((aPos.x-uCx)*2.0*uZoom/uSpan, -(aPos.y-uCy)*2.0*uZoom/uSpan,0.0,1.0); }`;
+const FS2=`#version 300 es
+precision highp float; in vec3 vCol; out vec4 o; void main(){ o=vec4(vCol,1.0); }`;
+const prog2=gl.createProgram(); gl.attachShader(prog2,sh(gl.VERTEX_SHADER,VS2)); gl.attachShader(prog2,sh(gl.FRAGMENT_SHADER,FS2)); gl.linkProgram(prog2);
+const u2={cx:gl.getUniformLocation(prog2,'uCx'),cy:gl.getUniformLocation(prog2,'uCy'),zoom:gl.getUniformLocation(prog2,'uZoom'),span:gl.getUniformLocation(prog2,'uSpan')};
+function glassMeshGL(cells,p){
+  const inter=[], ins=p.inset/40, sz=p.size/40;
+  for(const {c,r,d,R,G,B} of cells){
+    const x0=c/40+ins,y0=r/40+ins,x1=x0+sz,y1=y0+sz;
+    const a=Math.min(1,p.fillBase+d/1000*p.fillScale)*1.7;       // additive brightness
+    const cr=R/255*p.colorGain*a,cg=G/255*p.colorGain*a,cb=B/255*p.colorGain*a;
+    for(const [x,y] of [[x0,y0],[x1,y0],[x1,y1],[x0,y0],[x1,y1],[x0,y1]]) inter.push(x,y,cr,cg,cb);
+  }
+  if(!inter.length) return null;
+  const vao=gl.createVertexArray(); gl.bindVertexArray(vao);
+  const vb=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,vb); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(inter),gl.STATIC_DRAW);
+  const st=5*4; gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,st,0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1,3,gl.FLOAT,false,st,8);
+  gl.bindVertexArray(null); return {vao,n:inter.length/5};
+}
 function lumTint(rgb){ const SAT=2.4,HDR=1.6; const lum=rgb[0]*0.299+rgb[1]*0.587+rgb[2]*0.114;
   return [ (lum+(rgb[0]-lum)*SAT)*HDR, (lum+(rgb[1]-lum)*SAT)*HDR, (lum+(rgb[2]-lum)*SAT)*HDR ]; }
 const hex2lin=h=>[parseInt(h.substr(1,2),16)/255,parseInt(h.substr(3,2),16)/255,parseInt(h.substr(5,2),16)/255];
@@ -161,12 +215,17 @@ function rebuildGL(){
   const s=edges(GRID);
   M={ glow:glMesh(s,GLOW_W), white:glMesh(s,WHITE_W), core:glMesh(s,CORE_W),
       fglow:glMesh(FRAME_SEGS,FGLOW_W), fwhite:glMesh(FRAME_SEGS,FWHITE_W), fcore:glMesh(FRAME_SEGS,FCORE_W),
-      orb:glMesh(orbSegs,ORB_W), orbcore:glMesh(orbSegs,ORB_CORE_W) };
+      orb:glMesh(orbSegs,ORB_W), orbcore:glMesh(orbSegs,ORB_CORE_W),
+      glass:glassMeshGL(glassCells(GRID,G.glass.state),G.glass.state) };
   drawGL();
 }
 function drawGL(){
   gl.viewport(0,0,1200,1200); gl.clearColor(0.02,0.02,0.027,1); gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.useProgram(prog); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE);
+  // glass reference: additive coloured quads (light field), drawn under the lines
+  if(M.glass){ gl.useProgram(prog2); gl.uniform1f(u2.cx,view.cx); gl.uniform1f(u2.cy,view.cy); gl.uniform1f(u2.zoom,view.z); gl.uniform1f(u2.span,VS_N);
+    gl.bindVertexArray(M.glass.vao); gl.drawArrays(gl.TRIANGLES,0,M.glass.n); gl.bindVertexArray(null); }
+  gl.useProgram(prog);
   gl.uniform1f(uCx,view.cx); gl.uniform1f(uCy,view.cy); gl.uniform1f(uZoom,view.z); gl.uniform1f(uSpan,VS_N);
   const fig=lumTint(AXIS_LIN[AXIS]), frm=lumTint(hex2lin(FRAME_HEX[AXIS]));
   const layers=[
@@ -208,13 +267,37 @@ const POINT_SCHEMA=[
   ['pCoreOp','orb core α',0,1,0.01],
   ['pCoreBlur','orb core blur',0,0.3,0.005],
 ];
+const GLASS_SCHEMA=[
+  ['convMin','body neigh ≥',1,8,1],
+  ['coverage','coverage %',0,100,2],
+  ['seed','coverage seed',1,40,1],
+  ['inset','cell inset',0,0.4,0.01],
+  ['size','cell size',0.2,1,0.01],
+  ['colorGain','colour gain',1,4,0.1],
+  ['fillBase','fill α base',0,1,0.02],
+  ['fillScale','fill α scale',0,2,0.05],
+  ['fillCap','fill α cap',0.1,1,0.02],
+  ['whiten','whiten %',0,1,0.02],
+  ['rimW','rim width',0,0.3,0.004],
+  ['rimLight','rim lighten',0,1,0.02],
+  ['rimOp','rim α x',0,4,0.1],
+  ['glowS1','glow σ tight',0.02,0.6,0.005],
+  ['glowG1','glow gain tight',1,12,0.5],
+  ['glowS2','glow σ wide',0.05,1.2,0.01],
+  ['glowG2','glow gain wide',1,10,0.5],
+  ['sparkleThr','sparkle thresh',0,1,0.02],
+  ['sparkleR','sparkle r',0,0.2,0.004],
+  ['sparkleOp','sparkle α',0,1,0.02],
+];
 // defaults
 const NORMIE_DEF={glowSrcW:0.146,tightSigma:0.11,tightGain:10.5,tightAlpha:2.7,wideSigma:0.1,wideGain:1,wideAlpha:0.1,colorCoreW:0.105,colorCoreOp:0.95,whiteW:0.04,whiteOp:0.9,whiteBlur:0.015,beadW:0.245,beadOp:0.88,beadStep:1,whiteBeadW:0.1,whiteBeadOp:0.89};
-const FRAME_DEF ={glowSrcW:0.18,tightSigma:0.12,tightGain:9,tightAlpha:2.4,wideSigma:0.12,wideGain:1.5,wideAlpha:0.3,colorCoreW:0.12,colorCoreOp:0.95,whiteW:0.045,whiteOp:0.85,whiteBlur:0.02,beadW:0,beadOp:0,beadStep:1,whiteBeadW:0,whiteBeadOp:0};
-const POINT_DEF ={pR:0.5,pSigma:0.18,pGain:5,pAlpha:1.2,pCoreR:0.22,pCoreOp:0.95,pCoreBlur:0.05};
+const FRAME_DEF ={glowSrcW:0.345,tightSigma:0.11,tightGain:1,tightAlpha:1.35,wideSigma:0.1,wideGain:1,wideAlpha:0.8,colorCoreW:0.3,colorCoreOp:1,whiteW:0.075,whiteOp:0.86,whiteBlur:0.03,beadW:0.02,beadOp:0,beadStep:1.25,whiteBeadW:0.01,whiteBeadOp:0};
+const POINT_DEF ={pR:0.42,pSigma:0.11,pGain:3,pAlpha:1.05,pCoreR:0.23,pCoreOp:0.44,pCoreBlur:0.035};
+const GLASS_DEF ={convMin:4,coverage:100,seed:1,inset:0.08,size:0.84,colorGain:1.6,fillBase:0.34,fillScale:0.6,fillCap:0.86,whiten:0,rimW:0.07,rimLight:0.5,rimOp:1.6,glowS1:0.1,glowG1:6,glowS2:0.28,glowG2:3.5,sparkleThr:0.55,sparkleR:0.05,sparkleOp:0.6};
 const G={ normie:{schema:LINE_SCHEMA, state:{...NORMIE_DEF}, def:NORMIE_DEF},
           frame :{schema:LINE_SCHEMA, state:{...FRAME_DEF},  def:FRAME_DEF},
-          points:{schema:POINT_SCHEMA,state:{...POINT_DEF},  def:POINT_DEF} };
+          points:{schema:POINT_SCHEMA,state:{...POINT_DEF},  def:POINT_DEF},
+          glass :{schema:GLASS_SCHEMA,state:{...GLASS_DEF},  def:GLASS_DEF} };
 
 const amplify=(gain,alpha)=>{ const g=(+gain).toFixed(2),a=(+alpha).toFixed(2); return `${g} 0 0 0 0  0 ${g} 0 0 0  0 0 ${g} 0 0  0 0 0 ${a} 0`; };
 // neon LINE layer -> {defs, body}. Hue-preserving (works for any stroke colour).
@@ -249,17 +332,41 @@ function orbs(p, sfx){
     (p.pCoreR>0?`<g fill="#fff" opacity="${p.pCoreOp}"${cfilt}>${C(p.pCoreR)}</g>`:'');
   return {defs, body};
 }
+// glass voxels: translucent light-field rects + brighter rim + sparkle, under a
+// 2-tier blur glow (ports _glassLayer). Grid units; ports x25 to the .sol.
+function buildGlass(cells,p){
+  const defs=`<filter id="gGlass" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">`+
+    `<feGaussianBlur in="SourceGraphic" stdDeviation="${p.glowS2}" result="m"/>`+
+    `<feColorMatrix in="m" type="matrix" values="${p.glowG2} 0 0 0 0 0 ${p.glowG2} 0 0 0 0 0 ${p.glowG2} 0 0 0 0 0 .62 0" result="mc"/>`+
+    `<feGaussianBlur in="SourceGraphic" stdDeviation="${p.glowS1}" result="t"/>`+
+    `<feColorMatrix in="t" type="matrix" values="${p.glowG1} 0 0 0 0 0 ${p.glowG1} 0 0 0 0 0 ${p.glowG1} 0 0 0 0 0 1 0" result="tc"/>`+
+    `<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`;
+  const clamp=v=>Math.max(0,Math.min(255,Math.round(v)));
+  const lift=v=>clamp(v*p.colorGain*(1-p.whiten)+255*p.whiten), rim=v=>clamp(v+(255-v)*p.rimLight);
+  let body=`<g filter="url(#gGlass)" stroke-width="${p.rimW}">`;
+  for(const {c,r,d,R,G,B} of cells){
+    const Rl=lift(R),Gl=lift(G),Bl=lift(B);
+    const a=p.fillBase + d/1000*p.fillScale;
+    const fo=Math.min(p.fillCap, a).toFixed(3), so=Math.min(1, a*p.rimOp).toFixed(3);
+    body+=`<rect x="${(c+p.inset).toFixed(3)}" y="${(r+p.inset).toFixed(3)}" width="${p.size}" height="${p.size}" fill="rgb(${Rl},${Gl},${Bl})" fill-opacity="${fo}" stroke="rgb(${rim(Rl)},${rim(Gl)},${rim(Bl)})" stroke-opacity="${so}"/>`;
+    if(d>p.sparkleThr*1000 && p.sparkleR>0) body+=`<circle cx="${(c+0.32).toFixed(2)}" cy="${(r+0.32).toFixed(2)}" r="${p.sparkleR}" fill="#fff" opacity="${p.sparkleOp}"/>`;
+  }
+  return {defs, body:body+`</g>`};
+}
+
 function viewBoxStr(){ const w=1000*VS_N/view.z; return `${(view.cx*1000-w/2).toFixed(2)} ${(view.cy*1000-w/2).toFixed(2)} ${w.toFixed(2)} ${w.toFixed(2)}`; }
 let svgEl=null;
 function buildSVG(){
   const fig=neon('#o', HEX[AXIS], G.normie.state, 'N');
   const frm=neon('#f', FRAME_HEX[AXIS], G.frame.state, 'F');
   const orb=orbs(G.points.state, 'P');
+  const cells=glassCells(GRID, G.glass.state);
+  const glass=buildGlass(cells, G.glass.state);
   const svg=
    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBoxStr()}">`+
      `<rect x="-2000" y="-2000" width="6000" height="6000" fill="#050507"/>`+
-     `<defs>${fig.defs}${frm.defs}${orb.defs}<path id="o" d="${svgPath(GRID)}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
-     `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${frm.body}${fig.body}${orb.body}</g>`+
+     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}<path id="o" d="${svgPath(GRID)}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
+     `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${fig.body}${glass.body}${frm.body}${orb.body}</g>`+
    `</svg>`;
   document.getElementById('svgwrap').innerHTML=svg;
   svgEl=document.querySelector('#svgwrap svg');
@@ -267,9 +374,11 @@ function buildSVG(){
   document.getElementById('dump').value=
     `axis=${['x','y','z'][AXIS]}  figure=${HEX[AXIS]}  frame=${FRAME_HEX[AXIS]}\n\n`+
     `[NORMIE] ${ps(G.normie.state)}\n\n[FRAME] ${ps(G.frame.state)}\n\n[POINTS] ${ps(G.points.state)}\n\n`+
+    `[GLASS] ${ps(G.glass.state)}  (${cells.length} cells)\n\n`+
     `--- figure defs ---\n${fig.defs}\n--- figure body ---\n${fig.body}\n\n`+
     `--- frame defs ---\n${frm.defs}\n--- frame body ---\n${frm.body}\n\n`+
-    `--- orb defs ---\n${orb.defs}\n--- orb body ---\n${orb.body}`;
+    `--- orb defs ---\n${orb.defs}\n--- orb body ---\n${orb.body}\n\n`+
+    `--- glass defs ---\n${glass.defs}\n--- glass rect sample ---\n${glass.body.slice(0,400)}…`;
 }
 function applyViewSVG(){ if(svgEl) svgEl.setAttribute('viewBox',viewBoxStr()); }
 
@@ -299,19 +408,20 @@ function makeRows(grpName){
     cont.appendChild(row);
   });
 }
-['normie','frame','points'].forEach(makeRows);
+['normie','frame','points','glass'].forEach(makeRows);
 document.querySelector('.controls').addEventListener('input',e=>{
   const grp=e.target.dataset.grp, k=e.target.dataset.k; if(!grp)return;
   G[grp].state[k]=parseFloat(e.target.value); document.getElementById(`v_${grp}_${k}`).textContent=G[grp].state[k]; buildSVG();
+  if(grp==='glass'){ M.glass=glassMeshGL(glassCells(GRID,G.glass.state),G.glass.state); drawGL(); } // keep the WebGL reference in sync
 });
 document.getElementById('tabs').addEventListener('click',e=>{ const t=e.target.dataset.tab; if(!t)return;
   [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
-  ['normie','frame','points'].forEach(g=>document.getElementById('rows_'+g).style.display=(g===t?'':'none')); });
+  ['normie','frame','points','glass'].forEach(g=>document.getElementById('rows_'+g).style.display=(g===t?'':'none')); });
 document.getElementById('axis').addEventListener('click',e=>{ const a=e.target.dataset.axis; if(a==null)return;
   AXIS=+a; [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.axis===a)); drawGL(); buildSVG(); });
 document.getElementById('shape').addEventListener('change',e=>{ SHAPE=+e.target.value; GRID=buildGrid(SHAPE); rebuildGL(); buildSVG(); });
 document.getElementById('reset').addEventListener('click',()=>{
-  for(const g of ['normie','frame','points']){ G[g].state={...G[g].def};
+  for(const g of ['normie','frame','points','glass']){ G[g].state={...G[g].def};
     G[g].schema.forEach(([k])=>{ const el=document.querySelector(`[data-grp="${g}"][data-k="${k}"]`); if(el){el.value=G[g].state[k]; document.getElementById(`v_${g}_${k}`).textContent=G[g].state[k];} }); }
   buildSVG(); });
 document.getElementById('resetView').addEventListener('click',()=>{ view={z:1,cx:0.5,cy:0.5}; updateView(); });
