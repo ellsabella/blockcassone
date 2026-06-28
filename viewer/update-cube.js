@@ -170,8 +170,12 @@ async function renderPreviews() {
   try {
     const svg = await previewThumbnailSVG({ seed, slot, sourceTokenId: safeBig(nft.tokenId), payload });
     if (token !== previewToken) return;
-    els.stageSvg.innerHTML = svg && svg.includes('<svg') ? svg : '<span class="preview-empty">empty SVG returned</span>';
-    resetSvgZoom();
+    if (svg && svg.includes('<svg')) {
+      els.stageSvg.replaceChildren(svgToImg(svg));
+      resetSvgZoom();
+    } else {
+      els.stageSvg.innerHTML = '<span class="preview-empty">empty SVG returned</span>';
+    }
   } catch (err) {
     if (token !== previewToken) return;
     stageError(els.stageSvg, `SVG preview failed: ${msg(err)}`);
@@ -190,6 +194,16 @@ function showCubeEmpty(text) {
   els.cubeFrame.removeAttribute('src');
   els.cubeEmpty.textContent = text;
   els.cubeEmpty.style.display = '';
+}
+
+// Render an on-chain SVG as an <img> data-URI. Inline SVGs share element IDs
+// (#n/#o/#g …), so multiple in one document cross-reference each other; an <img>
+// isolates each one's IDs (and still zooms via CSS transform).
+function svgToImg(svg) {
+  const img = document.createElement('img');
+  img.src = 'data:image/svg+xml,' + encodeURIComponent(svg);
+  img.alt = '';
+  return img;
 }
 
 function safeBig(v) { try { return BigInt(v); } catch { return 0n; } }
@@ -238,7 +252,7 @@ function renderOwned() {
     card.addEventListener('click', () => selectTarget(cube));
     frag.appendChild(card);
     cubeThumbnailSVG(cube.cubeId)
-      .then(svg => { if (svg && svg.includes('<svg')) tile.innerHTML = svg; })
+      .then(svg => { if (svg && svg.includes('<svg')) tile.replaceChildren(svgToImg(svg)); })
       .catch((err) => {
         console.error(`[update-cube] thumbnail #${cube.cubeId} failed:`, err);
         tile.innerHTML = '<span class="preview-empty" style="font-size:9px;color:#ff9a9a">err</span>';
@@ -298,23 +312,23 @@ async function commit() {
 // --- SVG panel zoom + pan (wheel to zoom, drag to pan) ---------------------
 const svgZoom = { scale: 1, x: 0, y: 0 };
 function applySvgZoom() {
-  const svg = els.stageSvg.querySelector('svg');
-  if (!svg) return;
-  svg.style.transformOrigin = 'center center';
-  svg.style.transform = `translate(${svgZoom.x}px, ${svgZoom.y}px) scale(${svgZoom.scale})`;
+  const el = els.stageSvg.querySelector('img');
+  if (!el) return;
+  el.style.transformOrigin = 'center center';
+  el.style.transform = `translate(${svgZoom.x}px, ${svgZoom.y}px) scale(${svgZoom.scale})`;
 }
 function resetSvgZoom() { svgZoom.scale = 1; svgZoom.x = 0; svgZoom.y = 0; applySvgZoom(); }
 
 els.stageSvg.style.cursor = 'grab';
 els.stageSvg.addEventListener('wheel', (e) => {
-  if (!els.stageSvg.querySelector('svg')) return;
+  if (!els.stageSvg.querySelector('img')) return;
   e.preventDefault();
   svgZoom.scale = Math.max(0.5, Math.min(12, svgZoom.scale * Math.exp(-e.deltaY * 0.0016)));
   applySvgZoom();
 }, { passive: false });
 let svgDrag = false, svgLastX = 0, svgLastY = 0;
 els.stageSvg.addEventListener('pointerdown', (e) => {
-  if (!els.stageSvg.querySelector('svg')) return;
+  if (!els.stageSvg.querySelector('img')) return;
   svgDrag = true; svgLastX = e.clientX; svgLastY = e.clientY;
   els.stageSvg.style.cursor = 'grabbing';
   els.stageSvg.setPointerCapture(e.pointerId);
