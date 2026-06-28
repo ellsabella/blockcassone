@@ -379,6 +379,7 @@ contract CubeNFT is ERC721, Ownable {
     error EmptyStreet(uint32 street);
     error NotStreetOwner(uint32 street, uint256 cubeId);
     error StreetAlreadyMerged(uint32 street);
+    error InvalidLeader(uint32 street, uint256 cubeId);
 
     event StreetMerged(
         uint256 indexed streetTokenId,
@@ -391,15 +392,33 @@ contract CubeNFT is ERC721, Ownable {
     ///         into one street token. The occupied plot cubes are burned and all
     ///         8 slots become owned by the new street token.
     /// @dev Reverts unless the caller solely owns every occupied plot. The leader
-    ///      (street SVG) is the lowest occupied plot. Irreversible in v1, but plot
-    ///      CubeData is preserved so an un-merge could be added later.
+    ///      (street SVG) defaults to the lowest occupied plot. Irreversible in v1,
+    ///      but plot CubeData is preserved so an un-merge could be added later.
     function mergeStreet(uint32 street) external returns (uint256 streetTokenId) {
+        return _mergeStreet(street, 0);
+    }
+
+    /// @notice Merge `street`, using `leaderCubeId` (which must be an occupied plot
+    ///         of the street, owned by the caller) as the leader whose art drives
+    ///         the street token's SVG. The viewer lets the owner pick the lead.
+    function mergeStreet(uint32 street, uint256 leaderCubeId)
+        external
+        returns (uint256 streetTokenId)
+    {
+        return _mergeStreet(street, leaderCubeId);
+    }
+
+    function _mergeStreet(uint32 street, uint256 requestedLeader)
+        internal
+        returns (uint256 streetTokenId)
+    {
         uint256 base = uint256(street) * 8;
         if (base + 8 > totalSlots) revert InvalidSlot(uint32(base));
 
         uint256[8] memory plots;
         uint256 occ;
         uint256 leader;
+        bool leaderFound;
         for (uint256 k = 0; k < 8; k++) {
             uint256 cid = cubeForSlot[uint32(base + k)];
             if (cid == 0) continue;
@@ -408,10 +427,16 @@ contract CubeNFT is ERC721, Ownable {
             }
             if (ownerOf(cid) != msg.sender) revert NotStreetOwner(street, cid);
             plots[k] = cid;
-            if (leader == 0) leader = cid; // lowest occupied plot leads
+            if (leader == 0) leader = cid; // default: lowest occupied plot leads
+            if (cid == requestedLeader) leaderFound = true;
             occ++;
         }
         if (occ == 0) revert EmptyStreet(street);
+        // An explicit leader must be one of this street's occupied plots.
+        if (requestedLeader != 0) {
+            if (!leaderFound) revert InvalidLeader(street, requestedLeader);
+            leader = requestedLeader;
+        }
 
         streetTokenId = _nextCubeId++;
         CubeData memory ld = _cubeData[leader];

@@ -191,10 +191,14 @@ export async function moveCube({ cubeId, owner, newSlot }) {
 }
 
 // Merge every occupied plot of a street the caller solely owns (CubeNFT.mergeStreet).
-export async function mergeStreet({ street, owner }) {
+export async function mergeStreet({ street, owner, leaderCubeId }) {
   const cfg = await loadConfig();
   if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
-  const data = '0x6ea3aa45' + word(street);
+  // mergeStreet(uint32) auto-picks the lowest plot; mergeStreet(uint32,uint256)
+  // uses the owner-chosen leader cube as the street SVG.
+  const data = leaderCubeId
+    ? '0x991b9e12' + word(street) + word(leaderCubeId)
+    : '0x6ea3aa45' + word(street);
   return sendTx(cfg, owner, cfg.cubeNft, data, 'mergeStreet');
 }
 

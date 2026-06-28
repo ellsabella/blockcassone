@@ -61,17 +61,28 @@
     .plot-tile img { max-width: 100%; max-height: 100%; }
     .plot-tile.vacant { border-style: dashed; color: #565660; font-size: 10px; text-align: center; }
     .plot-cap { font-size: 9px; color: #7f7f88; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    /* cubes owned by someone else on a contested street — they block the merge */
-    .plot.theirs .plot-tile { background: #2a0c0c; border-color: rgba(178,56,56,0.6); }
-    .plot.theirs .plot-cap { color: #c08a8a; }
-    /* your own cubes are draggable (move to consolidate) */
-    .plot.mine .plot-tile { cursor: grab; }
+    /* yours: green border + green text, draggable to consolidate */
+    .plot.mine .plot-tile { border: 2px solid #2ec27a; cursor: grab; }
     .plot.mine .plot-tile:active { cursor: grabbing; }
+    .plot.mine .plot-cap { color: #6ff0a0; }
+    /* someone else's cube on a contested street — the blocker, bright thick red */
+    .plot.theirs .plot-tile { background: #3a0c0c; border: 3px solid #ff3030; box-shadow: 0 0 12px rgba(255,48,48,0.4); }
+    .plot.theirs .plot-cap { color: #ff5a5a; font-weight: 800; }
+    /* a staged (unconfirmed) move — orange */
+    .plot.pending .plot-tile { border: 3px solid #ffa226; box-shadow: 0 0 14px rgba(255,162,38,0.5); }
+    .plot.pending .plot-cap { color: #ffbf66; font-weight: 800; }
     /* bright selection border (matches the big-cube selection) */
-    .plot.selected .plot-tile { border-color: #ff7dcc; box-shadow: 0 0 12px rgba(255,58,184,0.45); }
+    .plot.selected .plot-tile { border: 3px solid #ff7dcc; box-shadow: 0 0 14px rgba(255,58,184,0.6); }
     /* drop affordance while dragging a cube */
     body.dragging .plot-tile.vacant { border-color: rgba(255,125,204,0.55); color: #ff9ad6; }
     .plot-tile.drop-ok { border-style: solid !important; border-color: #ff7dcc !important; background: rgba(60,18,44,0.55) !important; color: #ff9ad6; }
+
+    /* staged-changes commit bar */
+    #commit-bar { flex: 0 0 auto; display: none; align-items: center; gap: 14px; justify-content: center;
+      padding: 9px; border-top: 2px solid rgba(255,162,38,0.55); background: rgba(40,26,8,0.92); }
+    #commit-summary { font-size: 12px; color: #ffbf66; font-weight: 800; }
+    #commit-go { background: rgba(120,70,10,0.92); border-color: #ffa226; color: #fff; font-size: 13px; padding: 9px 22px; letter-spacing: 1px; box-shadow: 0 0 18px rgba(255,162,38,0.4); }
+    #commit-discard { color: #c9a26a; }
     .merged-block { display: flex; align-items: center; gap: 14px; }
     .merged-tile { width: 120px; height: 120px; background: #050507; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .merged-tile img { max-width: 100%; max-height: 100%; }
@@ -122,6 +133,11 @@
       </div>
     </div>
     <div id="streets"></div>
+    <div id="commit-bar">
+      <span id="commit-summary"></span>
+      <button id="commit-discard">discard</button>
+      <button id="commit-go">CONFIRM CHANGES ON-CHAIN</button>
+    </div>
   </div>
 
   <div id="confirm-overlay">
