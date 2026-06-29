@@ -351,7 +351,8 @@ const WALKER_SCHEMA=[
   ['steps','steps / walk',3,40,1],
   ['turnBias','turn bias',0,1,0.05],
   ['seed','walk seed',1,40,1],
-  ['secondary','2nd colour 0/1',0,1,1],
+  ['secondary','2nd axis 0/1',0,1,1],
+  ['secMix','2nd colour mix',0,1,0.05],
   ['coreW','core w',0,0.3,0.005],
   ['coreOp','core α',0,1,0.02],
   ['glowW','glow w',0.02,0.4,0.005],
@@ -367,7 +368,7 @@ const NORMIE_DEF={glowSrcW:0.146,tightSigma:0.11,tightGain:10.5,tightAlpha:2.7,w
 const FRAME_DEF ={glowSrcW:0.345,tightSigma:0.11,tightGain:1,tightAlpha:1.35,wideSigma:0.1,wideGain:1,wideAlpha:0.8,colorCoreW:0.3,colorCoreOp:1,whiteW:0.075,whiteOp:0.86,whiteBlur:0.03,beadW:0.02,beadOp:0,beadStep:1.25,whiteBeadW:0.01,whiteBeadOp:0};
 const POINT_DEF ={pR:0.42,pSigma:0.11,pGain:3,pAlpha:1.05,pCoreR:0.23,pCoreOp:0.44,pCoreBlur:0.035};
 const GLASS_DEF ={convMin:5,coverage:38,seed:20,inset:0.05,size:0.8,lightRot:120,lightSpread:16,lightR:16,colorGain:2.6,saturate:3,whiteBloom:0.15,fillBase:0.58,fillScale:0.55,fillCap:1,whiten:0.1,rimW:0.012,rimLight:1,rimOp:1.6,glowS1:0.02,glowG1:1,glowS2:0.05,glowG2:1,sparkleThr:0.92,sparkleR:0,sparkleOp:0};
-const WALKER_DEF={numWalks:12,steps:18,turnBias:0.4,seed:3,secondary:0,coreW:0.05,coreOp:0.5,glowW:0.12,glowSigma:0.12,glowGain:6,glowOp:0.4,beadW:0.18,beadStep:0.8,beadOp:0.6};
+const WALKER_DEF={numWalks:12,steps:18,turnBias:0.4,seed:3,secondary:0,secMix:0,coreW:0.05,coreOp:0.6,glowW:0.12,glowSigma:0.12,glowGain:5,glowOp:0.25,beadW:0.1,beadStep:0.8,beadOp:0.45};
 const G={ normie:{schema:LINE_SCHEMA, state:{...NORMIE_DEF}, def:NORMIE_DEF},
           frame :{schema:LINE_SCHEMA, state:{...FRAME_DEF},  def:FRAME_DEF},
           points:{schema:POINT_SCHEMA,state:{...POINT_DEF},  def:POINT_DEF},
@@ -436,16 +437,25 @@ function buildGlass(cells,p){
 
 // stone walkers: thin core (primary axis hue) + bobbly beads + soft glow, with
 // the GLOW/beads in a secondary axis hue. Screen-blended (additive, translucent).
+// one mono-coloured walker layer (glow + bobbles + thin core, all the same hue)
+function walkerStrokes(d, hue, p){
+  return `<path d="${d}" stroke="${hue}" stroke-width="${p.glowW}" opacity="${p.glowOp}" filter="url(#wkGlow)"/>`+
+    (p.beadW>0?`<path d="${d}" stroke="${hue}" stroke-width="${p.beadW}" stroke-dasharray="0 ${p.beadStep}" opacity="${p.beadOp}" filter="url(#wkGlow)"/>`:'')+
+    (p.coreW>0?`<path d="${d}" stroke="${hue}" stroke-width="${p.coreW}" opacity="${p.coreOp}"/>`:'');
+}
 function buildWalkers(paths, p, primHex, secHex){
   if(!paths.length) return {defs:'', body:''};
-  const d = walkerPathD(paths);
+  // Each walker is MONO-coloured. The SET splits between the primary axis hue and
+  // a secondary axis hue by `secMix` (0 = all primary). secMix>0 => the "red/blue"
+  // / "red/green" mix of single-colour walkers.
+  const prim=[], sec=[];
+  paths.forEach((pa,i)=> ((hashCell(p.seed*13+1,i,0)%100) < p.secMix*100 ? sec : prim).push(pa));
   const defs=`<filter id="wkGlow" x="-60%" y="-60%" width="220%" height="220%" color-interpolation-filters="sRGB">`+
     `<feGaussianBlur in="SourceGraphic" stdDeviation="${p.glowSigma}" result="b"/>`+
     `<feColorMatrix in="b" type="matrix" values="${p.glowGain} 0 0 0 0 0 ${p.glowGain} 0 0 0 0 0 ${p.glowGain} 0 0 0 0 0 1 0"/></filter>`;
   let body=`<g fill="none" stroke-linecap="round" stroke-linejoin="round" style="mix-blend-mode:screen">`;
-  if(p.glowW>0) body+=`<path d="${d}" stroke="${secHex}" stroke-width="${p.glowW}" opacity="${p.glowOp}" filter="url(#wkGlow)"/>`;
-  if(p.beadW>0) body+=`<path d="${d}" stroke="${secHex}" stroke-width="${p.beadW}" stroke-dasharray="0 ${p.beadStep}" opacity="${p.beadOp}" filter="url(#wkGlow)"/>`;
-  if(p.coreW>0) body+=`<path d="${d}" stroke="${primHex}" stroke-width="${p.coreW}" opacity="${p.coreOp}"/>`;
+  if(prim.length) body+=walkerStrokes(walkerPathD(prim), primHex, p);
+  if(sec.length)  body+=walkerStrokes(walkerPathD(sec),  secHex,  p);
   return {defs, body:body+`</g>`};
 }
 
