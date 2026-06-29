@@ -8,6 +8,7 @@ import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
+import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 
 // Minimal Normie source used only for previews.
 contract PreviewMockNormies is ERC721 {
@@ -50,7 +51,8 @@ contract PreviewThumbnail is Script {
             address(normies),
             address(0),
             address(new CubeHilbertGeometry()),
-            address(new CubeFrameLayer())
+            address(new CubeFrameLayer()),
+            address(new CubeWalkerLayer())
         );
 
         for (uint256 s = 0; s < count; s++) {

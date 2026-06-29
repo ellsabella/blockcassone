@@ -8,6 +8,7 @@ import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
+import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 import { NonNormieArtStore } from "../src/NonNormieArtStore.sol";
@@ -142,6 +143,9 @@ contract DeployLocalGenesis is Script {
         vm.broadcast();
         address frameLayer = address(new CubeFrameLayer());
 
+        vm.broadcast();
+        address walkerLayer = address(new CubeWalkerLayer());
+
         // Customization art store, wired into BOTH renderers (immutable) so
         // re-based cubes render their stored art.
         vm.broadcast();
@@ -149,7 +153,7 @@ contract DeployLocalGenesis is Script {
 
         vm.broadcast();
         d.thumbnailRenderer =
-            new CubeThumbnailRendererV1(d.cubes, address(d.normies), address(d.artStore), geometry, frameLayer);
+            new CubeThumbnailRendererV1(d.cubes, address(d.normies), address(d.artStore), geometry, frameLayer, walkerLayer);
 
         vm.broadcast();
         d.renderer = new CubeRendererV2(
