@@ -600,14 +600,38 @@ contract CubeThumbnailRendererV1 {
         string memory frontD = _walkFront(raw, data.seed);
         string memory sideD = _walkSides(raw, data.seed);
         if (bytes(frontD).length == 0 && bytes(sideD).length == 0) return "";
+        // Resolve colours OUT of the concat (external geometry staticcalls inside a
+        // big concat overflow the legacy stack).
+        return _walkSvg(
+            frontD,
+            sideD,
+            _colour(geometry.mainAxis(uint256(data.slot))),
+            _colour(geometry.sideAxis(uint256(data.slot)))
+        );
+    }
+
+    function _walkSvg(string memory frontD, string memory sideD, string memory figCol, string memory sideCol)
+        private
+        pure
+        returns (string memory)
+    {
         return string.concat(
             '<defs><filter id="wk" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".02" result="b"/><feColorMatrix in="b" type="matrix" values="4.5 0 0 0 0 0 4.5 0 0 0 0 0 4.5 0 0 0 0 0 1 0"/></filter>',
             '<path id="ws" d="', sideD, '"/><path id="wf" d="', frontD, '"/></defs>',
             '<g transform="translate(100 85) scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round" style="mix-blend-mode:screen">',
-            _walkStrokes("ws", _colour(geometry.sideAxis(uint256(data.slot)))),
-            _walkStrokes("wf", _colour(geometry.mainAxis(uint256(data.slot)))),
+            _walkStrokes("ws", sideCol),
+            _walkStrokes("wf", figCol),
             "</g>"
         );
+    }
+
+    // Append "<cmd><x> <y>" to a walk subpath via single-arg cats (keeps the
+    // emitting frames shallow — no string.concat temporaries near buf.cat).
+    function _catXY(bytes memory buf, string memory cmd, uint256 x, uint256 y) private pure {
+        buf.cat(cmd);
+        buf.cat(x.toString());
+        buf.cat(" ");
+        buf.cat(y.toString());
     }
 
     function _walkStrokes(string memory ref, string memory col) private pure returns (string memory) {
@@ -637,7 +661,7 @@ contract CubeThumbnailRendererV1 {
     // One mid-body walk: M at the body cell, then tour. (Own frame: keeps the
     // caller's stack shallow — no via-IR.)
     function _frontWalk(bytes memory buf, uint256 ci, uint256 h) private pure {
-        buf.cat(string.concat("M", (ci % 40).toString(), " ", (ci / 40).toString()));
+        _catXY(buf, "M", ci % 40, ci / 40);
         _tourSteps(buf, ci % 40, ci / 40, h >> 8, (h >> 4) & 3);
     }
 
@@ -662,10 +686,10 @@ contract CubeThumbnailRendererV1 {
     function _sideWalk(bytes memory buf, bytes memory raw, uint256 h, uint256 y) private pure {
         bool fromLeft = (h & 1) == 0;
         uint256 x = fromLeft ? 0 : 40;
-        buf.cat(string.concat("M", x.toString(), " ", y.toString()));
+        _catXY(buf, "M", x, y);
         for (uint256 s2 = 0; s2 < WK_STRAIGHT; s2++) {
             x = fromLeft ? x + 1 : x - 1;
-            buf.cat(string.concat("L", x.toString(), " ", y.toString()));
+            _catXY(buf, "L", x, y);
             uint256 cx = x > 39 ? 39 : x;
             if (_bitmapBit(raw, y * 40 + cx) && _neigh8(raw, cx, y) >= 3) break; // reached body
             if (fromLeft ? x >= 40 : x == 0) break;
@@ -684,7 +708,7 @@ contract CubeThumbnailRendererV1 {
             else if (dir == 1) { if (y < 40) y++; else { dir = 3; continue; } }
             else if (dir == 2) { if (x > 0) x--; else { dir = 0; continue; } }
             else { if (y > 0) y--; else { dir = 1; continue; } }
-            buf.cat(string.concat("L", x.toString(), " ", y.toString()));
+            _catXY(buf, "L", x, y);
         }
     }
 
