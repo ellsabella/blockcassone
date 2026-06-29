@@ -419,9 +419,11 @@ contract CubeThumbnailRendererV1 {
     {
         if (raw.length != 200) return "";
 
-        // Per-cube light-triangle rotation (0..359) -> the rainbow lands differently
-        // on every cube. Precompute the three rotated light positions once.
-        uint256 rot = uint256(seed) % 360;
+        // Per-cube rainbow orientation: pick ONE of 6 evenly-spaced rotations
+        // (0,60,..,300) from the hashed seed. Six discrete, well-separated angles
+        // read as clearly distinct cube-to-cube — a fine 0..359 rotation barely
+        // varies for nearby/structured seeds. Precompute the rotated lights once.
+        uint256 rot = (uint256(keccak256(abi.encodePacked(seed))) % 6) * 60;
         uint256[6] memory L = _lights(rot);
 
         bytes memory buf = StrBuf.alloc(131072);
@@ -473,7 +475,7 @@ contract CubeThumbnailRendererV1 {
         if (so > 1000) so = 1000;
         return string.concat(
             '<rect x="', (101 + col * 25).toString(), '" y="', (86 + row * 25).toString(),
-            '" width="23" height="23" fill="rgb(', _glassFill(col, row, L), ')" fill-opacity="', _dec2(fo),
+            '" width="20" height="20" fill="rgb(', _glassFill(col, row, L), ')" fill-opacity="', _dec2(fo),
             '" stroke="#fff" stroke-opacity="', _dec2(so), '"/>'
         );
     }
