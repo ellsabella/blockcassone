@@ -597,12 +597,13 @@ contract CubeThumbnailRendererV1 {
         return string.concat(".", d < 10 ? "0" : "", d.toString());
     }
 
-    // --- Stone walkers (Normie-only) -------------------------------------------
+    // --- Stone walkers --------------------------------------------------------
     // Delegated to CubeWalkerLayer (split out to stay under the 24KB code limit).
     // Front (unique-plane) walks emerge mid-body in the figure axis colour; side
     // walks (the doubled sideAxis colour) enter from opposite edges then tour.
+    // Applies to ANY art on the planes (Normie or customized) — not Normie-only
+    // like the forest; walker.render returns "" when there's no body to crawl.
     function _svgWalkers(CubeNFT.CubeData memory data, bytes memory raw) private view returns (string memory) {
-        if (data.sourceKind != cubes.SOURCE_KIND_NORMIE()) return ""; // Normie-only
         return walker.render(
             raw,
             data.seed,

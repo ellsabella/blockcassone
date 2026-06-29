@@ -192,7 +192,9 @@ const DEV_MINT_OWNER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 export async function mintNormieCubeOnChain({ slot, owner = DEV_MINT_OWNER, normieId, seed }) {
   const cfg = await loadConfig();
   if (!cfg.cubeNft || !cfg.normies) throw new Error('chain-config.json missing cubeNft/normies');
-  const nid = normieId != null ? Number(normieId) : 100000 + Number(slot); // fresh + un-cubed per slot
+  // Keep it a VALID Normie id (0..9999, 4-digit label) and clear of the genesis
+  // sample ids (0..7); unique per slot. 100000+slot produced impossible ids.
+  const nid = normieId != null ? Number(normieId) : 1000 + Number(slot);
   const sd = seed || ('0x' + word(BigInt(nid) * 2654435761n + BigInt(Date.now())).slice(-64));
   // 1) mint the source Normie on the mock so it has art + ownership
   await sendTx(cfg, owner, cfg.normies, '0x40c10f19' + addrWord(owner) + word(nid), 'mockNormieMint');
