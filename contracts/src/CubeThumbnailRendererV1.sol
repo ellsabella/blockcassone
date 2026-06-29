@@ -20,6 +20,7 @@ interface IThumbnailNonNormieArtStore {
 interface ICubeHilbertGeometry {
     function motifLayout(uint256 slot) external pure returns (uint256);
     function mainAxis(uint256 slot) external pure returns (uint256);
+    function sideAxis(uint256 slot) external pure returns (uint256);
 }
 
 interface ICubeFrameLayer {
@@ -91,6 +92,7 @@ contract CubeThumbnailRendererV1 {
             _svgDefs(data, raw),
             _svgForest(data),
             _svgBitmap(data, raw),
+            _svgWalkers(data, raw),
             _glassLayer(raw, data.sourceTokenId, data.seed),
             _svgLabel(data),
             _svgFrame(data),
@@ -577,6 +579,115 @@ contract CubeThumbnailRendererV1 {
         if (fp >= 1000) return "1";
         uint256 d = fp / 10;
         return string.concat(".", d < 10 ? "0" : "", d.toString());
+    }
+
+    // --- Stone walkers (Normie-only) -------------------------------------------
+    // Thin two-colour glowing lines: front (unique) plane walkers emerge mid-body
+    // in the figure axis colour; the two parallel SIDE planes' walkers (the doubled
+    // sideAxis colour) come straight in from opposite edges then tour. Paths are a
+    // seeded 2D approximation (the 3D voxel walk is too heavy for eth_call). Each
+    // colour's path is defined once and <use>d 3x (glow/bobble/core). Tuned in
+    // tmp/line-lab.html. Drawn in the scale(25) group; screen-blended (additive).
+    uint256 private constant WK_FRONT = 11;    // mid-body walks (figure colour)
+    uint256 private constant WK_SIDE = 23;     // edge-entry walks (side colour)
+    uint256 private constant WK_STRAIGHT = 16; // max straight steps before touring
+    uint256 private constant WK_STEPS = 10;    // tour steps
+    uint256 private constant WK_TURN = 40;     // % chance to turn each tour step
+
+    function _svgWalkers(CubeNFT.CubeData memory data, bytes memory raw) private view returns (string memory) {
+        if (data.sourceKind != cubes.SOURCE_KIND_NORMIE()) return ""; // Normie-only
+        if (raw.length != 200) return "";
+        string memory frontD = _walkFront(raw, data.seed);
+        string memory sideD = _walkSides(raw, data.seed);
+        if (bytes(frontD).length == 0 && bytes(sideD).length == 0) return "";
+        return string.concat(
+            '<defs><filter id="wk" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".02" result="b"/><feColorMatrix in="b" type="matrix" values="4.5 0 0 0 0 0 4.5 0 0 0 0 0 4.5 0 0 0 0 0 1 0"/></filter>',
+            '<path id="ws" d="', sideD, '"/><path id="wf" d="', frontD, '"/></defs>',
+            '<g transform="translate(100 85) scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round" style="mix-blend-mode:screen">',
+            _walkStrokes("ws", _colour(geometry.sideAxis(uint256(data.slot)))),
+            _walkStrokes("wf", _colour(geometry.mainAxis(uint256(data.slot)))),
+            "</g>"
+        );
+    }
+
+    function _walkStrokes(string memory ref, string memory col) private pure returns (string memory) {
+        return string.concat(
+            '<use href="#', ref, '" stroke="', col, '" stroke-width=".11" opacity=".54" filter="url(#wk)"/>',
+            '<use href="#', ref, '" stroke="', col, '" stroke-width=".09" stroke-dasharray="0 .8" opacity=".82" filter="url(#wk)"/>',
+            '<use href="#', ref, '" stroke="', col, '" stroke-width=".03" opacity=".44"/>'
+        );
+    }
+
+    // Body cells = lit with >= 3 of 8 neighbours on (the walkable interior).
+    function _walkFront(bytes memory raw, bytes32 seed) private pure returns (string memory) {
+        bytes memory buf = StrBuf.alloc(8192);
+        uint256[] memory cells = new uint256[](1600);
+        uint256 n;
+        for (uint256 i = 0; i < 1600; i++) {
+            if (_bitmapBit(raw, i) && _neigh8(raw, i % 40, i / 40) >= 3) cells[n++] = i;
+        }
+        if (n == 0) return "";
+        for (uint256 w = 0; w < WK_FRONT; w++) {
+            uint256 h = uint256(keccak256(abi.encodePacked(seed, uint256(0), w)));
+            uint256 ci = cells[h % n];
+            uint256 x = ci % 40;
+            uint256 y = ci / 40;
+            buf.cat(string.concat("M", x.toString(), " ", y.toString()));
+            _tourSteps(buf, x, y, h >> 8, (h >> 4) & 3);
+        }
+        return buf.str();
+    }
+
+    function _walkSides(bytes memory raw, bytes32 seed) private pure returns (string memory) {
+        bytes memory buf = StrBuf.alloc(16384);
+        uint256[] memory rows = new uint256[](40);
+        uint256 nr;
+        for (uint256 r = 0; r < 40; r++) {
+            for (uint256 c = 0; c < 40; c++) {
+                if (_bitmapBit(raw, r * 40 + c) && _neigh8(raw, c, r) >= 3) { rows[nr++] = r; break; }
+            }
+        }
+        if (nr == 0) return "";
+        for (uint256 w = 0; w < WK_SIDE; w++) {
+            uint256 h = uint256(keccak256(abi.encodePacked(seed, uint256(1), w)));
+            bool fromLeft = (h & 1) == 0;
+            uint256 x = fromLeft ? 0 : 40;
+            uint256 dir = fromLeft ? 0 : 2; // R or L
+            uint256 y = rows[(h >> 1) % nr];
+            buf.cat(string.concat("M", x.toString(), " ", y.toString()));
+            for (uint256 s2 = 0; s2 < WK_STRAIGHT; s2++) {
+                x = fromLeft ? x + 1 : x - 1;
+                buf.cat(string.concat("L", x.toString(), " ", y.toString()));
+                uint256 cx = x > 39 ? 39 : x;
+                if (_bitmapBit(raw, y * 40 + cx) && _neigh8(raw, cx, y) >= 3) break; // reached body
+                if (fromLeft ? x >= 40 : x == 0) break;
+            }
+            _tourSteps(buf, x, y, h >> 8, dir);
+        }
+        return buf.str();
+    }
+
+    // Append a turn-biased random walk (L-segments) from (x,y) to an existing
+    // subpath. Coords are grid vertices 0..40.
+    function _tourSteps(bytes memory buf, uint256 x, uint256 y, uint256 s, uint256 dir) private pure {
+        for (uint256 step = 0; step < WK_STEPS; step++) {
+            s = uint256(keccak256(abi.encodePacked(s)));
+            if (s % 100 < WK_TURN) dir = (dir + (((s >> 8) & 1) == 0 ? 1 : 3)) & 3;
+            (int256 dx, int256 dy) = _walkDir(dir);
+            int256 nx = int256(x) + dx;
+            int256 ny = int256(y) + dy;
+            if (nx < 0 || nx > 40 || ny < 0 || ny > 40) { dir = (dir + 2) & 3; continue; }
+            x = uint256(nx);
+            y = uint256(ny);
+            buf.cat(string.concat("L", x.toString(), " ", y.toString()));
+        }
+    }
+
+    function _walkDir(uint256 d) private pure returns (int256 dx, int256 dy) {
+        if (d == 0) return (int256(1), int256(0));   // right
+        if (d == 1) return (int256(0), int256(1));   // down
+        if (d == 2) return (-int256(1), int256(0));  // left
+        return (int256(0), -int256(1));              // up
     }
 
     function _neigh8(bytes memory raw, uint256 col, uint256 row) private pure returns (uint256 nb) {
