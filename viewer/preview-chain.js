@@ -183,6 +183,24 @@ async function sendTx(cfg, from, to, data, label) {
 }
 
 // Move a cube the caller owns to a vacant slot (CubeNFT.moveCube).
+// Dev/local only: mint a fresh mock Normie + a cube at an EXPLICIT slot, so the
+// Big Cube page can preview a specific colour combo on-chain (colour = f(slot)).
+// Needs the LocalMockNormies dev contract (its mint() is unguarded) — on a mainnet
+// fork the real Normies has no public mint, so this won't work there. `owner` must
+// be an unlocked Anvil account (defaults to acct #0, which owns the mock + sends).
+const DEV_MINT_OWNER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+export async function mintNormieCubeOnChain({ slot, owner = DEV_MINT_OWNER, normieId, seed }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft || !cfg.normies) throw new Error('chain-config.json missing cubeNft/normies');
+  const nid = normieId != null ? Number(normieId) : 100000 + Number(slot); // fresh + un-cubed per slot
+  const sd = seed || ('0x' + word(BigInt(nid) * 2654435761n + BigInt(Date.now())).slice(-64));
+  // 1) mint the source Normie on the mock so it has art + ownership
+  await sendTx(cfg, owner, cfg.normies, '0x40c10f19' + addrWord(owner) + word(nid), 'mockNormieMint');
+  // 2) mint the cube at the chosen slot (caller owns the Normie; not owner-gated)
+  await sendTx(cfg, owner, cfg.cubeNft, '0xd3cdc267' + word(nid) + word(slot) + seedWord(sd), 'mintNormieCube');
+  return { cubeOwner: owner, normieId: nid, slot: Number(slot), seed: sd };
+}
+
 export async function moveCube({ cubeId, owner, newSlot }) {
   const cfg = await loadConfig();
   if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');

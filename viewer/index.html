@@ -82,6 +82,7 @@
       text-overflow: ellipsis;
     }
     #mint-count { width: 46px; text-align: center; }
+    #mint-slot { width: 54px; text-align: center; }
     #mint-price {
       color: #f0f0f4;
       font-size: 12px;
@@ -520,6 +521,8 @@
       <button id="mint-plus" aria-label="Increase mint count">+</button>
       <button id="mint-run">Mint</button>
       <button id="mint-reset">Reset</button>
+      <input id="mint-slot" inputmode="numeric" placeholder="slot" title="dev: on-chain mint a cube at this slot (colour = f(slot))">
+      <button id="mint-at-slot" title="dev: mint a real on-chain cube at the given slot">Mint @ slot</button>
       <span id="mint-status">minted: 0 | empty slots: 64</span>
     </div>
     <div id="controls">
