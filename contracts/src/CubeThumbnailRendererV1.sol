@@ -629,13 +629,16 @@ contract CubeThumbnailRendererV1 {
         if (n == 0) return "";
         for (uint256 w = 0; w < WK_FRONT; w++) {
             uint256 h = uint256(keccak256(abi.encodePacked(seed, uint256(0), w)));
-            uint256 ci = cells[h % n];
-            uint256 x = ci % 40;
-            uint256 y = ci / 40;
-            buf.cat(string.concat("M", x.toString(), " ", y.toString()));
-            _tourSteps(buf, x, y, h >> 8, (h >> 4) & 3);
+            _frontWalk(buf, cells[h % n], h);
         }
         return buf.str();
+    }
+
+    // One mid-body walk: M at the body cell, then tour. (Own frame: keeps the
+    // caller's stack shallow — no via-IR.)
+    function _frontWalk(bytes memory buf, uint256 ci, uint256 h) private pure {
+        buf.cat(string.concat("M", (ci % 40).toString(), " ", (ci / 40).toString()));
+        _tourSteps(buf, ci % 40, ci / 40, h >> 8, (h >> 4) & 3);
     }
 
     function _walkSides(bytes memory raw, bytes32 seed) private pure returns (string memory) {
@@ -650,44 +653,39 @@ contract CubeThumbnailRendererV1 {
         if (nr == 0) return "";
         for (uint256 w = 0; w < WK_SIDE; w++) {
             uint256 h = uint256(keccak256(abi.encodePacked(seed, uint256(1), w)));
-            bool fromLeft = (h & 1) == 0;
-            uint256 x = fromLeft ? 0 : 40;
-            uint256 dir = fromLeft ? 0 : 2; // R or L
-            uint256 y = rows[(h >> 1) % nr];
-            buf.cat(string.concat("M", x.toString(), " ", y.toString()));
-            for (uint256 s2 = 0; s2 < WK_STRAIGHT; s2++) {
-                x = fromLeft ? x + 1 : x - 1;
-                buf.cat(string.concat("L", x.toString(), " ", y.toString()));
-                uint256 cx = x > 39 ? 39 : x;
-                if (_bitmapBit(raw, y * 40 + cx) && _neigh8(raw, cx, y) >= 3) break; // reached body
-                if (fromLeft ? x >= 40 : x == 0) break;
-            }
-            _tourSteps(buf, x, y, h >> 8, dir);
+            _sideWalk(buf, raw, h, rows[(h >> 1) % nr]);
         }
         return buf.str();
     }
 
+    // One side walk: straight in from an edge to the body, then tour.
+    function _sideWalk(bytes memory buf, bytes memory raw, uint256 h, uint256 y) private pure {
+        bool fromLeft = (h & 1) == 0;
+        uint256 x = fromLeft ? 0 : 40;
+        buf.cat(string.concat("M", x.toString(), " ", y.toString()));
+        for (uint256 s2 = 0; s2 < WK_STRAIGHT; s2++) {
+            x = fromLeft ? x + 1 : x - 1;
+            buf.cat(string.concat("L", x.toString(), " ", y.toString()));
+            uint256 cx = x > 39 ? 39 : x;
+            if (_bitmapBit(raw, y * 40 + cx) && _neigh8(raw, cx, y) >= 3) break; // reached body
+            if (fromLeft ? x >= 40 : x == 0) break;
+        }
+        _tourSteps(buf, x, y, h >> 8, fromLeft ? 0 : 2);
+    }
+
     // Append a turn-biased random walk (L-segments) from (x,y) to an existing
-    // subpath. Coords are grid vertices 0..40.
+    // subpath. Coords are grid vertices 0..40. Movement inlined per direction to
+    // keep the frame shallow (no dx/dy/nx/ny locals).
     function _tourSteps(bytes memory buf, uint256 x, uint256 y, uint256 s, uint256 dir) private pure {
         for (uint256 step = 0; step < WK_STEPS; step++) {
             s = uint256(keccak256(abi.encodePacked(s)));
             if (s % 100 < WK_TURN) dir = (dir + (((s >> 8) & 1) == 0 ? 1 : 3)) & 3;
-            (int256 dx, int256 dy) = _walkDir(dir);
-            int256 nx = int256(x) + dx;
-            int256 ny = int256(y) + dy;
-            if (nx < 0 || nx > 40 || ny < 0 || ny > 40) { dir = (dir + 2) & 3; continue; }
-            x = uint256(nx);
-            y = uint256(ny);
+            if (dir == 0) { if (x < 40) x++; else { dir = 2; continue; } }
+            else if (dir == 1) { if (y < 40) y++; else { dir = 3; continue; } }
+            else if (dir == 2) { if (x > 0) x--; else { dir = 0; continue; } }
+            else { if (y > 0) y--; else { dir = 1; continue; } }
             buf.cat(string.concat("L", x.toString(), " ", y.toString()));
         }
-    }
-
-    function _walkDir(uint256 d) private pure returns (int256 dx, int256 dy) {
-        if (d == 0) return (int256(1), int256(0));   // right
-        if (d == 1) return (int256(0), int256(1));   // down
-        if (d == 2) return (-int256(1), int256(0));  // left
-        return (int256(0), -int256(1));              // up
     }
 
     function _neigh8(bytes memory raw, uint256 col, uint256 row) private pure returns (uint256 nb) {
