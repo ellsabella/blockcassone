@@ -49,16 +49,29 @@ contract LocalMockNormies {
         return true;
     }
 
+    // Solid overlapping discs (low-frequency) so the mock silhouette has real solid
+    // body — lots of cells with 5+ lit neighbours — which the glass-voxel layer
+    // needs. The old high-frequency ring/wave pattern was too noisy: almost no
+    // "body" cells, so almost no glass. tokenId varies the disc centres/radii.
     function _sampleRawImageData(uint256 tokenId) private pure returns (bytes memory data) {
         data = new bytes(200);
+        uint256 h = uint256(keccak256(abi.encodePacked(tokenId)));
         for (uint256 i = 0; i < 1600; i++) {
             uint256 col = i % 40;
             uint256 row = i / 40;
-            uint256 dx = col > 19 ? col - 19 : 19 - col;
-            uint256 dy = row > 19 ? row - 19 : 19 - row;
-            uint256 ring = (dx * dx + dy * dy + tokenId * 7) % 53;
-            uint256 wave = (col * 13 + row * 17 + tokenId * 19) % 37;
-            if (ring < 28 && wave > 8) {
+            bool lit = false;
+            for (uint256 k = 0; k < 3; k++) {
+                uint256 cx = 9 + (h >> (k * 32)) % 22;     // disc centre 9..30
+                uint256 cy = 9 + (h >> (k * 32 + 8)) % 22;
+                uint256 rr = 7 + (h >> (k * 32 + 16)) % 6; // radius 7..12
+                uint256 ddx = col > cx ? col - cx : cx - col;
+                uint256 ddy = row > cy ? row - cy : cy - row;
+                if (ddx * ddx + ddy * ddy <= rr * rr) {
+                    lit = true;
+                    break;
+                }
+            }
+            if (lit) {
                 data[i / 8] = bytes1(uint8(data[i / 8]) | uint8(1 << (7 - (i % 8))));
             }
         }
