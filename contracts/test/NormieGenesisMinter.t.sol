@@ -5,6 +5,7 @@ import { Test } from "forge-std/Test.sol";
 import { ERC721 } from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
+import { GenesisMinterBase } from "../src/GenesisMinterBase.sol";
 
 contract GenesisMockERC721 is ERC721 {
     constructor() ERC721("Normies", "NORM") { }
@@ -81,7 +82,7 @@ contract NormieGenesisMinterTest is Test {
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
-                NormieGenesisMinter.InsufficientAllowlistNormies.selector, ALICE, 4, 3
+                GenesisMinterBase.InsufficientAllowlistNormies.selector, ALICE, 4, 3
             )
         );
         genesis.mintAllowlist(4);
@@ -102,7 +103,7 @@ contract NormieGenesisMinterTest is Test {
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
-                NormieGenesisMinter.InsufficientAllowlistNormies.selector,
+                GenesisMinterBase.InsufficientAllowlistNormies.selector,
                 ALICE,
                 expectedAvailable + 1,
                 expectedAvailable
@@ -182,13 +183,13 @@ contract NormieGenesisMinterTest is Test {
         localCubes.transferOwnership(address(localGenesis));
 
         vm.prank(ALICE);
-        vm.expectRevert(NormieGenesisMinter.SnapshotNotFinalized.selector);
+        vm.expectRevert(GenesisMinterBase.SnapshotNotFinalized.selector);
         localGenesis.mintAllowlist(1);
     }
 
     function testCannotMintZeroQuantity() public {
         vm.prank(ALICE);
-        vm.expectRevert(NormieGenesisMinter.InvalidQuantity.selector);
+        vm.expectRevert(GenesisMinterBase.InvalidQuantity.selector);
         genesis.mintAllowlist(0);
     }
 
@@ -208,13 +209,13 @@ contract NormieGenesisMinterTest is Test {
         assertEq(first.length, 3);
 
         vm.prank(PUBLIC_MINTER);
-        vm.expectRevert(NormieGenesisMinter.MintClosed.selector);
+        vm.expectRevert(GenesisMinterBase.MintClosed.selector);
         localGenesis.mintPublic(1);
     }
 
     function testSeaDropMintsAllowlistPhase() public {
         vm.prank(OWNER);
-        genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+        genesis.setPhase(GenesisMinterBase.Phase.Allowlist);
         uint256[] memory aliceSnapshot = _ids(101, 102, 103);
         uint256[] memory selected = _ids(103, 101);
         bytes32[] memory proof = new bytes32[](0);
@@ -234,7 +235,7 @@ contract NormieGenesisMinterTest is Test {
 
     function testSeaDropMintsPublicPhase() public {
         vm.prank(OWNER);
-        genesis.setPhase(NormieGenesisMinter.Phase.Public);
+        genesis.setPhase(GenesisMinterBase.Phase.Public);
 
         uint256 expected = _expectedPublicPick(PUBLIC_MINTER, 0, 0, 5);
 
@@ -246,40 +247,133 @@ contract NormieGenesisMinterTest is Test {
         assertEq(_sourceToken(cubeIds[0]), expected);
     }
 
+    function testSeaDropPublicRevertsOnPartialFill() public {
+        vm.prank(OWNER);
+        genesis.setPhase(GenesisMinterBase.Phase.Public);
+
+        // Pool has 5 (101,102,103,201,202); asking for 6 can't be fully filled.
+        assertEq(genesis.publicRemaining(), 5);
+        vm.prank(SEA_DROP);
+        vm.expectRevert(
+            abi.encodeWithSelector(GenesisMinterBase.IncompletePublicFill.selector, 6, 5)
+        );
+        genesis.mintSeaDrop(PUBLIC_MINTER, 6);
+
+        // Nothing minted — the whole call reverted (buyer would've paid for 6).
+        assertEq(genesis.mintedCount(), 0);
+        assertEq(genesis.publicRemaining(), 5);
+    }
+
+    function testSeaDropPublicFillsExactlyAvailable() public {
+        // 16 slots = 2 streets so one wallet can receive 5 plots (3 + 2); the shared
+        // 8-slot setUp is a single street and caps a wallet at 3.
+        NormieGenesisMinter g = _freshPublicMinter(16, _ids5(401, 402, 403, 404, 405));
+
+        vm.prank(SEA_DROP);
+        uint256[] memory cubeIds = g.mintSeaDrop(PUBLIC_MINTER, 5);
+        assertEq(cubeIds.length, 5);
+        assertEq(g.mintedCount(), 5);
+        assertEq(g.publicRemaining(), 0);
+    }
+
+    function testSeaDropPublicRevertsWhenSupplyCapCannotCover() public {
+        // Fresh minter with a supply cap (2) smaller than the pool (5): available is
+        // capped by remaining supply, so a 3-qty SeaDrop mint must revert.
+        CubeNFT localCubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 2, OWNER);
+        NormieGenesisMinter g = new NormieGenesisMinter(localCubes, bytes32("cap-seed"), OWNER);
+        vm.startPrank(OWNER);
+        localCubes.transferOwnership(address(g));
+        g.addSnapshotNormies(ALICE, _ids(301, 302, 303));
+        g.addSnapshotNormies(BOB, _ids(304, 305));
+        g.finalizeSnapshot();
+        g.setSeaDrop(SEA_DROP);
+        g.setPhase(GenesisMinterBase.Phase.Public);
+        vm.stopPrank();
+
+        vm.prank(SEA_DROP);
+        vm.expectRevert(
+            abi.encodeWithSelector(GenesisMinterBase.IncompletePublicFill.selector, 3, 2)
+        );
+        g.mintSeaDrop(PUBLIC_MINTER, 3);
+    }
+
+    function testDirectMintPublicStillAllowsPartialFill() public {
+        // Contrast: the direct (unpaid) mintPublic path stays best-effort — a 6-qty
+        // ask against a 5-token pool mints 5, where the SeaDrop path would revert.
+        NormieGenesisMinter g = _freshPublicMinter(16, _ids5(401, 402, 403, 404, 405));
+
+        vm.prank(PUBLIC_MINTER);
+        uint256[] memory cubeIds = g.mintPublic(6);
+        assertEq(cubeIds.length, 5);
+        assertEq(g.publicRemaining(), 0);
+    }
+
+    // A finalized public-phase minter with `slots` slots and the given pool, its
+    // SeaDrop caller set to SEA_DROP. Used where a wallet needs more than the 3
+    // plots a single street allows.
+    function _freshPublicMinter(uint32 slots, uint256[] memory poolIds)
+        private
+        returns (NormieGenesisMinter g)
+    {
+        CubeNFT localCubes =
+            new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), slots, OWNER);
+        g = new NormieGenesisMinter(localCubes, bytes32("fresh-seed"), OWNER);
+        vm.startPrank(OWNER);
+        localCubes.transferOwnership(address(g));
+        g.addSnapshotNormies(ALICE, poolIds);
+        g.finalizeSnapshot();
+        g.setSeaDrop(SEA_DROP);
+        g.setPhase(GenesisMinterBase.Phase.Public);
+        vm.stopPrank();
+    }
+
+    function _ids5(uint256 a, uint256 b, uint256 c, uint256 d, uint256 e)
+        private
+        pure
+        returns (uint256[] memory r)
+    {
+        r = new uint256[](5);
+        r[0] = a;
+        r[1] = b;
+        r[2] = c;
+        r[3] = d;
+        r[4] = e;
+    }
+
     function testSeaDropRejectsUnauthorizedCaller() public {
         vm.prank(OWNER);
-        genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+        genesis.setPhase(GenesisMinterBase.Phase.Allowlist);
 
         vm.prank(ALICE);
         vm.expectRevert(
-            abi.encodeWithSelector(NormieGenesisMinter.UnauthorizedSeaDrop.selector, ALICE)
+            abi.encodeWithSelector(GenesisMinterBase.UnauthorizedSeaDrop.selector, ALICE)
         );
         genesis.mintSeaDrop(ALICE, 1);
     }
 
     function testSeaDropRejectsClosedPhase() public {
         vm.prank(OWNER);
-        genesis.setPhase(NormieGenesisMinter.Phase.Closed);
+        genesis.setPhase(GenesisMinterBase.Phase.Closed);
 
         vm.prank(SEA_DROP);
-        vm.expectRevert(NormieGenesisMinter.MintClosed.selector);
+        vm.expectRevert(GenesisMinterBase.MintClosed.selector);
         genesis.mintSeaDrop(ALICE, 1);
     }
 
     function testSeaDropAllowlistRequiresPreselection() public {
         vm.prank(OWNER);
-        genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+        genesis.setPhase(GenesisMinterBase.Phase.Allowlist);
 
         vm.prank(SEA_DROP);
         vm.expectRevert(
-            abi.encodeWithSelector(NormieGenesisMinter.NoAllowlistNormies.selector, ALICE)
+            abi.encodeWithSelector(GenesisMinterBase.NoAllowlistNormies.selector, ALICE)
         );
         genesis.mintSeaDrop(ALICE, 1);
     }
 
     function testSeaDropAllowlistRejectsQuantityAboveSelection() public {
         vm.prank(OWNER);
-        genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+        genesis.setPhase(GenesisMinterBase.Phase.Allowlist);
         uint256[] memory aliceSnapshot = _ids(101, 102, 103);
         uint256[] memory selected = _ids(103, 101);
         bytes32[] memory proof = new bytes32[](0);
@@ -289,7 +383,7 @@ contract NormieGenesisMinterTest is Test {
         vm.prank(SEA_DROP);
         vm.expectRevert(
             abi.encodeWithSelector(
-                NormieGenesisMinter.InsufficientAllowlistNormies.selector, ALICE, 3, 2
+                GenesisMinterBase.InsufficientAllowlistNormies.selector, ALICE, 3, 2
             )
         );
         genesis.mintSeaDrop(ALICE, 3);
@@ -302,7 +396,7 @@ contract NormieGenesisMinterTest is Test {
 
     function testSeaDropAllowlistRejectsQuantityAboveRemainingSelection() public {
         vm.prank(OWNER);
-        genesis.setPhase(NormieGenesisMinter.Phase.Allowlist);
+        genesis.setPhase(GenesisMinterBase.Phase.Allowlist);
         uint256[] memory aliceSnapshot = _ids(101, 102, 103);
         uint256[] memory selected = _ids(103, 101);
         bytes32[] memory proof = new bytes32[](0);
@@ -315,7 +409,7 @@ contract NormieGenesisMinterTest is Test {
         vm.prank(SEA_DROP);
         vm.expectRevert(
             abi.encodeWithSelector(
-                NormieGenesisMinter.InsufficientAllowlistNormies.selector, ALICE, 2, 1
+                GenesisMinterBase.InsufficientAllowlistNormies.selector, ALICE, 2, 1
             )
         );
         genesis.mintSeaDrop(ALICE, 2);
@@ -328,7 +422,7 @@ contract NormieGenesisMinterTest is Test {
 
         vm.prank(ALICE);
         vm.expectRevert(
-            abi.encodeWithSelector(NormieGenesisMinter.NormieNotInSnapshot.selector, 201)
+            abi.encodeWithSelector(GenesisMinterBase.NormieNotInSnapshot.selector, 201)
         );
         genesis.selectAllowlistNormies(aliceSnapshot, selected, proof);
     }
@@ -340,7 +434,7 @@ contract NormieGenesisMinterTest is Test {
 
         vm.prank(BOB);
         vm.expectRevert(
-            abi.encodeWithSelector(NormieGenesisMinter.InvalidSnapshotProof.selector, BOB)
+            abi.encodeWithSelector(GenesisMinterBase.InvalidSnapshotProof.selector, BOB)
         );
         genesis.selectAllowlistNormies(bobSnapshot, selected, proof);
     }
@@ -355,7 +449,7 @@ contract NormieGenesisMinterTest is Test {
     function testCannotSetZeroSeaDrop() public {
         vm.prank(OWNER);
         vm.expectRevert(
-            abi.encodeWithSelector(NormieGenesisMinter.InvalidSeaDrop.selector, address(0))
+            abi.encodeWithSelector(GenesisMinterBase.InvalidSeaDrop.selector, address(0))
         );
         genesis.setSeaDrop(address(0));
     }
@@ -428,7 +522,7 @@ contract NormieGenesisMinterTest is Test {
         g.mintPublic(3); // BOB caps street 0 at its 3-plot limit
 
         vm.prank(BOB);
-        vm.expectRevert(abi.encodeWithSelector(NormieGenesisMinter.NoVacantPlot.selector, BOB));
+        vm.expectRevert(abi.encodeWithSelector(GenesisMinterBase.NoVacantPlot.selector, BOB));
         g.mintPublic(1); // no street left where BOB is under its cap
     }
 
