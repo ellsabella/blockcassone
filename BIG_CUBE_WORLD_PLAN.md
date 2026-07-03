@@ -195,6 +195,25 @@ edge-point identity. This is the crux that makes move/merge coherent.
 - **Big Cube page performance** — heavy wallet scenes (200+ NFTs) cause slow loads
   + rAF "handler took too long" violations; relies on the Reset button to recover.
   Needs profiling/virtualisation before launch (see memory `big_cube_performance`).
+- **Chain indexer / off-chain cache (Big Cube data layer)** — the Big Cube's data
+  hydration (`viewer/chain-cubes.js` `loadChainMintRecords`) **re-scans the whole
+  world every load**: for `cubeId = 1 … nextCubeId` it issues `resolvedCubeData` +
+  `ownerOf` + (Normies) `rawImageData` — ~3 eth_calls/cube, batched in chunks of
+  100 but with **no caching between loads**, so a full 4096 world ≈ 12k calls each
+  time, and on a mainnet-fork RPC key the Normie image-byte re-fetch burns quota.
+  **Action item: build an indexer** that follows mint/move/merge/customize events
+  incrementally and serves a compact cached snapshot (cubeId → slot/owner/seed/
+  source/art), so Big Cube load is O(changed) not O(world) and rendering stops
+  pulling from chain. Virtualisation decides *what* renders; the indexer decides
+  *where the data comes from* — the two are complementary and should share the same
+  record shape. Sits behind the `/api/chain-rpc` proxy seam (`renderer/server.js`).
+  **Concurrency is the real driver, not just per-load cost:** `renderer/server.js`
+  is an explicit single-threaded *dev* server, and every visitor re-scans the whole
+  world (~12k eth_calls at 4096) through it to one RPC key — so N concurrent Big
+  Cube visitors ≈ N×12k eth_calls (100 users ≈ 1.2M → rate-limit death + cost). The
+  indexer must therefore be a **shared cached data service**: follow events once,
+  serve every visitor one cacheable JSON snapshot (CDN-frontable) with ~0 per-user
+  RPC. Client-side render virtualisation/chunking does nothing for this axis.
 - **`movesEnabled` production gate** — ~RESOLVED by the SeaDrop ownership-decoupling:
   minting no longer requires transferring CubeNFT ownership to the minter (it's the
   `genesisMinter` role now), so a human/admin can stay owner and call `setMovesEnabled`
@@ -241,3 +260,56 @@ edge-point identity. This is the crux that makes move/merge coherent.
   Don't pre-generate/upload the full 10k.
 - Customization **source allow-list policy** (CC0 registry `data/cc0-projects.json`)
   — still open for collections beyond Brainrot.
+
+## Indexer design (Big Cube data layer)
+
+**Status:** spec only — build *after* the cube/biome rework (don't harden data infra
+against a moving render target). No contract changes required to start.
+
+### Core principle: fat events → log-follower + lazy art cache
+Contracts cannot push to the indexer — the EVM has no network I/O; `emit` only writes
+a log into the block. The indexer **pulls**: it backfills with `eth_getLogs` and
+streams live logs over a WebSocket `eth_subscribe("logs", …)` (that subscription is
+the practical "push" — the RPC node streams new logs as blocks mine). The win is that
+our events are already **self-sufficient**: they carry the whole mutable record, so
+the indexer needs **zero `eth_call`s** to reconstruct a cube. Heavy *immutable* art is
+never emitted (gas + redundant); events carry a cheap pointer/hash and the indexer
+materialises the bytes **once per unique id, cached forever**.
+
+Replaces `viewer/chain-cubes.js` `loadChainMintRecords()` (today: full-world scan,
+~3 eth_calls/cube, no cache) — see memory `indexer_action_item`.
+
+### Event → indexed field mapping (all already emitted)
+| Record field | Source event | Notes |
+|---|---|---|
+| owner | ERC-721 `Transfer(from,to,cubeId)` | current owner = last transfer; standard |
+| slot, seed, sourceKind, sourceContract, sourceTokenId, agentic, agentId | `CubeNFT.CubeMinted` | near-full `CubeData` in one log |
+| mintedAt, sourceChainId | (log block ts / known chain) | free, not emitted |
+| slot change | `CubeNFT.CubeMoved(cubeId,fromSlot,toSlot,owner)` | mutable slot |
+| merge | `CubeNFT.StreetMerged(streetTokenId,owner,street,occ)` | street collapse |
+| re-base | `CubeNFT.CubeCustomized` + `CubeMintController.CubeCustomizedWithPayload(…,payloadHash)` | new source + payload hash |
+| agentic binding | `AgentStatusRegistry.AgentBindingUpdated(srcContract,srcTokenId,agentic,agentId,updatedAt)` | follow logs |
+| non-normie payload commit | `NonNormieArtStore.NonNormiePayloadRecorded`, `BrainrotGenesisMinter.SourcePayloadCommitted(sourceId,payloadHash)` | links id → art blob |
+| **flattened tonal payload (400 B)** | *not emitted* — fetch once by hash/pointer, cache | immutable |
+| **normie raw image bytes** | *not emitted* — fetch once per normieId from NormiesStorage, cache | immutable |
+| **derived traits** (colour=axis, geometry=plane, edge-points) | *computed* from seed+slot via the JS twins | no contract read |
+
+### Pipeline (Node/TS service on the VPS)
+1. **Backfill** `eth_getLogs` from the deploy block for
+   `[CubeNFT, CubeMintController, NonNormieArtStore, AgentStatusRegistry]`.
+2. **Live** WebSocket `eth_subscribe("logs", {address, topics})`.
+3. **Decode → upsert** one record per `cubeId` (owner, slot, source, seed, agentic,
+   payloadHash). All from logs — no `eth_call`s for the record.
+4. **Lazy art cache** — first sighting of a `payloadHash`/`normieId` → one fetch of the
+   bytes → store on disk/blob permanently (immutable, so never re-fetch).
+5. **Serve** a snapshot JSON (or tiny read API) behind a CDN. The viewer reads *that*
+   instead of the chain → ~0 RPC per user (the concurrency fix: N viewers ≠ N×12k
+   calls). Keep the record shape identical to `chain-cubes.js recordFromChain` so the
+   viewer's existing consumers are unchanged.
+6. **Reorg/finality** (mainnet): treat the last N blocks as tentative, re-read the
+   affected range on reorg. Irrelevant on the dev anvil fork.
+
+### Optional contract tweak (not required)
+Include the SSTORE2 **pointer** (not just `payloadHash`) in the payload/customize
+events so the indexer reads art bytes directly without a lookup call. Marginal — do
+not gate the design on it.
