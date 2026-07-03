@@ -77,6 +77,7 @@ async function loadChainConfig() {
         maxCubes: Math.max(1, Math.min(4096, Number(raw?.maxCubes || 4096))),
         directRpc: Boolean(raw?.directRpc),
         agentStatusRegistry: normalizeAddress(raw?.agentStatusRegistry),
+        useSnapshot: Boolean(raw?.useSnapshot),
       };
     })
     .catch(() => ({ enabled: false }));
@@ -168,10 +169,75 @@ function recordFromChain(config, cubeId, owner, dataHex) {
   };
 }
 
+// Read the indexer's cached world snapshot (data/world-snapshot.json). Returns
+// the record array, or null if missing/unusable so the caller falls back to a
+// live chain scan. Guards against a stale snapshot from a different deployment.
+async function loadSnapshotRecords(config) {
+  try {
+    const res = await fetch('/data/world-snapshot.json', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const snap = await res.json();
+    if (!snap || !Array.isArray(snap.records)) return null;
+    if (snap.cubeNft && config.cubeNft &&
+        String(snap.cubeNft).toLowerCase() !== String(config.cubeNft).toLowerCase()) {
+      console.warn('[chain-cubes] snapshot cubeNft mismatch — ignoring stale snapshot');
+      return null;
+    }
+    return snap.records;
+  } catch (err) {
+    console.warn('[chain-cubes] snapshot read failed', err);
+    return null;
+  }
+}
+
+// Hydrate .art for normie-sourced records by batching rawImageData (immutable
+// per normieId). Shared by the snapshot fast-path; the chain scan hydrates
+// inline. Goes away once the indexer serves art (M4).
+async function hydrateNormieArt(config, records) {
+  const normieRecords = records.filter(r =>
+    r && r.sourceKind === 'normie' && Number.isInteger(Number(r.source?.tokenId))
+  );
+  const chunkSize = 100;
+  for (let offset = 0; offset < normieRecords.length; offset += chunkSize) {
+    const chunk = normieRecords.slice(offset, offset + chunkSize);
+    const rawCalls = chunk.map(record => ({
+      to: config.normieStorage,
+      data: calldata(SELECTORS.rawImageData, record.source.tokenId),
+    }));
+    try {
+      const rawRows = await batchCall(config, rawCalls);
+      for (let i = 0; i < chunk.length; i++) {
+        const id = Number(chunk[i].source.tokenId);
+        const raw = decodeAbiBytes(rawRows[i]);
+        chunk[i].art = compactNormieArtFromRaw({
+          id, raw, traits: null,
+          agentic: Boolean(chunk[i]?.agentic),
+          agentId: chunk[i]?.agentId || '',
+        });
+      }
+    } catch (err) {
+      console.warn('[chain-cubes] snapshot Normie art hydration failed', err);
+    }
+  }
+}
+
 export async function loadChainMintRecords() {
   const config = await loadChainConfig();
   if (!config.enabled) return { enabled: false, records: [] };
   const hydrateStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+  // Fast path: read the indexer's cached snapshot instead of scanning the chain
+  // (~3 eth_calls/cube). Falls back to the scan if it's missing or stale.
+  if (config.useSnapshot) {
+    const snapRecords = await loadSnapshotRecords(config);
+    if (snapRecords) {
+      await hydrateNormieArt(config, snapRecords);
+      const snapEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      recordHydration(snapEnd - hydrateStart, snapRecords.length);
+      return { enabled: true, config, records: snapRecords };
+    }
+    console.warn('[chain-cubes] useSnapshot set but no usable snapshot — scanning chain');
+  }
 
   const nextHex = await call(config, config.cubeNft, SELECTORS.nextCubeId);
   const nextCubeId = Math.max(1, Math.min(config.maxCubes + 1, numberWord(words(nextHex)[0])));

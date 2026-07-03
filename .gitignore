@@ -4,3 +4,6 @@ contracts/out/
 broadcast/
 node_modules/
 dist/
+
+# generated indexer snapshot (local/fork state)
+data/world-snapshot.json
