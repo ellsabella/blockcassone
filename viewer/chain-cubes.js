@@ -61,7 +61,7 @@ function decodeAbiBytes(hex) {
 
 async function loadChainConfig() {
   if (configCache) return configCache;
-  configCache = fetch('/data/chain-config.json')
+  configCache = fetch('/data/chain-config.json', { cache: 'no-store' })
     .then(res => res.ok ? res.json() : null)
     .then(raw => {
       const cubeNft = normalizeAddress(raw?.cubeNft);
@@ -91,11 +91,11 @@ async function rpc(config, payload) {
   if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
   const data = await res.json();
   if (Array.isArray(payload)) {
+    // Tolerant: a reverting call (e.g. ownerOf/resolvedCubeData of a burned cube
+    // after a merge) yields null for that row, so the caller can skip it rather
+    // than failing the whole batch.
     const rows = data.slice().sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0));
-    return rows.map(row => {
-      if (row?.error) throw new Error(row.error.message || JSON.stringify(row.error));
-      return row.result;
-    });
+    return rows.map(row => (row?.error ? null : row.result));
   }
   if (data?.error) throw new Error(data.error.message || JSON.stringify(data.error));
   return data.result;
@@ -136,6 +136,7 @@ function recordFromChain(config, cubeId, owner, dataHex) {
     slot,
     wallet: owner,
     sourceKind,
+    sourceKindNumber, // 1=normie, 2=external, 3=merged street
     source: {
       chain: numberWord(row[7]) === 1 ? 'ethereum' : `chain-${numberWord(row[7])}`,
       chainId: numberWord(row[7]),
@@ -180,6 +181,7 @@ export async function loadChainMintRecords() {
 
     const recordStart = records.length;
     for (let i = 0; i < chunk.length; i++) {
+      if (!ownerRows[i] || !dataRows[i]) continue; // burned/nonexistent (e.g. merged-away) cube
       const owner = addressWord(words(ownerRows[i])[0]);
       const record = recordFromChain(config, chunk[i], owner, dataRows[i]);
       if (record) records.push(record);

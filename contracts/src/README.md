@@ -25,15 +25,21 @@ Important current direction:
   when present, otherwise mint-time snapshot.
 - Non-Normie flattened art payloads are prototype/future-update infrastructure,
   not the genesis production mint path.
-- Placement is currently simple slot occupancy, with plot, street, neighbourhood, and region derived from the slot. Final placement is expected to become mutable world state.
+- Placement is **mutable world state**: slots are assigned at mint by the
+  allocator in `NormieGenesisMinter` (anchor-then-wrap, ≤3/wallet/street), and
+  holders can relocate (`moveCube`) or merge whole streets (`mergeStreet`)
+  post-mint. Plot, street, neighbourhood, region, and environment are all derived
+  from the slot. See [`WORLD_MECHANICS.md`](../../WORLD_MECHANICS.md) for the full
+  functional reference.
 - Production source policy has shifted to a Normie-only genesis mint. Allowlist
   wallets mint their snapshot Normies, then the public phase mints unclaimed
   snapshot Normie sources until the `4096` cube supply cap is reached.
 - CC0 and owned-art sources move to a post-mint update flow.
 
-Likely future contracts:
+World mechanics (allocation, environment, population, merge, move) are **built
+into `CubeNFT` + `NormieGenesisMinter` + `lib/CubeEnv.sol`**, not a separate
+world contract. Likely future contracts:
 
-- `CubeWorld.sol` or `WorldState.sol`: plot occupancy, movement, environments, population counters, placement-policy checks, and consolidation.
 - `NormieSnapshotRegistry.sol`: snapshot-root and matched Normie consumption.
 - `SourceAssignment.sol`: allowlist/public Normie source assignment helpers.
 - Future update registry/contracts: approved CC0 and owner-verified update payloads.

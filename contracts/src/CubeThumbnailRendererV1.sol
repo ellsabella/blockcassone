@@ -3,13 +3,15 @@ pragma solidity ^0.8.26;
 
 import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import { CubeNFT } from "./CubeNFT.sol";
+import { StrBuf } from "./lib/StrBuf.sol";
+import { NonNormieArt } from "./NonNormieArt.sol";
 
 interface IThumbnailNormieRawImageStorage {
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
 }
 
 interface IThumbnailNonNormieArtStore {
-    function payloadForCube(uint256 cubeId) external view returns (bytes memory);
+    function imageBytesForCube(uint256 cubeId) external view returns (bytes memory);
 }
 
 // Swappable render modules (see contracts/src/render/). The orchestrator holds
@@ -18,6 +20,7 @@ interface IThumbnailNonNormieArtStore {
 interface ICubeHilbertGeometry {
     function motifLayout(uint256 slot) external pure returns (uint256);
     function mainAxis(uint256 slot) external pure returns (uint256);
+    function sideAxis(uint256 slot) external pure returns (uint256);
 }
 
 interface ICubeFrameLayer {
@@ -27,61 +30,150 @@ interface ICubeFrameLayer {
         returns (string memory);
 }
 
+interface ICubeWalkerLayer {
+    function render(bytes memory raw, bytes32 seed, string memory figCol, string memory sideCol)
+        external
+        pure
+        returns (string memory);
+}
+
 contract CubeThumbnailRendererV1 {
     using Strings for uint256;
+    using StrBuf for bytes;
 
     CubeNFT public immutable cubes;
     address public immutable normieStorage;
     address public immutable nonNormieStore;
     ICubeHilbertGeometry public immutable geometry;
     ICubeFrameLayer public immutable frame;
+    ICubeWalkerLayer public immutable walker;
 
     constructor(
         CubeNFT cubes_,
         address normieStorage_,
         address nonNormieStore_,
         address geometry_,
-        address frame_
+        address frame_,
+        address walker_
     ) {
         cubes = cubes_;
         normieStorage = normieStorage_;
         nonNormieStore = nonNormieStore_;
         geometry = ICubeHilbertGeometry(geometry_);
         frame = ICubeFrameLayer(frame_);
+        walker = ICubeWalkerLayer(walker_);
     }
 
     function thumbnailSVG(uint256 tokenId) public view returns (string memory) {
         CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
-        bytes memory raw = _rawImageBytes(data, tokenId);
-        string memory labelPath = _labelPath(data.sourceTokenId);
-        string memory bitmapPath = _bitmapPath(raw);
-        string memory outlinePath = _outlinePath(raw, data.sourceTokenId);
-        uint256 axis = geometry.mainAxis(uint256(data.slot));
-        uint256 layout = geometry.motifLayout(uint256(data.slot));
-        string memory planeColor = _colour(axis);
+        return _renderSVG(data, _rawImageBytes(data, tokenId));
+    }
+
+    /// @notice Render the thumbnail SVG for arbitrary art with no stored cube. The
+    ///         customization UI passes the target cube's `seed` + `slot`, the new
+    ///         source's `sourceTokenId`, and a 400-byte 2-bit tonal payload, and
+    ///         gets back the exact SVG that re-basing onto that art would store.
+    ///         Stateless and free (view) — for live previews.
+    function previewThumbnailSVG(
+        bytes32 seed,
+        uint32 slot,
+        uint256 sourceTokenId,
+        bytes calldata tonalPayload
+    ) external view returns (string memory) {
+        CubeNFT.CubeData memory data;
+        data.seed = seed;
+        data.slot = slot;
+        data.sourceTokenId = sourceTokenId;
+        return _renderSVG(data, NonNormieArt.toBinaryBitmap(tonalPayload));
+    }
+
+    function _renderSVG(CubeNFT.CubeData memory data, bytes memory raw)
+        private
+        view
+        returns (string memory)
+    {
+        // This assembler keeps only data + raw live; each piece recomputes its own
+        // (cheap) intermediates in its own frame. Holding the six path/colour
+        // locals here overflows the legacy stack (no via-IR). View-only, so the
+        // recomputation is free.
         return string.concat(
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200">',
-            '<rect width="1200" height="1200" fill="#020203"/>',
-            _thumbnailDefs(bitmapPath, outlinePath, labelPath, axis, planeColor),
-            _forestLayer(data, planeColor, layout),
-            _thumbnailBitmap(bitmapPath, outlinePath, labelPath, planeColor),
-            _glassLayer(raw, data.sourceTokenId),
-            frame.render(data.seed, data.sourceTokenId, layout, axis),
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200"><rect width="1200" height="1200" fill="#020203"/>',
+            _svgDefs(data, raw),
+            _svgForest(data),
+            _svgBitmap(data, raw),
+            _svgTail(data, raw)
+        );
+    }
+
+    // Tail layers split out so neither concat holds too many inlined frames.
+    function _svgTail(CubeNFT.CubeData memory data, bytes memory raw) private view returns (string memory) {
+        return string.concat(
+            _svgWalkers(data, raw),
+            _glassLayer(raw, data.sourceTokenId, data.seed),
+            _svgLabel(data),
+            _svgFrame(data),
             "</svg>"
         );
     }
 
+    function _svgDefs(CubeNFT.CubeData memory data, bytes memory raw) private view returns (string memory) {
+        uint256 axis = geometry.mainAxis(uint256(data.slot));
+        return _thumbnailDefs(
+            _bitmapPath(raw),
+            _outlinePath(raw, data.sourceTokenId),
+            _labelPath(data.sourceTokenId),
+            _colour(axis)
+        );
+    }
+
+    function _svgForest(CubeNFT.CubeData memory data) private view returns (string memory) {
+        // Forest strands are Normie-only; non-Normie / customized cubes show only
+        // the bare edge-point orbs (drawn by the frame layer).
+        if (data.sourceKind != cubes.SOURCE_KIND_NORMIE()) return "";
+        return _forestLayer(
+            data,
+            _colour(geometry.mainAxis(uint256(data.slot))),
+            geometry.motifLayout(uint256(data.slot))
+        );
+    }
+
+    function _svgBitmap(CubeNFT.CubeData memory data, bytes memory raw) private view returns (string memory) {
+        return _thumbnailBitmap(
+            _bitmapPath(raw),
+            _outlinePath(raw, data.sourceTokenId),
+            _colour(geometry.mainAxis(uint256(data.slot)))
+        );
+    }
+
+    function _svgLabel(CubeNFT.CubeData memory data) private view returns (string memory) {
+        return _labelLayer(_labelPath(data.sourceTokenId), _colour(geometry.mainAxis(uint256(data.slot))));
+    }
+
+    function _svgFrame(CubeNFT.CubeData memory data) private view returns (string memory) {
+        uint256 axis = geometry.mainAxis(uint256(data.slot));
+        uint256 layout = geometry.motifLayout(uint256(data.slot));
+        return frame.render(data.seed, data.sourceTokenId, layout, axis);
+    }
+
     function _colour(uint256 axis) private pure returns (string memory) {
-        if (axis == 0) return "#ff1919"; // x -> red
-        if (axis == 1) return "#38ff4d"; // y -> green
-        return "#244cff"; // z -> blue
+        // Pure axis hues (match the WebGL cube + the line-lab tuning). The neon
+        // filter is hue-preserving, so the glow stays the source hue.
+        if (axis == 0) return "#ff0000"; // x -> red
+        if (axis == 1) return "#00ff00"; // y -> green
+        return "#0000ff"; // z -> blue
     }
 
     // Returns a 200-byte (40x40, 1 bit/cell) binary silhouette for either source
     // kind. Normie art is already binary; non-Normie art is a 400-byte 2-bit
     // tonal-band payload (NonNormieArtStore) thresholded to a silhouette.
     function _rawImageBytes(CubeNFT.CubeData memory data, uint256 cubeId) private view returns (bytes memory) {
-        if (data.sourceKind == cubes.SOURCE_KIND_NORMIE()) {
+        // A merged-street token carries its leader cube's source facts, so its
+        // thumbnail renders the leader exactly. Genesis leaders are Normies, so
+        // street tokens fetch from the Normie store (v1 assumes Normie leaders).
+        if (
+            data.sourceKind == cubes.SOURCE_KIND_NORMIE()
+                || data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET()
+        ) {
             if (normieStorage == address(0)) return "";
             try IThumbnailNormieRawImageStorage(normieStorage).getTokenRawImageData(data.sourceTokenId) returns (
                 bytes memory raw
@@ -92,10 +184,12 @@ contract CubeThumbnailRendererV1 {
             }
         }
         if (data.sourceKind == cubes.SOURCE_KIND_EXTERNAL_ERC721() && nonNormieStore != address(0)) {
-            try IThumbnailNonNormieArtStore(nonNormieStore).payloadForCube(cubeId) returns (
-                bytes memory payload
+            // External / customized cubes render the store's recorded art (the
+            // 2-bit tonal payload collapsed to the 1-bit bitmap). Empty if none.
+            try IThumbnailNonNormieArtStore(nonNormieStore).imageBytesForCube(cubeId) returns (
+                bytes memory bitmap
             ) {
-                return _tonalToBinary(payload);
+                return bitmap;
             } catch {
                 return "";
             }
@@ -103,41 +197,14 @@ contract CubeThumbnailRendererV1 {
         return "";
     }
 
-    // Threshold a 400-byte 2-bit tonal-band payload (4 luminance bands, 40x40,
-    // row-major) into the 200-byte 1-bit silhouette the bitmap/outline path
-    // expects: any non-zero band is foreground. Bit layout matches _bitmapBit
-    // (index = row*40+col; byte index/8; bit 7-(index%8)).
-    function _tonalToBinary(bytes memory payload) private pure returns (bytes memory) {
-        if (payload.length != 400) return "";
-        bytes memory out = new bytes(200);
-        for (uint256 cell = 0; cell < 1600; cell++) {
-            uint8 band = uint8(uint8(payload[cell >> 2]) >> ((cell & 3) << 1)) & 3;
-            if (band > 0) {
-                out[cell >> 3] |= bytes1(uint8(1) << uint8(7 - (cell & 7)));
-            }
-        }
-        return out;
-    }
-    // Build a diagonal feColorMatrix "values" string that boosts the cube's own
-    // colour channel (axis 0=R,1=G,2=B) by `dom` and the other two by `sec`, with
-    // alpha `a`. This makes the neon glow saturate in the cube's hue (red cubes
-    // glow red, blue glow blue) instead of washing toward white.
-    function _neonVals(uint256 axis, string memory dom, string memory sec, string memory a)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory r = axis == 0 ? dom : sec;
-        string memory g = axis == 1 ? dom : sec;
-        string memory b = axis == 2 ? dom : sec;
-        return string.concat(r, " 0 0 0 0 0 ", g, " 0 0 0 0 0 ", b, " 0 0 0 0 0 ", a, " 0");
-    }
-
+    // Builds the whole <defs> block. Uses the shared O(n) StrBuf (each buf.cat is
+    // a shallow call) rather than one giant string.concat, which overflowed the
+    // legacy stack limit. All neon filters are hue-preserving (the source stroke
+    // supplies the colour), so they're shared across axes.
     function _thumbnailDefs(
         string memory bitmapPath,
         string memory outlinePath,
         string memory labelPath,
-        uint256 axis,
         string memory planeColor
     )
         private
@@ -145,90 +212,52 @@ contract CubeThumbnailRendererV1 {
         returns (string memory)
     {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
-        return string.concat(
-            '<defs>',
-            '<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/>',
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
-            '<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/>',
-            '<feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
-            '<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/>',
-            '<feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge>',
-            "</filter>",
-            '<filter id="nt" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".26" result="r"/>',
-            '<feColorMatrix in="r" type="matrix" values="', _neonVals(axis, "9", "1.8", ".92"), '" result="rc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".52" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "7", "1.4", ".38"), '" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".74" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "4.5", "1", ".025"), '" result="mc"/>',
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="rc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
-            '<filter id="t" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation=".8" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="7 0 0 0 0 0 7 0 0 0 0 0 7 0 0 0 0 0 1 0" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 .85 0" result="mc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="8" result="w"/>',
-            '<feColorMatrix in="w" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .45 0" result="wc"/>',
-            '<feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
-            '<filter id="gf" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB">',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/>',
-            '<feColorMatrix in="t" type="matrix" values="', _neonVals(axis, "6", "1.8", "1"), '" result="tc"/>',
-            '<feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/>',
-            '<feColorMatrix in="m" type="matrix" values="', _neonVals(axis, "4", "1.3", ".62"), '" result="mc"/>',
-            '<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>',
-            "</filter>",
-            // Forest particle clouds: feTurbulence masked, coloured by the source
-            // (so red/green/blue cubes get matching particles), then bloomed.
-            '<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">',
-            '<feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/>',
-            '<feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/>',
-            '<feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/>',
-            '<feGaussianBlur in="clip" stdDeviation="5" result="gr"/>',
-            // dim the clipped speckle so the cloud is soft, not a dense blob
-            '<feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/>',
-            '<feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge>',
-            "</filter>",
-            // Soft radial gradient filling the forest particle clouds: fades to
-            // transparent so the turbulence speckles read as a soft diffuse cloud
-            // (not a hard blob). Plane colour; no white sparkle pass.
-            '<radialGradient id="cg"><stop offset="0" stop-color="', planeColor, '" stop-opacity=".82"/>',
-            '<stop offset=".4" stop-color="', planeColor, '" stop-opacity=".36"/>',
-            '<stop offset="1" stop-color="', planeColor, '" stop-opacity="0"/></radialGradient>',
-            '<path id="n" d="',
-            bitmapPath,
-            '"/>',
-            '<path id="o" d="',
-            outlinePath,
-            '"/>',
-            '<path id="l" d="',
-            labelPath,
-            '"/>',
-            "</defs>"
+        bytes memory buf = StrBuf.alloc(
+            8192 + bytes(bitmapPath).length + bytes(outlinePath).length + bytes(labelPath).length
         );
+        buf.cat('<defs>');
+        // shared white-ish glow tiers #g / #p / #h
+        buf.cat('<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/><feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/><feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        buf.cat('<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/><feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/><feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        buf.cat('<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/><feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge></filter>');
+        // Figure neon (#nfN): wide soft + tight bright, screen-composited (additive)
+        // and hue-preserving. Applied inside scale(25), so stdDeviation is in grid
+        // units. #wfN softens the white core. (Tuned in tmp/line-lab.html.)
+        buf.cat('<filter id="nfN" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".1" result="wb"/><feColorMatrix in="wb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .1 0" result="w"/><feGaussianBlur in="SourceGraphic" stdDeviation=".11" result="tb"/><feColorMatrix in="tb" type="matrix" values="10.5 0 0 0 0 0 10.5 0 0 0 0 0 10.5 0 0 0 0 0 2.7 0" result="t"/><feBlend in="w" in2="t" mode="screen"/></filter>');
+        buf.cat('<filter id="wfN" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".015"/></filter>');
+        // Frame neon (#nfF / #wfF) — drawn in raw 1200-space, so stdDeviation is in
+        // viewBox px (= grid units x 25).
+        buf.cat('<filter id="nfF" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="wb"/><feColorMatrix in="wb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .8 0" result="w"/><feGaussianBlur in="SourceGraphic" stdDeviation="2.75" result="tb"/><feColorMatrix in="tb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1.35 0" result="t"/><feBlend in="w" in2="t" mode="screen"/></filter>');
+        buf.cat('<filter id="wfF" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".75"/></filter>');
+        // Edge-orb glow (#pfP) + soft white core (#pwP), raw 1200-space.
+        buf.cat('<filter id="pfP" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.75" result="b"/><feColorMatrix in="b" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 1.05 0"/></filter>');
+        buf.cat('<filter id="pwP" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".875"/></filter>');
+        // Glass soft-halo (#gGlass): glowG1/G2=1 -> no colour amplification, just a
+        // faint blurred halo under the source. The screen blend supplies brightness.
+        buf.cat('<filter id="gGlass" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="1.25" result="m"/><feColorMatrix in="m" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .62 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".5" result="t"/><feColorMatrix in="t" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0" result="tc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
+        // forest particle filter #pc + plane-colour cloud gradient #cg
+        buf.cat('<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/><feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/><feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/><feGaussianBlur in="clip" stdDeviation="5" result="gr"/><feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/><feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>');
+        buf.cat('<radialGradient id="cg"><stop offset="0" stop-color="');
+        buf.cat(planeColor);
+        buf.cat('" stop-opacity=".82"/><stop offset=".4" stop-color="');
+        buf.cat(planeColor);
+        buf.cat('" stop-opacity=".36"/><stop offset="1" stop-color="');
+        buf.cat(planeColor);
+        buf.cat('" stop-opacity="0"/></radialGradient>');
+        // path data referenced by <use>
+        buf.cat('<path id="n" d="');
+        buf.cat(bitmapPath);
+        buf.cat('"/><path id="o" d="');
+        buf.cat(outlinePath);
+        buf.cat('"/><path id="l" d="');
+        buf.cat(labelPath);
+        buf.cat('"/></defs>');
+        return buf.str();
     }
 
     function _thumbnailBitmap(
         string memory bitmapPath,
         string memory outlinePath,
-        string memory labelPath,
         string memory planeColor
     )
         private
@@ -244,27 +273,38 @@ contract CubeThumbnailRendererV1 {
             );
         }
 
+        // Figure neon stack (tuned in tmp/line-lab.html). Inside scale(25), so
+        // widths/dash are in grid units. fill="none" on the group keeps the open
+        // outline subpaths from filling; the faint #n fill is set explicitly.
+        // Layers: screen glow · glow beads (a dot per cell-vertex) · bright core ·
+        // soft white core · white beads.
         return string.concat(
-            '<g transform="translate(100 85) scale(25)" stroke-linecap="round" stroke-linejoin="round">',
-            '<use href="#n" fill="',
-            planeColor,
-            '" opacity=".003"/>',
-            '<use href="#o" fill="none" stroke="',
-            planeColor,
-            '" stroke-width=".38" opacity=".90" filter="url(#nt)"/>',
-            '<use href="#o" fill="none" stroke="',
-            planeColor,
-            '" stroke-width=".27" opacity=".95" filter="url(#gf)"/>',
-            '<use href="#o" fill="none" stroke="#fff" stroke-width=".026" opacity=".92"/>',
-            bytes(labelPath).length == 0
-                ? ""
-                : string.concat(
-                    '<use href="#l" fill="none" stroke="',
-                    planeColor,
-                    '" stroke-width=".32" opacity=".88" filter="url(#nt)"/><use href="#l" fill="none" stroke="',
-                    planeColor,
-                    '" stroke-width=".26" opacity=".95" filter="url(#gf)"/><use href="#l" fill="none" stroke="#fff" stroke-width=".028" opacity=".84"/>'
-                ),
+            '<g transform="translate(100 85) scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">',
+            '<use href="#n" fill="', planeColor, '" opacity=".003"/>',
+            '<use href="#o" stroke="', planeColor, '" stroke-width=".146" filter="url(#nfN)"/>',
+            '<use href="#o" stroke="', planeColor, '" stroke-width=".245" stroke-dasharray="0 1" opacity=".88" filter="url(#nfN)"/>',
+            '<use href="#o" stroke="', planeColor, '" stroke-width=".105" opacity=".95"/>',
+            '<use href="#o" stroke="#fff" stroke-width=".04" opacity=".9" filter="url(#wfN)"/>',
+            '<use href="#o" stroke="#fff" stroke-width=".1" stroke-dasharray="0 1" opacity=".89" filter="url(#wfN)"/>',
+            "</g>"
+        );
+    }
+
+    // The Normie number (#l), drawn as its own layer ON TOP of the glass so it
+    // stays legible. Same neon treatment as the figure lines.
+    function _labelLayer(string memory labelPath, string memory planeColor)
+        private
+        pure
+        returns (string memory)
+    {
+        if (bytes(labelPath).length == 0) return "";
+        return string.concat(
+            '<g transform="translate(100 85) scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">',
+            '<use href="#l" stroke="', planeColor, '" stroke-width=".146" filter="url(#nfN)"/>',
+            '<use href="#l" stroke="', planeColor, '" stroke-width=".245" stroke-dasharray="0 1" opacity=".88" filter="url(#nfN)"/>',
+            '<use href="#l" stroke="', planeColor, '" stroke-width=".105" opacity=".95"/>',
+            '<use href="#l" stroke="#fff" stroke-width=".04" opacity=".9" filter="url(#wfN)"/>',
+            '<use href="#l" stroke="#fff" stroke-width=".1" stroke-dasharray="0 1" opacity=".89" filter="url(#wfN)"/>',
             "</g>"
         );
     }
@@ -314,42 +354,11 @@ contract CubeThumbnailRendererV1 {
         }
     }
 
-    // --- O(n) string builder ---------------------------------------------------
-    // Repeated `s = string.concat(s, piece)` in the dense per-cell path loops is
-    // O(n^2) (each append re-copies the whole growing string) and is the main
-    // MemoryOOG risk for detailed Normies. These helpers append into a pre-sized
-    // bytes buffer in O(total length). The caller MUST reserve `cap` >= total
-    // appended bytes + 32: the word-aligned copy can write up to 31 bytes of slack
-    // past the logical end, which must stay inside the reserved buffer.
-    function _bufNew(uint256 cap) private pure returns (bytes memory buf) {
-        buf = new bytes(cap); // zero-filled; capacity reserved past the length word
-        assembly {
-            mstore(buf, 0) // logical length starts at 0 (capacity stays allocated)
-        }
-    }
-
-    function _bufCat(bytes memory buf, string memory piece) private pure {
-        assembly {
-            let len := mload(buf)
-            let plen := mload(piece)
-            let dst := add(add(buf, 0x20), len)
-            let src := add(piece, 0x20)
-            for { let i := 0 } lt(i, plen) { i := add(i, 0x20) } {
-                mstore(add(dst, i), mload(add(src, i)))
-            }
-            mstore(buf, add(len, plen)) // advance logical length
-        }
-    }
-
-    function _bufStr(bytes memory buf) private pure returns (string memory) {
-        return string(buf);
-    }
-
     function _bitmapPath(bytes memory raw) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
         // <= 40 rows * 20 runs * ~15 bytes/run; 24KB leaves ample slack.
-        bytes memory buf = _bufNew(24576);
+        bytes memory buf = StrBuf.alloc(24576);
         for (uint256 row = 0; row < 40; row++) {
             uint256 col = 0;
             while (col < 40) {
@@ -363,8 +372,7 @@ contract CubeThumbnailRendererV1 {
                     col++;
                 }
 
-                _bufCat(
-                    buf,
+                buf.cat(
                     string.concat(
                         "M",
                         start.toString(),
@@ -379,144 +387,158 @@ contract CubeThumbnailRendererV1 {
                 );
             }
         }
-        return _bufStr(buf);
+        return buf.str();
     }
 
     function _outlinePath(bytes memory raw, uint256 normieId) private pure returns (string memory) {
         if (raw.length != 200) return "";
 
         // <= 1600 cells * 4 edges * 8 bytes = 51200; 64KB leaves ample slack.
-        bytes memory buf = _bufNew(65536);
+        bytes memory buf = StrBuf.alloc(65536);
         for (uint256 row = 0; row < 40; row++) {
             for (uint256 col = 0; col < 40; col++) {
                 if (!_bitmapBit(raw, row * 40 + col)) continue;
                 if (_isLabelCell(normieId, row, col)) continue;
                 if (!_bitmapBitAt(raw, row, col, 0, -1)) {
-                    _bufCat(buf, string.concat("M", col.toString(), " ", row.toString(), "v1"));
+                    buf.cat(string.concat("M", col.toString(), " ", row.toString(), "v1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, 0, 1)) {
-                    _bufCat(buf, string.concat("M", (col + 1).toString(), " ", row.toString(), "v1"));
+                    buf.cat(string.concat("M", (col + 1).toString(), " ", row.toString(), "v1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, -1, 0)) {
-                    _bufCat(buf, string.concat("M", col.toString(), " ", row.toString(), "h1"));
+                    buf.cat(string.concat("M", col.toString(), " ", row.toString(), "h1"));
                 }
                 if (!_bitmapBitAt(raw, row, col, 1, 0)) {
-                    _bufCat(buf, string.concat("M", col.toString(), " ", (row + 1).toString(), "h1"));
+                    buf.cat(string.concat("M", col.toString(), " ", (row + 1).toString(), "h1"));
                 }
             }
         }
-        return _bufStr(buf);
+        return buf.str();
     }
 
     // --- Glass voxel cells -----------------------------------------------------
-    // Infill some Normie cells with luminous translucent panes, the way the 3D
-    // viewer assigns voxel alpha: 3x3 density bands -> interior dimming -> centre
-    // falloff -> per-cell variety -> visibility floor. Colour comes from a static
-    // RGB light field (red upper-right, green lower-left, blue top), saturated
-    // near a single light and blooming to white where they overlap. All maths is
-    // fixed-point (band/mult/falloff/variety/intensity x1000; light field x10000)
-    // and was validated against the float prototype before porting.
-    function _glassLayer(bytes memory raw, uint256 normieId) private pure returns (string memory) {
+    // Bright translucent "glass" cells filling the silhouette body, screen-blended
+    // (mix-blend-mode) so they read as luminous glass over the dark cube, not dim
+    // alpha-over fills. Colour comes from an RGB light field whose three lights sit
+    // on an evenly-spaced 120deg triangle; the triangle's ROTATION is derived from
+    // the cube seed, so every cube lands the rainbow differently. Tuned in
+    // tmp/line-lab.html; lab grid-units x25 -> these viewBox-px constants.
+    uint256 private constant GLASS_CONV_MIN = 5;   // glass where >= this many of 8 neighbours are on (body)
+    uint256 private constant GLASS_COVERAGE = 38;  // % of body cells kept (seeded scatter)
+    int256 private constant GLASS_CX = 600;        // light-triangle centre (viewBox px)
+    int256 private constant GLASS_CY = 585;
+    int256 private constant GLASS_SPREAD = 400;    // light distance from centre (16 grid x25)
+    uint256 private constant GLASS_R2 = 160000;    // light falloff R^2 ((16 grid x25)^2)
+
+    function _glassLayer(bytes memory raw, uint256 normieId, bytes32 seed)
+        private
+        pure
+        returns (string memory)
+    {
         if (raw.length != 200) return "";
-        (uint256 cMin, uint256 cMax, uint256 rMin, uint256 rMax, bool any) = _bbox(raw);
-        if (!any) return "";
 
-        // Cap the cell count so a pathological/noisy bitmap can't overflow the
-        // fixed buffer. A real coherent silhouette keeps far fewer than this
-        // (the prototype #1250 kept ~120); 600 * ~190 bytes/cell < the 128KB cap.
-        bytes memory buf = _bufNew(131072);
-        _bufCat(buf, '<g filter="url(#g)" stroke-width="1.6">');
+        // Per-cube rainbow orientation: pick ONE of 6 evenly-spaced rotations
+        // (0,60,..,300) from the hashed seed. Six discrete, well-separated angles
+        // read as clearly distinct cube-to-cube — a fine 0..359 rotation barely
+        // varies for nearby/structured seeds. Precompute the rotated lights once.
+        uint256 rot = (uint256(keccak256(abi.encodePacked(seed))) % 6) * 60;
+        uint256[6] memory L = _lights(rot);
+
+        bytes memory buf = StrBuf.alloc(131072);
+        // screen blend = bright luminous glass over the dark cube (alpha-over would
+        // only darken). glowG1/G2 = 1 in the lab -> the filter is just a faint soft
+        // halo (no colour amplification).
+        buf.cat('<g filter="url(#gGlass)" stroke-width="0.3" style="mix-blend-mode:screen">');
         uint256 kept = 0;
-        for (uint256 row = 0; row < 40 && kept < 600; row++) {
-            for (uint256 col = 0; col < 40 && kept < 600; col++) {
-                if (!_bitmapBit(raw, row * 40 + col)) continue;
-                if (_isLabelCell(normieId, row, col)) continue;
-                uint256 intensity = _glassIntensity(raw, col, row, cMin, cMax, rMin, rMax);
-                if (intensity < 80) continue; // floor raised 70->80: ~10% fewer cells (drops the dimmest)
-                _bufCat(buf, _glassRect(col, row, intensity));
-                kept++;
-            }
+        for (uint256 i = 0; i < 1600 && kept < 760; i++) {
+            if (!_bitmapBit(raw, i)) continue;
+            uint256 col = i % 40;
+            uint256 row = i / 40;
+            if (_isLabelCell(normieId, row, col)) continue;
+            if (_neigh8(raw, col, row) < GLASS_CONV_MIN) continue; // body cell
+            if (uint256(keccak256(abi.encodePacked(seed, col, row))) % 100 >= GLASS_COVERAGE) continue;
+            buf.cat(_glassRect(col, row, L));
+            kept++;
         }
-        _bufCat(buf, "</g>");
-        return _bufStr(buf);
+        buf.cat("</g>");
+        return buf.str();
     }
 
-    // intensity (x1000) = bandAlpha * interiorMult * falloff * variety / 1e9.
-    // Built incrementally (v = v * factor / 1000) to keep the stack shallow.
-    function _glassIntensity(
-        bytes memory raw,
-        uint256 col,
-        uint256 row,
-        uint256 cMin,
-        uint256 cMax,
-        uint256 rMin,
-        uint256 rMax
-    )
-        private
-        pure
-        returns (uint256 v)
-    {
-        {
-            uint256 nb = _neigh8(raw, col, row); // 3x3 on-count (excl. centre)
-            uint256 band = nb <= 1 ? 0 : (nb - 1 > 6 ? 6 : nb - 1);
-            v = _bandAlpha(band);
-        }
-        {
-            uint256 interiorSum = _cellOn(raw, int256(col) - 1, int256(row))
-                + _cellOn(raw, int256(col) + 1, int256(row))
-                + _cellOn(raw, int256(col), int256(row) - 1)
-                + _cellOn(raw, int256(col), int256(row) + 1);
-            v = v * _interiorMult(interiorSum) / 1000;
-        }
-        {
-            uint256 tA = cMax > cMin ? 1000 * _absd(2 * col, cMin + cMax) / (cMax - cMin) : 0;
-            uint256 tB = rMax > rMin ? 1000 * _absd(2 * row, rMin + rMax) / (rMax - rMin) : 0;
-            uint256 t = tA > tB ? tA : tB;
-            uint256 sub = 850 * t / 1000;
-            v = v * (sub >= 850 ? 50 : 900 - sub) / 1000;
-        }
-        {
-            uint256 variety = 350 + (uint256(keccak256(abi.encodePacked(col, row))) % 1000) * 650 / 1000;
-            v = v * variety / 1000;
+    // Per-cell glass brightness (x1000): DENSER cells (more on-neighbours) glow
+    // brighter, so the scattered glass reads the form's body and sparse edge
+    // cells stay faint. A per-cell variety factor keeps it from looking
+    // mechanical. No centre bias (that caused the old central bunching).
+    function _glassDensity(uint256 col, uint256 row) private pure returns (uint256 v) {
+        // Opacity x1000, shaped to the reference's measured distribution: mostly
+        // faint (median ~.14), with a steep bright tail (top ~10% ramps to ~.64).
+        // Random per cell so the bright cells scatter rather than cluster.
+        uint256 r = uint256(keccak256(abi.encodePacked(col, row))) % 1000;
+        if (r <= 900) {
+            uint256 t = r * 1000 / 900; // 0..1000
+            v = 65 + (t * t / 1000) * 255 / 1000; // .065 .. .320
+        } else {
+            v = 320 + (r - 900) * 320 / 100; // .320 .. ~.636
         }
     }
 
-    function _glassRect(uint256 col, uint256 row, uint256 intensity)
+    function _glassRect(uint256 col, uint256 row, uint256[6] memory L)
         private
         pure
-        returns (string memory rect)
+        returns (string memory)
     {
-        uint256 x = 100 + col * 25 + 2;
-        uint256 y = 85 + row * 25 + 2;
-        (uint256 R, uint256 G, uint256 B) = _lightColor(100 + col * 25 + 12, 85 + row * 25 + 12);
-        uint256 op = intensity * 2 > 1000 ? 1000 : intensity * 2;
-        uint256 bodyOp = intensity > 880 ? 880 : intensity;
-        rect = string.concat(
-            '<rect x="', x.toString(), '" y="', y.toString(), '" width="21" height="21" fill="rgb(',
-            R.toString(), ",", G.toString(), ",", B.toString(), ')" fill-opacity="', _dec2(bodyOp),
-            '" stroke="rgb(', _lerp255(R), ",", _lerp255(G), ",", _lerp255(B),
-            ')" stroke-opacity="', _dec2(op), '"/>'
+        uint256 d = _glassDensity(col, row);  // 65..636 (x1000)
+        uint256 fo = 580 + d * 550 / 1000;    // fillBase .58 + density x fillScale .55
+        if (fo > 1000) fo = 1000;             // fillCap 1
+        uint256 so = fo * 16 / 10;            // rim opacity = fill x rimOp 1.6
+        if (so > 1000) so = 1000;
+        return string.concat(
+            '<rect x="', (101 + col * 25).toString(), '" y="', (86 + row * 25).toString(),
+            '" width="20" height="20" fill="rgb(', _glassFill(col, row, L), ')" fill-opacity="', _dec2(fo),
+            '" stroke="#fff" stroke-opacity="', _dec2(so), '"/>'
         );
-        if (intensity > 500) {
-            rect = string.concat(
-                rect,
-                '<circle cx="', (x + 6).toString(), '" cy="', (y + 6).toString(),
-                '" r="1.1" fill="#fff" opacity="', _dec2(op / 2), '"/>'
-            );
-        }
     }
 
-    // RGB light field at canvas (px,py). Each light contributes a = R^2/(R^2+d^2)
-    // to its channel (R=520). Saturate to the dominant hue, then blend toward
-    // white only where several lights strongly overlap.
-    function _lightColor(uint256 px, uint256 py)
+    // "r,g,b" fill for a glass cell: light field -> saturate (bold hue) -> colour
+    // gain (brightness) -> whiten. Matches the lab's col3().
+    function _glassFill(uint256 col, uint256 row, uint256[6] memory L)
+        private
+        pure
+        returns (string memory)
+    {
+        (uint256 R, uint256 G, uint256 B) = _lightColor(112 + col * 25, 97 + row * 25, L);
+        (uint256 r, uint256 g, uint256 b) = _glassTone(R, G, B);
+        return string.concat(r.toString(), ",", g.toString(), ",", b.toString());
+    }
+
+    function _glassTone(uint256 R, uint256 G, uint256 B)
+        private
+        pure
+        returns (uint256, uint256, uint256)
+    {
+        int256 luma = (299 * int256(R) + 587 * int256(G) + 114 * int256(B)) / 1000;
+        return (_glassChan(int256(R), luma), _glassChan(int256(G), luma), _glassChan(int256(B), luma));
+    }
+
+    // saturate 3, then colour gain 2.6 * (1 - whiten .1) = 2.34, then + 255*.1.
+    // Signed: a saturated channel can dip below 0 before clamping.
+    function _glassChan(int256 c, int256 luma) private pure returns (uint256) {
+        int256 v = (luma + (c - luma) * 3) * 2340 / 1000 + 26;
+        if (v < 0) return 0;
+        if (v > 255) return 255;
+        return uint256(v);
+    }
+
+    // RGB light field at (px,py) for the rotated triangle L = [Rx,Ry,Gx,Gy,Bx,By].
+    // Each light a = R2/(R2+d^2); saturate to the dominant hue, then whiten where
+    // lights overlap (scaled by whiteBloom .15).
+    function _lightColor(uint256 px, uint256 py, uint256[6] memory L)
         private
         pure
         returns (uint256 R8, uint256 G8, uint256 B8)
     {
-        uint256 r = _lightA(px, py, 1010, 300);
-        uint256 g = _lightA(px, py, 210, 770);
-        uint256 b = _lightA(px, py, 660, 120);
+        uint256 r = _lightA(px, py, L[0], L[1]);
+        uint256 g = _lightA(px, py, L[2], L[3]);
+        uint256 b = _lightA(px, py, L[4], L[5]);
         uint256 mx = r;
         if (g > mx) mx = g;
         if (b > mx) mx = b;
@@ -525,7 +547,7 @@ contract CubeThumbnailRendererV1 {
         uint256 G = g * 10000 / mx;
         uint256 B = b * 10000 / mx;
         uint256 sum = r + g + b;
-        uint256 white = sum > 13000 ? (sum - 13000) / 2 : 0;
+        uint256 white = (sum > 13000 ? (sum - 13000) / 2 : 0) * 15 / 100; // whiteBloom .15
         if (white > 10000) white = 10000;
         R = R + (10000 - R) * white / 10000;
         G = G + (10000 - G) * white / 10000;
@@ -538,12 +560,34 @@ contract CubeThumbnailRendererV1 {
     function _lightA(uint256 px, uint256 py, uint256 lx, uint256 ly) private pure returns (uint256) {
         uint256 dx = px > lx ? px - lx : lx - px;
         uint256 dy = py > ly ? py - ly : ly - py;
-        return 270400 * 10000 / (270400 + dx * dx + dy * dy);
+        return GLASS_R2 * 10000 / (GLASS_R2 + dx * dx + dy * dy);
     }
 
-    // bright hue-tinted rim: v lerped 30% toward 255.
-    function _lerp255(uint256 v) private pure returns (string memory) {
-        return (v + (255 - v) * 3 / 10).toString();
+    // Three light positions on a 120deg triangle, rotated `rot` degrees about the
+    // centre. L = [Rx,Ry, Gx,Gy, Bx,By] in viewBox px.
+    function _lights(uint256 rot) private pure returns (uint256[6] memory L) {
+        L[0] = _lpos(GLASS_CX, _cos1e4(rot));       L[1] = _lpos(GLASS_CY, _sin1e4(rot));
+        L[2] = _lpos(GLASS_CX, _cos1e4(rot + 120)); L[3] = _lpos(GLASS_CY, _sin1e4(rot + 120));
+        L[4] = _lpos(GLASS_CX, _cos1e4(rot + 240)); L[5] = _lpos(GLASS_CY, _sin1e4(rot + 240));
+    }
+
+    function _lpos(int256 centre, int256 trig1e4) private pure returns (uint256) {
+        return uint256(centre + GLASS_SPREAD * trig1e4 / 10000); // 200..1000, always > 0
+    }
+
+    // sin(deg) x10000 via Bhaskara I: sin x ~= 4x(180-x)/(40500 - x(180-x)).
+    function _sin1e4(uint256 deg) private pure returns (int256) {
+        deg = deg % 360;
+        bool neg = deg >= 180;
+        uint256 x = neg ? deg - 180 : deg;    // 0..179
+        uint256 num = 4 * x * (180 - x);      // 0..32400
+        uint256 den = 40500 - x * (180 - x);  // 32400..40500
+        int256 s = int256(num * 10000 / den); // 0..10000
+        return neg ? -s : s;
+    }
+
+    function _cos1e4(uint256 deg) private pure returns (int256) {
+        return _sin1e4(deg + 90);
     }
 
     // Format an x1000 opacity fixed-point (0..1000) as an SVG decimal (".07", ".88", "1").
@@ -551,6 +595,21 @@ contract CubeThumbnailRendererV1 {
         if (fp >= 1000) return "1";
         uint256 d = fp / 10;
         return string.concat(".", d < 10 ? "0" : "", d.toString());
+    }
+
+    // --- Stone walkers --------------------------------------------------------
+    // Delegated to CubeWalkerLayer (split out to stay under the 24KB code limit).
+    // Front (unique-plane) walks emerge mid-body in the figure axis colour; side
+    // walks (the doubled sideAxis colour) enter from opposite edges then tour.
+    // Applies to ANY art on the planes (Normie or customized) — not Normie-only
+    // like the forest; walker.render returns "" when there's no body to crawl.
+    function _svgWalkers(CubeNFT.CubeData memory data, bytes memory raw) private view returns (string memory) {
+        return walker.render(
+            raw,
+            data.seed,
+            _colour(geometry.mainAxis(uint256(data.slot))),
+            _colour(geometry.sideAxis(uint256(data.slot)))
+        );
     }
 
     function _neigh8(bytes memory raw, uint256 col, uint256 row) private pure returns (uint256 nb) {
@@ -565,47 +624,6 @@ contract CubeThumbnailRendererV1 {
     function _cellOn(bytes memory raw, int256 c, int256 r) private pure returns (uint256) {
         if (c < 0 || c >= 40 || r < 0 || r >= 40) return 0;
         return _bitmapBit(raw, uint256(r) * 40 + uint256(c)) ? 1 : 0;
-    }
-
-    function _bbox(bytes memory raw)
-        private
-        pure
-        returns (uint256 cMin, uint256 cMax, uint256 rMin, uint256 rMax, bool any)
-    {
-        cMin = 39;
-        rMin = 39;
-        for (uint256 row = 0; row < 40; row++) {
-            for (uint256 col = 0; col < 40; col++) {
-                if (!_bitmapBit(raw, row * 40 + col)) continue;
-                any = true;
-                if (col < cMin) cMin = col;
-                if (col > cMax) cMax = col;
-                if (row < rMin) rMin = row;
-                if (row > rMax) rMax = row;
-            }
-        }
-    }
-
-    function _bandAlpha(uint256 band) private pure returns (uint256) {
-        if (band == 0) return 1000;
-        if (band == 1) return 840;
-        if (band == 2) return 680;
-        if (band == 3) return 500;
-        if (band == 4) return 340;
-        if (band == 5) return 200;
-        return 80;
-    }
-
-    function _interiorMult(uint256 interiorSum) private pure returns (uint256) {
-        if (interiorSum == 0) return 1000;
-        if (interiorSum == 1) return 871;
-        if (interiorSum == 2) return 671;
-        if (interiorSum == 3) return 430;
-        return 160;
-    }
-
-    function _absd(uint256 a, uint256 b) private pure returns (uint256) {
-        return a > b ? a - b : b - a;
     }
 
     function _labelPath(uint256 normieId) private pure returns (string memory) {

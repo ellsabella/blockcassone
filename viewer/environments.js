@@ -14,6 +14,7 @@ import { createMeshGL, createPlane } from '../renderer/src/geometry.js';
 import { createInstancedBillboardMesh } from './instanced-mesh.js';
 import { hash1, walkTree, V } from './tree-walker.js';
 import { worldPerp } from './materials/line-mesh.js';
+import { environmentIdForStreet } from '../core/cube-env.js';
 
 function mulberry32(seed) {
   let s = seed >>> 0;
@@ -42,9 +43,10 @@ export const ENVIRONMENTS = [
 // Final order-5 world will switch to neighbourhood — single accessor keeps
 // that a one-line change.
 export function environmentForSlot(motifIdx) {
+  // Street-level, rarity-weighted, byte-identical to the on-chain CubeEnv so the
+  // 3D biome matches the Environment metadata trait (see core/cube-env.js).
   const street = Math.floor((Number(motifIdx) || 0) / 8);
-  const idx = Math.floor(hash1([street + 1, 911, 37]) * ENVIRONMENTS.length) % ENVIRONMENTS.length;
-  return ENVIRONMENTS[idx];
+  return ENVIRONMENTS[environmentIdForStreet(street)];
 }
 
 export function environmentNameForSlot(motifIdx) {

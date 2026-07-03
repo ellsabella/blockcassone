@@ -47,6 +47,32 @@ contract CubeHilbertGeometry {
         return b;
     }
 
+    // The DOUBLED axis: both outer plane quads ([0,1,2,3] and [4,5,6,7]) are
+    // parallel and share this axis (the octree's `c`, = the b3 basis whose normal
+    // both outer planes carry). It's the colour of the majority of stone walkers.
+    // Same octree walk as mainAxis; returns `c` instead of `b`.
+    function sideAxis(uint256 motif) external pure returns (uint256) {
+        uint256 levels = HILBERT_ORDER - 1;
+        uint256 a = 0;
+        uint256 b = 1;
+        uint256 c = 2;
+        for (uint256 i = 0; i < levels; i++) {
+            uint256 d = (motif / (8 ** (levels - 1 - i))) % 8;
+            uint256 na;
+            uint256 nb;
+            uint256 nc;
+            if (d == 3 || d == 4) {
+                (na, nb, nc) = (a, b, c);
+            } else if (d == 1 || d == 2 || d == 5 || d == 6) {
+                (na, nb, nc) = (c, a, b);
+            } else {
+                (na, nb, nc) = (b, c, a);
+            }
+            (a, b, c) = (na, nb, nc);
+        }
+        return c;
+    }
+
     // Motif verts [2,3,4,5] (the unique plane) via per-motif octree descent.
     function _uniqueVerts(uint256 slot)
         private

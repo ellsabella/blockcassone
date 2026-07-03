@@ -40,6 +40,7 @@ contract CubeMintControllerTest is Test {
         attestationVerifier = new FlatteningAttestation(OWNER, signer);
         controller = new CubeMintController(cubes, artStore, attestationVerifier);
 
+        cubes.setCustomizer(address(controller)); // authorize re-base (while test still owns cubes)
         cubes.transferOwnership(address(controller));
         artStore.transferOwnership(address(controller));
 
@@ -215,6 +216,74 @@ contract CubeMintControllerTest is Test {
             attestation,
             signature
         );
+    }
+
+    function testCustomizeCubeRebasesSourceAndPayload() public {
+        // A Normie genesis cube owned by MINTER.
+        normies.mint(MINTER, 500);
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(500, 7, bytes32("seed"));
+
+        bytes memory payload = _samplePayload();
+        FlatteningAttestation.Attestation memory attestation =
+            _attestation(MINTER, address(externalNft), 1, 1, payload, block.timestamp + 1 days);
+        bytes memory signature = _sign(attestation);
+
+        vm.prank(MINTER);
+        controller.customizeCube(cubeId, address(externalNft), 1, payload, attestation, signature);
+
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
+        assertEq(data.sourceKind, cubes.SOURCE_KIND_EXTERNAL_ERC721()); // adopts the new source
+        assertEq(data.sourceContract, address(externalNft));
+        assertEq(data.sourceTokenId, 1);
+        assertEq(data.payloadVersion, NonNormieArt.PAYLOAD_VERSION_TONAL_BANDS_2BIT);
+        assertEq(data.slot, 7); // slot preserved
+        assertEq(data.seed, bytes32("seed")); // identity preserved
+        assertEq(artStore.payloadForCube(cubeId), payload);
+        assertTrue(attestationVerifier.nonceUsed(MINTER, 1));
+    }
+
+    function testCustomizeCubeIsRepeatable() public {
+        normies.mint(MINTER, 500);
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(500, 7, bytes32("seed"));
+
+        bytes memory p1 = _samplePayload();
+        FlatteningAttestation.Attestation memory a1 =
+            _attestation(MINTER, address(externalNft), 1, 1, p1, block.timestamp + 1 days);
+        // Sign before pranking: _sign() calls hashAttestation() (an external call),
+        // which would otherwise consume the vm.prank meant for customizeCube.
+        bytes memory s1 = _sign(a1);
+        vm.prank(MINTER);
+        controller.customizeCube(cubeId, address(externalNft), 1, p1, a1, s1);
+
+        bytes memory p2 = _samplePayload();
+        p2[10] = bytes1(uint8(0x55)); // different art
+        FlatteningAttestation.Attestation memory a2 =
+            _attestation(MINTER, address(externalNft), 2, 1, p2, block.timestamp + 1 days);
+        a2.nonce = 2; // fresh nonce
+        bytes memory s2 = _sign(a2); // sign before prank (see above)
+        vm.prank(MINTER);
+        controller.customizeCube(cubeId, address(externalNft), 2, p2, a2, s2);
+
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
+        assertEq(data.sourceTokenId, 2); // latest source wins
+        assertEq(artStore.payloadForCube(cubeId), p2); // latest art wins
+    }
+
+    function testCustomizeRejectsNonCubeOwner() public {
+        normies.mint(MINTER, 500);
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(500, 7, bytes32("seed"));
+
+        bytes memory payload = _samplePayload();
+        FlatteningAttestation.Attestation memory attestation =
+            _attestation(OTHER, address(externalNft), 1, 1, payload, block.timestamp + 1 days);
+        bytes memory signature = _sign(attestation);
+
+        vm.prank(OTHER); // OTHER does not own the cube
+        vm.expectRevert(abi.encodeWithSelector(CubeMintController.CubeOwnerMismatch.selector, cubeId, OTHER));
+        controller.customizeCube(cubeId, address(externalNft), 1, payload, attestation, signature);
     }
 
     function _attestation(

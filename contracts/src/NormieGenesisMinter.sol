@@ -20,7 +20,6 @@ contract NormieGenesisMinter is Ownable {
     error InvalidAgentBindingList();
     error InvalidSeaDrop(address seaDrop);
     error InvalidSnapshotProof(address wallet);
-    error InvalidSlot(uint32 slot);
     error InsufficientAllowlistNormies(address minter, uint256 requested, uint256 available);
     error MintClosed();
     error NoAllowlistNormies(address minter);
@@ -66,6 +65,23 @@ contract NormieGenesisMinter is Ownable {
     mapping(uint256 normieId => uint256 agentId) public normieAgentId;
 
     uint256[] private _publicNormies;
+
+    // ---- Plot allocation ----------------------------------------------------
+    // Slots are no longer the global mint order. A new wallet anchors the lowest
+    // street that has no mints yet (spreading wallets one-per-street across the
+    // world); once every street has >= 1 mint we wrap and new wallets backfill the
+    // lowest non-full street. Either way a wallet packs <= 3 plots per street and
+    // spills forward to the next street, so its holdings stay a contiguous run and
+    // a full street ends up shared by ~3 wallets. Maintained in O(1) via a seed
+    // cursor (phase A) + a frontier (phase B / wrap) + a per-wallet pointer.
+    uint32 public constant PLOTS_PER_STREET = 8;
+    uint32 public constant MAX_PER_WALLET_PER_STREET = 3;
+
+    uint32 public seedCursor; // lowest street that may still have zero mints (anchor phase)
+    uint32 public frontierStreet; // lowest street not yet full (used once wrapped)
+    mapping(uint32 street => uint8 filled) public streetFill;
+    mapping(address wallet => uint32 streetPlusOne) public walletStreetPlusOne; // 0 = unset
+    mapping(address wallet => uint8 count) public walletStreetCount; // on the wallet's current street
 
     constructor(CubeNFT cubes_, bytes32 publicSeed_, address initialOwner_)
         Ownable(initialOwner_)
@@ -309,8 +325,7 @@ contract NormieGenesisMinter is Ownable {
         normieClaimed[normieId] = true;
         _removeFromPublicPool(normieId);
 
-        uint32 slot = uint32(mintedCount);
-        if (slot >= totalSlots) revert InvalidSlot(slot);
+        uint32 slot = _allocateSlot(minter);
         bytes32 seed = keccak256(abi.encode(publicSeed, minter, normieId, slot, mintPhase));
         mintedCount++;
 
@@ -319,6 +334,66 @@ contract NormieGenesisMinter is Ownable {
             ? cubes.mintSnapshotNormieCubeFor(minter, normieId, slot, seed)
             : cubes.mintSnapshotNormieCubeForWithAgent(minter, normieId, slot, seed, agentId);
         emit GenesisCubeMinted(cubeId, minter, normieId, slot, mintPhase);
+    }
+
+    error NoVacantPlot(address wallet);
+
+    /// @dev Places one plot for `wallet`. A new wallet anchors a fresh street (or
+    ///      wraps to the frontier); an existing wallet continues its run, spilling
+    ///      to the next street when it hits MAX_PER_WALLET_PER_STREET. Pointers only
+    ///      move forward, so it stays O(1) amortized.
+    function _allocateSlot(address wallet) private returns (uint32 slot) {
+        uint32 totalStreets = (totalSlots + PLOTS_PER_STREET - 1) / PLOTS_PER_STREET; // ceil
+
+        uint32 s;
+        uint8 cnt;
+        if (walletStreetPlusOne[wallet] == 0) {
+            s = _newWalletHome(totalStreets); // fresh anchor, or wrapped frontier
+        } else {
+            s = walletStreetPlusOne[wallet] - 1;
+            cnt = walletStreetCount[wallet];
+            if (cnt >= MAX_PER_WALLET_PER_STREET) {
+                s += 1; // wallet hit its per-street cap -> advance its run
+                cnt = 0;
+            }
+        }
+        // Skip any full streets in the run (filled by others while the wallet was away).
+        while (s < totalStreets && streetFill[s] >= _streetCapacity(s)) {
+            s += 1;
+            cnt = 0;
+        }
+        if (s >= totalStreets) revert NoVacantPlot(wallet); // wallet capped on every remaining street
+
+        uint8 fill = streetFill[s];
+        slot = s * PLOTS_PER_STREET + fill;
+        streetFill[s] = fill + 1;
+        walletStreetPlusOne[wallet] = s + 1;
+        walletStreetCount[wallet] = cnt + 1;
+
+        // Keep the frontier (the wrap target) at the lowest non-full street.
+        while (frontierStreet < totalStreets && streetFill[frontierStreet] >= _streetCapacity(frontierStreet)) {
+            frontierStreet += 1;
+        }
+    }
+
+    /// @dev Plots a street can hold: PLOTS_PER_STREET, except a final partial
+    ///      street when totalSlots isn't a multiple of PLOTS_PER_STREET.
+    function _streetCapacity(uint32 street) private view returns (uint8) {
+        uint256 used = uint256(street) * PLOTS_PER_STREET;
+        if (used >= totalSlots) return 0;
+        uint256 remaining = totalSlots - used;
+        return remaining >= PLOTS_PER_STREET ? uint8(PLOTS_PER_STREET) : uint8(remaining);
+    }
+
+    /// @dev Home street for a brand-new wallet: while any street has no mints,
+    ///      anchor the lowest such street (spread); once all are seeded, wrap and
+    ///      backfill from the lowest non-full street.
+    function _newWalletHome(uint32 totalStreets) private returns (uint32) {
+        while (seedCursor < totalStreets && streetFill[seedCursor] > 0) {
+            seedCursor += 1;
+        }
+        if (seedCursor < totalStreets) return seedCursor; // a still-empty street to anchor
+        return frontierStreet; // wrapped: every street has >= 1 mint
     }
 
     function _removeFromPublicPool(uint256 normieId) private {

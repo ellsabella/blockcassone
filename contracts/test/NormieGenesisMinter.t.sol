@@ -360,6 +360,98 @@ contract NormieGenesisMinterTest is Test {
         genesis.setSeaDrop(address(0));
     }
 
+    // ---- Plot allocation ----------------------------------------------------
+
+    function testAllocationSpreadsNewWalletsAcrossFreshStreets() public {
+        (NormieGenesisMinter g, CubeNFT c) = _world(32); // 4 streets
+        address[4] memory w = [address(0xE0), address(0xE1), address(0xE2), address(0xE3)];
+        for (uint256 i = 0; i < 4; i++) {
+            vm.prank(w[i]);
+            uint256 cubeId = g.mintPublic(1)[0];
+            assertEq(_slot(c, cubeId), uint32(i * 8)); // plot 0 of a fresh street each
+        }
+    }
+
+    function testAllocationSingleWalletRunSpillsThreePerStreet() public {
+        (NormieGenesisMinter g, CubeNFT c) = _world(32);
+        vm.prank(BOB);
+        uint256[] memory ids = g.mintPublic(8);
+
+        uint32[8] memory expected = [uint32(0), 1, 2, 8, 9, 10, 16, 17]; // 3+3+2, contiguous run
+        for (uint256 i = 0; i < 8; i++) {
+            assertEq(_slot(c, ids[i]), expected[i]);
+        }
+        assertEq(g.streetFill(0), 3);
+        assertEq(g.streetFill(1), 3);
+        assertEq(g.streetFill(2), 2);
+        assertEq(g.walletStreetCount(BOB), 2);
+    }
+
+    function testAllocationWrapsAfterAllStreetsSeeded() public {
+        (NormieGenesisMinter g, CubeNFT c) = _world(16); // 2 streets
+
+        vm.prank(address(0xC0));
+        uint256 a = g.mintPublic(1)[0];
+        vm.prank(address(0xC1));
+        uint256 b = g.mintPublic(1)[0];
+        assertEq(_slot(c, a), 0); // street 0
+        assertEq(_slot(c, b), 8); // street 1 (fresh anchor)
+
+        // Every street now has >= 1 mint -> wrap and backfill the frontier.
+        vm.prank(address(0xC2));
+        uint256 d = g.mintPublic(1)[0];
+        assertEq(_slot(c, d), 1); // street 0, plot 1
+    }
+
+    function testAllocationSharesStreetAcrossWalletsCappedAtThree() public {
+        (NormieGenesisMinter g, CubeNFT c) = _world(8); // 1 street
+
+        vm.prank(address(0xD0));
+        uint256[] memory a = g.mintPublic(3);
+        vm.prank(address(0xD1));
+        uint256[] memory b = g.mintPublic(3);
+        vm.prank(address(0xD2));
+        uint256[] memory d = g.mintPublic(2);
+
+        assertEq(_slot(c, a[0]), 0);
+        assertEq(_slot(c, a[2]), 2);
+        assertEq(_slot(c, b[0]), 3);
+        assertEq(_slot(c, b[2]), 5);
+        assertEq(_slot(c, d[0]), 6);
+        assertEq(_slot(c, d[1]), 7);
+        assertEq(g.streetFill(0), 8); // 3 + 3 + 2, shared by three wallets
+    }
+
+    function testAllocationRevertsWhenWalletCapsOnlyStreet() public {
+        (NormieGenesisMinter g,) = _world(8); // 1 street
+        vm.prank(BOB);
+        g.mintPublic(3); // BOB caps street 0 at its 3-plot limit
+
+        vm.prank(BOB);
+        vm.expectRevert(abi.encodeWithSelector(NormieGenesisMinter.NoVacantPlot.selector, BOB));
+        g.mintPublic(1); // no street left where BOB is under its cap
+    }
+
+    function _world(uint32 slots) private returns (NormieGenesisMinter g, CubeNFT c) {
+        c = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), slots, OWNER);
+        g = new NormieGenesisMinter(c, bytes32("alloc-seed"), OWNER);
+        vm.prank(OWNER);
+        c.transferOwnership(address(g));
+
+        uint256[] memory ids = new uint256[](slots);
+        for (uint256 i = 0; i < slots; i++) {
+            ids[i] = 5000 + i;
+        }
+        vm.prank(OWNER);
+        g.addSnapshotNormies(OWNER, ids);
+        vm.prank(OWNER);
+        g.finalizeSnapshot();
+    }
+
+    function _slot(CubeNFT c, uint256 cubeId) private view returns (uint32) {
+        return c.cubeData(cubeId).slot;
+    }
+
     function _add(address wallet, uint256[] memory ids) private {
         vm.prank(OWNER);
         genesis.addSnapshotNormies(wallet, ids);

@@ -16,6 +16,7 @@ interface IAgentStatusRegistry {
 contract CubeNFT is ERC721, Ownable {
     uint8 public constant SOURCE_KIND_NORMIE = 1;
     uint8 public constant SOURCE_KIND_EXTERNAL_ERC721 = 2;
+    uint8 public constant SOURCE_KIND_MERGED_STREET = 3;
 
     struct CubeData {
         uint32 slot;
@@ -54,6 +55,11 @@ contract CubeNFT is ERC721, Ownable {
     error ExternalSourceIsNormie();
     error InvalidAgentBinding(bool agentic, uint256 agentId);
     error NonexistentCube(uint256 cubeId);
+    error MovesDisabled();
+    error NotCubeOwner(uint256 cubeId, address caller);
+    error CannotMoveStreet(uint256 cubeId);
+    error OnlyCustomizer(address caller);
+    error CannotCustomizeStreet(uint256 cubeId);
     error RendererNotSet();
 
     event CubeMinted(
@@ -69,6 +75,15 @@ contract CubeNFT is ERC721, Ownable {
     );
     event RendererUpdated(address indexed oldRenderer, address indexed newRenderer);
     event AgentStatusRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
+    event CubeMoved(uint256 indexed cubeId, uint32 indexed fromSlot, uint32 indexed toSlot, address owner);
+    event MovesEnabledUpdated(bool enabled);
+    event CustomizerUpdated(address indexed oldCustomizer, address indexed newCustomizer);
+    event CubeCustomized(
+        uint256 indexed cubeId,
+        address indexed sourceContract,
+        uint256 sourceTokenId,
+        uint8 payloadVersion
+    );
 
     address public immutable normieContract;
     uint32 public immutable totalSlots;
@@ -76,6 +91,16 @@ contract CubeNFT is ERC721, Ownable {
 
     uint256 private _nextCubeId = 1;
     address public agentStatusRegistry;
+
+    // Post-mint move game. Off during the genesis mint so a moved cube can't land
+    // on a slot the allocator will target (which would brick a mint tx); the owner
+    // flips it on once the mint is done.
+    bool public movesEnabled;
+
+    // Authorized to re-base a cube's displayed source (post-mint customization).
+    // Set to the customization controller, which verifies cube ownership and a
+    // flattening attestation before calling.
+    address public customizer;
 
     mapping(uint256 cubeId => CubeData data) private _cubeData;
     mapping(uint32 slot => uint256 cubeId) public cubeForSlot;
@@ -335,6 +360,194 @@ contract CubeNFT is ERC721, Ownable {
             data.agentic = agentic;
             data.agentId = agentId;
         }
+    }
+
+    // ---- Street merge (8 -> 1) ----------------------------------------------
+    // A wallet that solely owns every occupied plot of a street can merge it into
+    // a single "street" token. The plot cubes are burned, but their CubeData (and
+    // the source/normie mappings) are retained so the street can still be rendered
+    // and so the source assets stay "used". The street token locks all 8 slots.
+
+    struct StreetInfo {
+        uint32 street; // 0 .. (totalSlots / 8 - 1)
+        uint8 occupiedCount; // population: occupied plots that were merged
+        uint256[8] plotCubeIds; // original cubeId per plot (0 = vacant)
+    }
+
+    mapping(uint256 streetTokenId => StreetInfo) private _streetInfo;
+
+    error EmptyStreet(uint32 street);
+    error NotStreetOwner(uint32 street, uint256 cubeId);
+    error StreetAlreadyMerged(uint32 street);
+    error InvalidLeader(uint32 street, uint256 cubeId);
+
+    event StreetMerged(
+        uint256 indexed streetTokenId,
+        address indexed owner,
+        uint32 indexed street,
+        uint8 occupiedCount
+    );
+
+    /// @notice Merge every occupied plot of `street` (all owned by the caller)
+    ///         into one street token. The occupied plot cubes are burned and all
+    ///         8 slots become owned by the new street token.
+    /// @dev Reverts unless the caller solely owns every occupied plot. The leader
+    ///      (street SVG) defaults to the lowest occupied plot. Irreversible in v1,
+    ///      but plot CubeData is preserved so an un-merge could be added later.
+    function mergeStreet(uint32 street) external returns (uint256 streetTokenId) {
+        return _mergeStreet(street, 0);
+    }
+
+    /// @notice Merge `street`, using `leaderCubeId` (which must be an occupied plot
+    ///         of the street, owned by the caller) as the leader whose art drives
+    ///         the street token's SVG. The viewer lets the owner pick the lead.
+    function mergeStreet(uint32 street, uint256 leaderCubeId)
+        external
+        returns (uint256 streetTokenId)
+    {
+        return _mergeStreet(street, leaderCubeId);
+    }
+
+    function _mergeStreet(uint32 street, uint256 requestedLeader)
+        internal
+        returns (uint256 streetTokenId)
+    {
+        uint256 base = uint256(street) * 8;
+        if (base + 8 > totalSlots) revert InvalidSlot(uint32(base));
+
+        uint256[8] memory plots;
+        uint256 occ;
+        uint256 leader;
+        bool leaderFound;
+        for (uint256 k = 0; k < 8; k++) {
+            uint256 cid = cubeForSlot[uint32(base + k)];
+            if (cid == 0) continue;
+            if (_cubeData[cid].sourceKind == SOURCE_KIND_MERGED_STREET) {
+                revert StreetAlreadyMerged(street);
+            }
+            if (ownerOf(cid) != msg.sender) revert NotStreetOwner(street, cid);
+            plots[k] = cid;
+            if (leader == 0) leader = cid; // default: lowest occupied plot leads
+            if (cid == requestedLeader) leaderFound = true;
+            occ++;
+        }
+        if (occ == 0) revert EmptyStreet(street);
+        // An explicit leader must be one of this street's occupied plots.
+        if (requestedLeader != 0) {
+            if (!leaderFound) revert InvalidLeader(street, requestedLeader);
+            leader = requestedLeader;
+        }
+
+        streetTokenId = _nextCubeId++;
+        CubeData memory ld = _cubeData[leader];
+        _cubeData[streetTokenId] = CubeData({
+            slot: ld.slot, // leader's slot drives the street thumbnail (colour/geometry)
+            sourceKind: SOURCE_KIND_MERGED_STREET,
+            rendererVersion: ld.rendererVersion,
+            payloadVersion: ld.payloadVersion,
+            agentic: false,
+            agentId: 0,
+            mintedAt: uint64(block.timestamp),
+            sourceChainId: block.chainid,
+            sourceContract: ld.sourceContract,
+            sourceTokenId: ld.sourceTokenId, // leader Normie -> street SVG thumbnail
+            seed: ld.seed
+        });
+
+        StreetInfo storage si = _streetInfo[streetTokenId];
+        si.street = street;
+        si.occupiedCount = uint8(occ);
+        for (uint256 k = 0; k < 8; k++) {
+            si.plotCubeIds[k] = plots[k];
+            if (plots[k] != 0) _burn(plots[k]); // CubeData retained for rendering
+            cubeForSlot[uint32(base + k)] = streetTokenId; // street locks all 8 slots
+        }
+
+        _safeMint(msg.sender, streetTokenId);
+        emit StreetMerged(streetTokenId, msg.sender, street, uint8(occ));
+    }
+
+    /// @notice CubeData for a (possibly burned) cube, with no ownership check.
+    /// @dev For the renderer to read merged-street plot cubes after they're burned.
+    function cubeDataUnchecked(uint256 cubeId) external view returns (CubeData memory) {
+        return _cubeData[cubeId];
+    }
+
+    /// @notice The street index, population, and 8 plot cube ids (0 = vacant) of a
+    ///         merged-street token.
+    function streetPlots(uint256 streetTokenId)
+        external
+        view
+        returns (uint32 street, uint8 occupiedCount, uint256[8] memory plotCubeIds)
+    {
+        StreetInfo storage si = _streetInfo[streetTokenId];
+        return (si.street, si.occupiedCount, si.plotCubeIds);
+    }
+
+    // ---- Move ----------------------------------------------------------------
+    // The cube keeps its seed (its edge-point identity) but takes a new slot, so
+    // its colour, geometry, street, and environment follow the destination.
+
+    function setMovesEnabled(bool enabled) external onlyOwner {
+        movesEnabled = enabled;
+        emit MovesEnabledUpdated(enabled);
+    }
+
+    /// @notice Move a cube you own to any vacant slot. Merged-street tokens are
+    ///         anchored and cannot be moved.
+    function moveCube(uint256 cubeId, uint32 newSlot) external {
+        if (!movesEnabled) revert MovesDisabled();
+
+        address owner = _ownerOf(cubeId);
+        if (owner == address(0)) revert NonexistentCube(cubeId);
+        if (owner != msg.sender) revert NotCubeOwner(cubeId, msg.sender);
+
+        CubeData storage data = _cubeData[cubeId];
+        if (data.sourceKind == SOURCE_KIND_MERGED_STREET) revert CannotMoveStreet(cubeId);
+        if (newSlot >= totalSlots) revert InvalidSlot(newSlot);
+
+        uint256 occupant = cubeForSlot[newSlot];
+        if (occupant != 0) revert SlotOccupied(newSlot, occupant);
+
+        uint32 oldSlot = data.slot;
+        cubeForSlot[oldSlot] = 0;
+        cubeForSlot[newSlot] = cubeId;
+        data.slot = newSlot;
+
+        emit CubeMoved(cubeId, oldSlot, newSlot, msg.sender);
+    }
+
+    // ---- Customization (post-mint re-base) -----------------------------------
+    // The cube keeps its seed (identity) and slot (location/colour/geometry) but
+    // adopts a new displayed source. Art payload + ownership/attestation checks
+    // live in the customization controller; this only re-bases the source facts.
+
+    function setCustomizer(address newCustomizer) external onlyOwner {
+        emit CustomizerUpdated(customizer, newCustomizer);
+        customizer = newCustomizer;
+    }
+
+    /// @notice Re-base a cube's displayed source. Sets it to an external source
+    ///         with a recorded art payload (`payloadVersion`), preserving seed and
+    ///         slot. Callable only by the customizer.
+    function customizeCubeSource(
+        uint256 cubeId,
+        address sourceContract,
+        uint256 sourceTokenId,
+        uint8 payloadVersion
+    ) external {
+        if (msg.sender != customizer) revert OnlyCustomizer(msg.sender);
+        if (_ownerOf(cubeId) == address(0)) revert NonexistentCube(cubeId);
+
+        CubeData storage data = _cubeData[cubeId];
+        if (data.sourceKind == SOURCE_KIND_MERGED_STREET) revert CannotCustomizeStreet(cubeId);
+
+        data.sourceKind = SOURCE_KIND_EXTERNAL_ERC721;
+        data.sourceContract = sourceContract;
+        data.sourceTokenId = sourceTokenId;
+        data.payloadVersion = payloadVersion;
+
+        emit CubeCustomized(cubeId, sourceContract, sourceTokenId, payloadVersion);
     }
 
     function setRenderer(address newRenderer) external onlyOwner {

@@ -1,0 +1,194 @@
+# Big Cube World Plan
+
+Consolidated, current source of truth for the world mechanics on top of the
+genesis mint. Supersedes the scattered notes in the older plan docs where they
+conflict. Everything here is targeted to be **ready before launch**.
+
+## Vision
+
+- Genesis mint runs through **OpenSea SeaDrop** (trust + rails). SeaDrop only
+  passes `(wallet, quantity)`, so all source assignment is derived on-chain.
+- At mint, a cube's art basis is **on-chain Normie data only**.
+- **Post-mint**, via the webUI, holders can re-base a cube on **any artwork**
+  (PNG/WEBP/JPEG), move it, and merge streets.
+- **Location is first-class** (street → neighbourhood → region) and drives the
+  post-mint game: scatter, move, merge, negotiate.
+
+## Identity model — what's permanent vs mutable
+
+| | Derives | Permanence |
+|---|---|---|
+| `seed` | edge-point fingerprint (`sidePlan`) | **permanent** (the cube's soul) |
+| `sourceTokenId` + raw art | the Normie/artwork shown | permanent at mint; **re-basable** post-mint via customization |
+| `slot` (plot) | geometry, colour (axis), street, environment | **mutable** (move) |
+
+Moving a cube changes its colour/environment/location-styling but keeps its
+edge-point identity. This is the crux that makes move/merge coherent.
+
+## World mechanics
+
+### 1. Plot allocation (shared streets)
+- 4096 cubes ÷ 512 streets = 8/street; with **≤3 per wallet per street**, a full
+  street draws from ~3 wallets → **streets are shared**.
+- A wallet's holdings are kept **together** (a contiguous run of streets), ≤3 per
+  street. Example: 4 cubes → 3 on street A + 1 on street B.
+- Vacancy appears only in the **unminted tail** if the 4096 cap isn't filled.
+- Replaces today's `slot = mintedCount`. Candidate algorithm: per-street fill
+  cursor + per-(wallet,street) ≤3 cap. *(allocation algorithm still to finalize)*
+
+### 2. Environment (biome) — street-level, rarity-weighted
+- One environment per **street**; all 8 plots share it.
+- Deterministic + permanent: `id = weightedPick(keccak(WORLD_SEED, street))`.
+- 6 biomes (`desert, water, grass, forest, mountain, ice`), weights (out of 100):
+  grass 34, forest 30, water 20, desert 12, mountain 3, ice 1.
+- `Environment` metadata trait + renderer biome visuals. JS viewer must mirror
+  the same WORLD_SEED + weights (sidePlan-style parity).
+- **Status: on-chain `CubeEnv` lib + `Environment` trait done; weights confirmed;
+  JS parity pending.**
+
+### 3. Move
+- Holder moves a cube they own from its plot to **any vacant plot** via the UI.
+- `moveCube(cubeId, newSlot)`: verify ownership + newSlot vacant; update the
+  cube's slot + slot→cube mapping. Colour/environment/street follow the new slot.
+- Purpose: drive post-mint activity, consolidate streets for merging, chase
+  scarcer environments, negotiate between holders.
+
+### 4. Merge (8→1 burn → street NFT)
+- Eligibility: wallet is the **sole owner of every occupied plot** on a street
+  (1–8 cubes; remaining plots vacant).
+- One ERC-721 collection with a **cube vs merged-street kind flag**. Merge
+  **captures the plots' data into a street record before burning** the cubes.
+- Street token: SVG of the street "leader"; HTML toggling street↔cube (inspect
+  each cube); `Merged` trait; vacant plots rendered as the street's environment
+  placeholder.
+- `Population` trait = occupied-plot count (single cube = 1).
+
+### 5. Population trait
+- On **all** tokens: `1` for a cube, `N` for a merged street. *(Done for cubes.)*
+
+### 6. Customization (post-mint, any artwork)
+- Re-base a cube on a **flattened bitmap** (the 40×40 source format) of any owned
+  asset or **approved CC0** project. Off-chain flatten → on-chain store.
+- CC0 approved list lives at `data/cc0-projects.json` (needs review).
+
+## WebUI
+
+- **Tab 1 — Explore:** the big cube world (region/neighbourhood/street/cube),
+  wallet focus, 3D detail. Evolve the dev viewer; indexer as read cache only.
+- **Tab 2 — Customize/Manage:** connect wallet → identify usable artworks (owned
+  + approved CC0) → customization flow.
+- **Move flow** + **Merge flow** UIs.
+
+## Build sequence (all pre-launch)
+
+1. **Environment model** — `CubeEnv` + `Environment` trait + weights + JS parity. **✅ DONE**
+2. **Per-street view in the token HTML** — street view, continuous Hilbert spine,
+   V/arrows toggle, gated strictly on `TOKEN.plots`; `preview:street` test tool. **✅ DONE**
+   *(open: biome placeholders don't yet render in the street view, AND their
+   aesthetics need a review — see Biome placeholders below.)*
+3. **Population trait** — `1` cubes, `N` merged. **✅ DONE (cubes)**
+4. **Plot allocation** — **🟡 BUILT, pending WSL test.** Replaces `slot =
+   mintedCount` in `NormieGenesisMinter._consumeAndMint` with `_allocateSlot`:
+   a **new wallet anchors the lowest street with zero mints** (spreads wallets
+   one-per-street across the world); **once every street has ≥1 mint we wrap** and
+   new wallets backfill the lowest non-full street. Either way a wallet packs
+   **≤3 plots/street** and **spills forward** (contiguous run), so a full street
+   ends up shared by ~3 wallets. O(1): `seedCursor` (anchor phase) + `frontierStreet`
+   (wrap) + per-wallet `(street, count)`; `_streetCapacity` handles a non-multiple-
+   of-8 final street. Caveat: togetherness is **per-transaction** (split mints far
+   apart land wherever the cursor then sits). `NoVacantPlot` guards the >1536-per-
+   wallet edge.
+5. **Move** — **🟡 BUILT (contract), pending WSL test; UI later.** `moveCube(cubeId,
+   newSlot)` in `CubeNFT`: owner-only, cube keeps its `seed` but takes a new slot,
+   so colour/geometry/street/environment follow. Gated behind owner-flipped
+   `movesEnabled` (off during mint so a move can't collide with an allocator-
+   targeted slot). Merged-street tokens are anchored (`CannotMoveStreet`); target
+   must be a vacant in-range slot. Frees the old slot for reuse / street
+   consolidation before a merge.
+6. **Merge** — kind flag, 8→1 burn, street-record store, street SVG + HTML,
+   placeholders. *(produces the `TOKEN.plots` the street view consumes)*
+   **🟡 BUILT, pending WSL test.** `mergeStreet(street)` in `CubeNFT`: caller must
+   solely own every occupied plot; occupied plot cubes are burned (CubeData +
+   source/normie mappings retained), all 8 slots lock to the new street token.
+   Leader = lowest occupied plot (drives the SVG thumbnail). Irreversible v1 (data
+   preserved for a future un-merge). `SOURCE_KIND_MERGED_STREET = 3`; `StreetInfo`
+   record + `streetPlots()` / `cubeDataUnchecked()` getters. `CubeRendererV2`:
+   street tokens emit `{kind:'street', plots:[…8…]}` (matches `preview:street`),
+   `Merged`/`Population`/`Source Kind = "Merged Street"` traits; thumbnail renderer
+   treats kind 3 like its Normie leader. *(v1 assumes Normie leaders — true for
+   genesis.)*
+7. **Customization** — **🟡 BUILT (contract), pending WSL test; UI + CC0 review
+   later.** `CubeMintController.customizeCube`: holder re-bases a cube they own
+   onto a new flattened 40×40 artwork (400-byte 2-bit payload) via an EIP-712
+   flattening attestation. Cube keeps seed + slot but **adopts the new source**
+   (`CubeNFT.customizeCubeSource`, `customizer`-gated → `sourceKind=EXTERNAL`);
+   re-basable any number of times (`NonNormieArtStore.updateTonalBands2Bit` upsert).
+   Both renderers now serve the store art (closed V2's 3D non-Normie gap via
+   `nonNormieStore.imageBytesForCube`). Trust: ownership/CC0 enforced off-chain by
+   the flattening signer. *(Open: CC0 registry `data/cc0-projects.json` review;
+   the off-chain flatten + signer service; customize UI.)*
+8. **WebUI** — explore tab, customize tab, move/merge flows. **🟡 IN PROGRESS.**
+   Customize/Update Cube as a **separate page** (`viewer/update.html` +
+   `update-cube.js`), same aesthetic, nav-linked from the explore HUD. Enabler:
+   `CubeThumbnailRendererV1.previewThumbnailSVG` (stateless on-chain SVG preview).
+   Slices: (1) ✅ wallet art list — paginated 50-at-a-time, lazy images (only the
+   visible page loads, sparing the OpenSea API), selection. (2) ✅ tonal encoder
+   (`gridToTonalPayload` in nft-art-grid — same 2-level-Otsu bands as the cube
+   outline) + **live on-chain SVG panel** via `preview-chain.js` eth_call to
+   `previewThumbnailSVG` (derives the thumbnail renderer from the V2 `renderer` in
+   chain-config.json). Cube panel = interim 2D banded preview. *(needs a local
+   deploy of the updated contracts with chain-config.json `renderer` pointing at
+   it.)* (2b) 🟡 real 3D cube panel via a **dev-only token-renderer preview bundle**:
+   `entry.js` now exports a parameterized `main(deps)`; `entry-main.js` is the
+   network-free production entry, `preview-entry.js` injects the non-Normie pipeline
+   (`buildNonNormie*` + `wallet-nfts` fetch). Build emits `preview.bundle.js` (no
+   forbiddenPatterns check); `cube-preview.html` iframes it; the cube panel sets its
+   src per selection. ✅ (4) ✅ "cubes you own" row + target select + confirm
+   (Cancel/LFG) → flatten→attestation→customizeCube, **working end-to-end on WSL**.
+   Dev commit: `DeployLocalGenesis` deploys + wires the customize stack
+   (NonNormieArtStore/FlatteningAttestation/CubeMintController, signer = Anvil acct
+   #1); `preview-chain.customizeCube` builds the EIP-712 attestation, Anvil signs it
+   (`eth_signTypedData_v4`) + sends the tx (unlocked owner), receipt-checked.
+   payloadHash via `web3_sha3` of `abi.encode(DOMAIN, payload)` (matches
+   `NonNormieArt.hashTonalBands2Bit`). On-chain SVGs rendered as `<img>` data-URIs
+   to isolate shared element IDs. Anvil needs `--gas-limit 100000000` (Normie forest
+   thumbnails exceed the 30M default eth_call cap). **Remaining for #8:** move +
+   merge flow UIs; production off-chain signer service (dev uses Anvil); explore
+   tab is the existing Big Cube page.
+
+### Biome placeholders (to revisit)
+- They don't currently render on vacant plots in the street preview — needs a
+  look (likely the empty-slot floor/accent setup in the token render context).
+- The biome visuals themselves need an **aesthetic pass** (not happy with them).
+- Ties to the environment model (#1) and the merged-street render (#6).
+
+## Status snapshot (already built)
+
+- Genesis mint: SeaDrop hook, allowlist (Merkle), public pull, claim tracking,
+  phases. Snapshot + Merkle tooling with real artifacts.
+- Renderer: cube SVG (`image`) + interactive 3D HTML (`animation_url`), edge-point
+  trait 2D/3D parity, agent-status registry, chunked asset store.
+- Shared `StrBuf` string builder.
+
+## To-do / follow-ups
+
+- **Wallet connect** — the dev viewer uses Anvil's unlocked accounts (signs typed
+  data + sends txs directly via RPC). Production needs real wallet connection
+  (MetaMask / WalletConnect) so the holder signs/sends customize, move, and merge
+  txs from their own wallet. (The Update Cube page's `from`/signer wiring becomes
+  the connected account.)
+- **Move + merge UI flows** — IN PROGRESS (on the Update Cube / manage surface,
+  reusing owned-cubes loading + chain helpers + the confirm modal).
+- **`movesEnabled` production gate** — `setMovesEnabled` is `onlyOwner` on CubeNFT,
+  but ownership transfers to the genesis minter, which has no passthrough — so
+  post-mint nobody can enable moves. Needs a genesis passthrough or a post-mint
+  ownership handback. (Dev: `DeployLocalGenesis` flips it on before transfer.)
+- Production off-chain **flatten + attestation signer** service (dev uses Anvil).
+- **`core/keccak.js`** multi-block bug (only bit client-side >136-byte hashing,
+  now routed through `web3_sha3`).
+
+## Open decisions
+
+- Merge **"leader" rule** + whether merge is reversible (current: lowest occupied
+  plot; irreversible v1).
+- Customization **source allow-list policy** (CC0 registry `data/cc0-projects.json`).

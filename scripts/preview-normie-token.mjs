@@ -62,21 +62,36 @@ async function main() {
   );
   const privateKey = argValue('private-key', process.env.BLOCKCASSONE_PRIVATE_KEY || DEFAULT_PRIVATE_KEY);
   const forge = process.env.FORGE || 'forge';
-  const tokenId = 1;
+  // Frame/figure colour is a pure function of the slot, and genesis assigns slots
+  // in mint order. So to land this Normie on slot N we mint N filler cubes (the N
+  // Normie ids just below it) first, then export the last cube (slot N). slot 0 is
+  // the default single-mint preview. Use this to compare colour combinations.
+  const slot = parseUint(argValue('slot', '0'), 'slot');
+  const sampleStart = normieId - slot;
+  if (sampleStart < 1) {
+    throw new Error(
+      `--slot=${slot} is too large for Normie ${normieId}: it needs ${slot} filler Normie id(s) below it.`
+    );
+  }
+  const tokenId = slot + 1;
 
   const agentIdRaw = argValue('agent-id', '');
   const agentId = agentIdRaw ? parseUint(agentIdRaw, 'agent ID') : (hasFlag('agentic') ? normieId : 0);
   const outDir = path.resolve(
     argValue(
       'out-dir',
-      path.join(os.tmpdir(), 'blockcassone-token-previews', `normie-${normieId}`)
+      path.join(
+        os.tmpdir(),
+        'blockcassone-token-previews',
+        slot === 0 ? `normie-${normieId}` : `normie-${normieId}-slot${slot}`
+      )
     )
   );
   await fs.rm(outDir, { recursive: true, force: true });
 
   const deployEnv = {
-    BLOCKCASSONE_SAMPLE_MINTS: '1',
-    BLOCKCASSONE_SAMPLE_NORMIE_START: String(normieId),
+    BLOCKCASSONE_SAMPLE_MINTS: String(slot + 1),
+    BLOCKCASSONE_SAMPLE_NORMIE_START: String(sampleStart),
     BLOCKCASSONE_PREVIEW_RECIPIENT: recipient,
   };
   if (agentId) {
@@ -131,6 +146,7 @@ async function main() {
 
   console.log('\nPreview ready');
   console.log(`Normie:   ${sourceToken}`);
+  console.log(`Slot:     ${slot}`);
   console.log(`Agentic:  ${agentic || 'N'}${agent && agent !== '0' ? ` / ${agent}` : ''}`);
   console.log(`HTML:     ${namedHtmlPath}`);
   console.log(`Image:    ${namedImagePath}`);

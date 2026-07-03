@@ -31,7 +31,7 @@ loadDotEnv(ENV_PATH);
 
 // Route prefixes that should resolve from the repo root (outside renderer/).
 // Everything else resolves from renderer/.
-const REPO_PREFIXES = ['/viewer/', '/core/', '/public/', '/schema/', '/renderer/', '/data/'];
+const REPO_PREFIXES = ['/viewer/', '/core/', '/public/', '/schema/', '/renderer/', '/data/', '/dist/'];
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

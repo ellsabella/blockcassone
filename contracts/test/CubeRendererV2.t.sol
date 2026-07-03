@@ -10,7 +10,9 @@ import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
+import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
+import { NonNormieArtStore } from "../src/NonNormieArtStore.sol";
 
 contract RendererV2MockNormies is ERC721 {
     mapping(uint256 tokenId => bytes rawImageData) private _rawImageData;
@@ -37,20 +39,24 @@ contract CubeRendererV2Test is Test {
     RendererAssetStore private assets;
     CubeThumbnailRendererV1 private thumbnailRenderer;
     CubeRendererV2 private renderer;
+    NonNormieArtStore private store;
 
     function setUp() public {
         normies = new RendererV2MockNormies();
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
+        store = new NonNormieArtStore(address(this)); // test acts as store owner
         thumbnailRenderer = new CubeThumbnailRendererV1(
             cubes,
             address(normies),
-            address(0),
+            address(store),
             address(new CubeHilbertGeometry()),
-            address(new CubeFrameLayer())
+            address(new CubeFrameLayer()),
+            address(new CubeWalkerLayer())
         );
-        renderer = new CubeRendererV2(cubes, assets, address(normies), address(thumbnailRenderer));
+        renderer =
+            new CubeRendererV2(cubes, assets, address(normies), address(thumbnailRenderer), address(store));
 
         bytes memory raw = new bytes(200);
         raw[0] = hex"80";
@@ -103,19 +109,21 @@ contract CubeRendererV2Test is Test {
 
         assertTrue(_contains(svg, '<path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/>'));
         assertTrue(_contains(svg, '<path id="o" d='));
-        // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green (#38ff4d).
-        // (Was #ff1919 under the old slot%3 rule; now uses the unique-axis colour.)
-        assertTrue(_contains(svg, '<use href="#o" fill="none" stroke="#38ff4d"'));
-        // Frame border now traces the motif's unique-plane sides (slot 1734 -> TRB,
-        // open left) as separate subpaths rather than the old fixed square path.
+        // slot 1734 has Hilbert planes [z,y,z] -> unique axis y -> green. Now pure
+        // #00ff00 (matches the WebGL cube + the line-lab neon tuning); the figure
+        // uses the additive-screen #nfN filter, fill="none" hoisted to the group.
+        assertTrue(_contains(svg, '<use href="#o" stroke="#00ff00" stroke-width=".146" filter="url(#nfN)"'));
+        // Frame border traces the motif's unique-plane sides (slot 1734 -> TRB,
+        // open left) as separate subpaths.
         assertTrue(_contains(svg, '<path d="M100 85H1100M1100 85V1085M100 1085H1100"'));
         assertTrue(_contains(svg, '<path id="l" d='));
-        assertTrue(_contains(svg, '<circle cx="100" cy="85" r="14"'));
-        assertTrue(_contains(svg, '<filter id="h"'));
+        // edge-point orbs: additive white-glow group at r=10 (soft core group r=6).
+        assertTrue(_contains(svg, '<circle cx="100" cy="85" r="10"'));
+        assertTrue(_contains(svg, '<filter id="nfN"'));
         // forest strand layer (thin strands + turbulence tip-clouds)
-        assertTrue(_contains(svg, '<g fill="none" stroke="#38ff4d" stroke-width="1.4"'));
+        assertTrue(_contains(svg, '<g fill="none" stroke="#00ff00" stroke-width="1.4"'));
         assertTrue(_contains(svg, 'filter="url(#pc)"'));
-        assertTrue(_contains(svg, '<use href="#l" fill="none" stroke="#38ff4d"'));
+        assertTrue(_contains(svg, '<use href="#l" stroke="#00ff00"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));
     }
@@ -209,6 +217,101 @@ contract CubeRendererV2Test is Test {
             if (valueBytes[i] != prefixBytes[i]) return false;
         }
         return true;
+    }
+
+    function testMergedStreetMetadataReportsPopulationAndMerged() public {
+        bytes memory raw2 = new bytes(64);
+        raw2[0] = hex"40";
+        normies.mint(MINTER, 6723, raw2);
+
+        // Street 0 = slots 0,1; occupy both, then merge.
+        vm.startPrank(MINTER);
+        cubes.mintNormieCube(6722, 0, bytes32("seed-a"));
+        cubes.mintNormieCube(6723, 1, bytes32("seed-b"));
+        uint256 streetId = cubes.mergeStreet(0);
+        vm.stopPrank();
+
+        string memory json = renderer.metadataJSON(streetId);
+        assertTrue(_contains(json, '"trait_type":"Population","value":"2"'));
+        assertTrue(_contains(json, '"trait_type":"Merged","value":"Y"'));
+        assertTrue(_contains(json, '"trait_type":"Source Kind","value":"Merged Street"'));
+        assertTrue(_contains(json, '"trait_type":"street","value":"0"'));
+        // Leader (lowest occupied plot) drives the SVG thumbnail.
+        assertTrue(_contains(json, '"image":"data:image/svg+xml;base64,'));
+    }
+
+    function testMergedStreetAnimationInjectsPlotsArray() public {
+        bytes memory raw2 = new bytes(64);
+        raw2[0] = hex"40";
+        normies.mint(MINTER, 6723, raw2);
+
+        vm.startPrank(MINTER);
+        cubes.mintNormieCube(6722, 0, bytes32("seed-a"));
+        cubes.mintNormieCube(6723, 1, bytes32("seed-b"));
+        uint256 streetId = cubes.mergeStreet(0);
+        vm.stopPrank();
+
+        string memory html = renderer.animationHTML(streetId);
+        assertTrue(_contains(html, "kind:'street'"));
+        assertTrue(_contains(html, "street:0"));
+        assertTrue(_contains(html, "population:2"));
+        assertTrue(_contains(html, "plots:["));
+        assertTrue(_contains(html, "occupied:true"));
+        assertTrue(_contains(html, "occupied:false")); // slots 2..7 are vacant
+        assertTrue(_contains(html, "sourceTokenId:6722"));
+        assertTrue(_contains(html, "sourceTokenId:6723"));
+        assertTrue(_contains(html, Base64.encode(normies.getTokenRawImageData(6722))));
+        // No network references leak into the merged-street payload.
+        assertFalse(_contains(html, "api.normies.art"));
+    }
+
+    function testCustomizedCubeRendersStoreArt() public {
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
+
+        // Re-base: record a flattened payload + flip the source (test = store owner
+        // + customizer; the controller/attestation flow is covered separately).
+        bytes memory payload = new bytes(400);
+        for (uint256 i = 0; i < 400; i++) {
+            payload[i] = 0xFF; // every cell "on" -> a full 200-byte bitmap, distinct from the mock Normie raw
+        }
+        store.recordTonalBands2Bit(cubeId, payload);
+        vm.prank(OWNER);
+        cubes.setCustomizer(address(this));
+        cubes.customizeCubeSource(cubeId, address(0xABCD), 42, 1);
+
+        // Metadata adopts the new source.
+        string memory json = renderer.metadataJSON(cubeId);
+        assertTrue(_contains(json, '"trait_type":"Source Kind","value":"External ERC-721"'));
+        assertTrue(_contains(json, '"trait_type":"Source Token ID","value":"42"'));
+
+        // The 3D/animation raw is the store bitmap, not the Normie raw.
+        string memory html = renderer.animationHTML(cubeId);
+        assertTrue(_contains(html, Base64.encode(store.imageBytesForCube(cubeId))));
+        assertFalse(_contains(html, Base64.encode(normies.getTokenRawImageData(6722))));
+
+        // Image still renders (thumbnail external path) without reverting.
+        assertTrue(_contains(renderer.imageURI(cubeId), "data:image/svg+xml;base64,"));
+    }
+
+    function testPreviewThumbnailMatchesStoredCustomizedCube() public {
+        vm.prank(MINTER);
+        uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
+
+        bytes memory payload = new bytes(400);
+        for (uint256 i = 0; i < 400; i++) {
+            payload[i] = 0xA5;
+        }
+        store.recordTonalBands2Bit(cubeId, payload);
+        vm.prank(OWNER);
+        cubes.setCustomizer(address(this));
+        cubes.customizeCubeSource(cubeId, address(0xABCD), 42, 1);
+
+        // The stateless preview must be byte-identical to what re-basing stores.
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
+        string memory stored = thumbnailRenderer.thumbnailSVG(cubeId);
+        string memory preview = thumbnailRenderer.previewThumbnailSVG(data.seed, data.slot, 42, payload);
+        assertEq(stored, preview);
     }
 
     function _contains(string memory value, string memory needle) private pure returns (bool) {

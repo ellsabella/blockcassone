@@ -10,7 +10,8 @@
     "snapshot:normies": "node scripts/take-normie-snapshot.mjs",
     "snapshot:merkle": "node scripts/build-normie-merkle.mjs",
     "agents:check": "node scripts/check-normie-agent-bindings.mjs",
-    "preview:normie": "node scripts/preview-normie-token.mjs"
+    "preview:normie": "node scripts/preview-normie-token.mjs",
+    "preview:street": "node scripts/preview-street.mjs"
   },
   "author": "",
   "license": "ISC",

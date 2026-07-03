@@ -8,6 +8,7 @@ import { CubeNFT } from "../src/CubeNFT.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
+import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 
 // Minimal Normie source used only for previews.
 contract PreviewMockNormies is ERC721 {
@@ -50,7 +51,8 @@ contract PreviewThumbnail is Script {
             address(normies),
             address(0),
             address(new CubeHilbertGeometry()),
-            address(new CubeFrameLayer())
+            address(new CubeFrameLayer()),
+            address(new CubeWalkerLayer())
         );
 
         for (uint256 s = 0; s < count; s++) {
@@ -74,10 +76,10 @@ contract PreviewThumbnail is Script {
     }
 
     // Detect the figure colour the renderer actually emitted. #ff1919 (red) and
-    // #244cff (blue) only ever appear as the plane colour; if neither is present
-    // the plane colour is green (#38ff4d, which also appears in the border).
+    // #1f3bff (blue) only ever appear as the plane colour; if neither is present
+    // the plane colour is green (#1fff3a).
     function _emittedColour(string memory svg) private pure returns (string memory) {
-        if (_contains(svg, "#244cff")) return "BLUE (z)";
+        if (_contains(svg, "#1f3bff")) return "BLUE (z)";
         if (_contains(svg, "#ff1919")) return "RED (x)";
         return "GREEN (y)";
     }
@@ -124,8 +126,8 @@ contract PreviewThumbnail is Script {
 
     function _colourName(uint256 axis) private pure returns (string memory) {
         if (axis == 0) return "red (x) #ff1919";
-        if (axis == 1) return "green (y) #38ff4d";
-        return "blue (z) #244cff";
+        if (axis == 1) return "green (y) #1fff3a";
+        return "blue (z) #1f3bff";
     }
 
     // A COHERENT face-ish silhouette (contiguous body + eye/mouth holes) so the

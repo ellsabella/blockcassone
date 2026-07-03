@@ -627,6 +627,63 @@ export function otsuMultiLevelThresholds(grayscale, numThresholds = NUM_BANDS - 
   throw new Error(`otsuMultiLevelThresholds: unsupported numThresholds=${numThresholds}`);
 }
 
+// Area-average downsample of a square grayscale buffer (srcSize -> dstSize).
+function downsampleGrayscale(src, srcSize, dstSize) {
+  const factor = srcSize / dstSize;
+  const dst = new Float32Array(dstSize * dstSize);
+  for (let row = 0; row < dstSize; row++) {
+    for (let col = 0; col < dstSize; col++) {
+      const r0 = Math.floor(row * factor), r1 = Math.min(srcSize, Math.ceil((row + 1) * factor));
+      const c0 = Math.floor(col * factor), c1 = Math.min(srcSize, Math.ceil((col + 1) * factor));
+      let sum = 0, count = 0;
+      for (let r = r0; r < r1; r++) {
+        for (let c = c0; c < c1; c++) { sum += src[r * srcSize + c]; count++; }
+      }
+      dst[row * dstSize + col] = count > 0 ? sum / count : 0;
+    }
+  }
+  return dst;
+}
+
+// 40×40 tonal bands (0..2) via the same 2-level Otsu the cube outline uses, so the
+// on-chain SVG silhouette matches the 3D cube form. band = #thresholds exceeded.
+export function gridToBands40(grid) {
+  const grayscale = grid?.grayscale;
+  if (!grayscale) return null;
+  const rawSize = grid.gridSize || GRID_SIZE;
+  const gs40 = rawSize > GRID_SIZE ? downsampleGrayscale(grayscale, rawSize, GRID_SIZE) : grayscale;
+  const thresholds = otsuMultiLevelThresholds(gs40, 2) || [];
+  const bands = new Uint8Array(GRID_SIZE * GRID_SIZE);
+  for (let i = 0; i < bands.length; i++) {
+    let b = 0;
+    for (const t of thresholds) { if (gs40[i] >= t) b++; }
+    bands[i] = b;
+  }
+  return bands;
+}
+
+// Pack the 40×40 bands into the on-chain 400-byte 2-bit tonal payload (row-major,
+// 2 bits/cell; band 0 = background -> "off" in the on-chain renderer). Feeds
+// CubeThumbnailRendererV1.previewThumbnailSVG and, on commit, customizeCube.
+export function gridToTonalPayload(grid) {
+  const bands = gridToBands40(grid);
+  const payload = new Uint8Array(400);
+  if (!bands) return payload;
+  // The on-chain art + glass land on band>0 (the "foreground"). Otsu makes the
+  // lit region band>0, but for a light-background image that's the background —
+  // so glass blankets it and looks poor. Keep the foreground the SPARSER half
+  // (usually the subject): if the lit region is the majority, make the dark
+  // region the foreground instead.
+  let lit = 0;
+  for (let i = 0; i < bands.length; i++) if (bands[i] > 0) lit++;
+  const flip = lit > bands.length - lit;
+  for (let i = 0; i < bands.length; i++) {
+    const b = flip ? (bands[i] > 0 ? 0 : 2) : bands[i];
+    if (b) payload[i >> 2] |= (b & 3) << ((i & 3) << 1);
+  }
+  return payload;
+}
+
 export function otsuRecursiveBands(grayscale, numBands, numBins = OTSU_BINS) {
   if (numBands <= 1) return [];
   const total = grayscale.length;

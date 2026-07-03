@@ -8,6 +8,7 @@ import { CubeRendererV2 } from "../src/CubeRendererV2.sol";
 import { CubeThumbnailRendererV1 } from "../src/CubeThumbnailRendererV1.sol";
 import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
+import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 import { NormieAddresses } from "../src/NormieAddresses.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
@@ -101,8 +102,11 @@ contract DeployMainnetNormiePreview is Script {
         address frameLayer = address(new CubeFrameLayer());
 
         vm.broadcast();
+        address walkerLayer = address(new CubeWalkerLayer());
+
+        vm.broadcast();
         deployment.thumbnailRenderer = new CubeThumbnailRendererV1(
-            deployment.cubes, NormieAddresses.NORMIES_STORAGE, address(0), geometry, frameLayer
+            deployment.cubes, NormieAddresses.NORMIES_STORAGE, address(0), geometry, frameLayer, walkerLayer
         );
 
         vm.broadcast();
@@ -111,7 +115,8 @@ contract DeployMainnetNormiePreview is Script {
                 deployment.cubes,
                 deployment.assetStore,
                 NormieAddresses.NORMIES_STORAGE,
-                address(deployment.thumbnailRenderer)
+                address(deployment.thumbnailRenderer),
+                address(0)
             );
 
         vm.broadcast();

@@ -6,9 +6,13 @@ import { spawnSync } from 'node:child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const outDir = path.join(repoRoot, 'dist', 'token-renderer');
-const entry = path.join(repoRoot, 'token-renderer', 'entry.js');
+const entry = path.join(repoRoot, 'token-renderer', 'entry-main.js');
 const bundlePath = path.join(outDir, 'token-renderer.bundle.js');
 const chunksPath = path.join(outDir, 'renderer-chunks.json');
+// Dev-only preview bundle for the Update Cube page (non-Normie art + wallet fetch).
+// NOT network-free and NOT forbiddenPatterns-checked — never an on-chain payload.
+const previewEntry = path.join(repoRoot, 'token-renderer', 'preview-entry.js');
+const previewBundlePath = path.join(outDir, 'preview.bundle.js');
 const chunkBytes = Number(process.env.BLOCKCASSONE_RENDERER_CHUNK_BYTES || 18_000);
 
 const forbiddenPatterns = [
@@ -108,6 +112,25 @@ async function main() {
   console.log(`token renderer bundle: ${Buffer.byteLength(bundle)} bytes`);
   console.log(`renderer script chunks: ${chunks.length} x <= ${chunkBytes} bytes`);
   console.log(`wrote ${path.relative(repoRoot, chunksPath)}`);
+
+  // Dev preview bundle: same scene, plus the non-Normie pipeline. Deliberately
+  // skips the forbiddenPatterns check (it fetches wallet art) — dev viewer only.
+  run(esbuildBin, [
+    previewEntry,
+    '--bundle',
+    '--format=iife',
+    '--target=es2020',
+    '--loader:.glsl=text',
+    '--external:../normies-api.js',
+    '--external:./normies-api.js',
+    '--external:viewer/normies-api.js',
+    '--outfile=' + previewBundlePath,
+    '--log-level=info',
+    '--legal-comments=none',
+    '--tree-shaking=true',
+  ]);
+  const previewBundle = await fs.readFile(previewBundlePath, 'utf8');
+  console.log(`preview (dev) bundle: ${Buffer.byteLength(previewBundle)} bytes -> ${path.relative(repoRoot, previewBundlePath)}`);
 }
 
 main().catch(err => {

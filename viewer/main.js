@@ -34,6 +34,7 @@ import {
   simulateMintBatch,
   sourceNftForSlot,
 } from './mint-simulator.js';
+import { mintNormieCubeOnChain } from './preview-chain.js';
 import {
   applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor,
 } from './scene/styling.js';
@@ -480,6 +481,8 @@ const mintCountInput = document.getElementById('mint-count');
 const mintPhaseInput = document.getElementById('mint-phase');
 const mintRunBtn = document.getElementById('mint-run');
 const mintResetBtn = document.getElementById('mint-reset');
+const mintSlotInput = document.getElementById('mint-slot');
+const mintAtSlotBtn = document.getElementById('mint-at-slot');
 const mintStatusEl = document.getElementById('mint-status');
 const mintSuccessEl = document.getElementById('mint-success');
 const mintSuccessTextEl = document.getElementById('mint-success-text');
@@ -1210,6 +1213,33 @@ async function runMintSimulation() {
     if (mintRunBtn) mintRunBtn.disabled = false;
   }
 }
+
+// Dev: mint a REAL on-chain cube at an explicit slot (colour = f(slot)), so you
+// can preview specific colour/glass combos in the viewer. Local-only — needs the
+// LocalMockNormies dev contract (mint() unguarded); no-ops on a mainnet fork.
+async function runOnChainSlotMint() {
+  const slot = parseInt(mintSlotInput?.value, 10);
+  if (!Number.isInteger(slot) || slot < 0) { log('enter a slot number to on-chain mint'); return; }
+  if (mintAtSlotBtn) mintAtSlotBtn.disabled = true;
+  try {
+    log(`on-chain minting a cube at slot ${slot}…`);
+    const r = await mintNormieCubeOnChain({ slot });
+    await loadMintSimulation(); // reloads on-chain records (chain-config enabled)
+    const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === slot);
+    if (idx >= 0) { currentPlaneIdx = idx; selectedMotifIdx = slot; openCubeDetail(slot); setOrbitTargetToSelection(); }
+    _updateMintStatus();
+    _updateNftLabel();
+    refreshOwnerFocusLabel();
+    rebuildScene();
+    log(`on-chain mint: Normie #${r.normieId} @ slot ${slot} (owner ${shortAddress(r.cubeOwner)})`);
+  } catch (err) {
+    log(`on-chain mint failed: ${String(err?.message || err)}`);
+  } finally {
+    if (mintAtSlotBtn) mintAtSlotBtn.disabled = false;
+  }
+}
+if (mintAtSlotBtn) mintAtSlotBtn.addEventListener('click', runOnChainSlotMint);
+if (mintSlotInput) mintSlotInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runOnChainSlotMint(); });
 
 if (mintMinusBtn) mintMinusBtn.addEventListener('click', () => _setMintCountValue(_mintCountValue() - 1));
 if (mintPlusBtn) mintPlusBtn.addEventListener('click', () => _setMintCountValue(_mintCountValue() + 1));

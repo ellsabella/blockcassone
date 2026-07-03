@@ -364,4 +364,204 @@ contract CubeNFTTest is Test {
         vm.expectRevert(abi.encodeWithSelector(CubeNFT.NonexistentCube.selector, 999));
         cubes.tokenURI(999);
     }
+
+    // ---- Street merge (8 -> 1) ----------------------------------------------
+
+    function _mintCubeAt(uint256 normieId, uint32 slot, address who) private returns (uint256 cubeId) {
+        normies.mint(who, normieId);
+        vm.prank(who);
+        cubeId = cubes.mintNormieCube(normieId, slot, keccak256(abi.encodePacked("seed", normieId)));
+    }
+
+    function testMergeStreetBurnsPlotsAndMintsStreetToken() public {
+        // Street 0 = slots 0..7. Occupy 0, 1, 2 with MINTER-owned cubes.
+        uint256 c0 = _mintCubeAt(301, 0, MINTER);
+        uint256 c1 = _mintCubeAt(302, 1, MINTER);
+        uint256 c2 = _mintCubeAt(303, 2, MINTER);
+
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.StreetMerged(4, MINTER, 0, 3);
+
+        vm.prank(MINTER);
+        uint256 streetId = cubes.mergeStreet(0);
+
+        assertEq(streetId, 4); // next id after the 3 cubes
+        assertEq(cubes.ownerOf(streetId), MINTER);
+
+        // Plot cubes are burned.
+        vm.expectRevert();
+        cubes.ownerOf(c0);
+        vm.expectRevert();
+        cubes.ownerOf(c1);
+        vm.expectRevert();
+        cubes.ownerOf(c2);
+
+        // The street token locks all 8 slots.
+        for (uint32 k = 0; k < 8; k++) {
+            assertEq(cubes.cubeForSlot(k), streetId);
+        }
+
+        CubeNFT.CubeData memory sd = cubes.cubeData(streetId);
+        assertEq(sd.sourceKind, cubes.SOURCE_KIND_MERGED_STREET());
+        assertEq(sd.slot, 0); // leader is the lowest occupied plot
+        assertEq(sd.sourceTokenId, 301); // leader Normie -> street thumbnail
+        assertEq(sd.seed, keccak256(abi.encodePacked("seed", uint256(301))));
+
+        (uint32 street, uint8 occ, uint256[8] memory plots) = cubes.streetPlots(streetId);
+        assertEq(street, 0);
+        assertEq(occ, 3);
+        assertEq(plots[0], c0);
+        assertEq(plots[1], c1);
+        assertEq(plots[2], c2);
+        assertEq(plots[3], 0);
+
+        // Burned plot data is retained for rendering.
+        CubeNFT.CubeData memory pd = cubes.cubeDataUnchecked(c2);
+        assertEq(pd.slot, 2);
+        assertEq(pd.sourceTokenId, 303);
+    }
+
+    function testMergeStreetRevertsIfNotSoleOwner() public {
+        _mintCubeAt(301, 0, MINTER);
+        uint256 other = _mintCubeAt(302, 1, OTHER);
+
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.NotStreetOwner.selector, uint32(0), other));
+        cubes.mergeStreet(0);
+    }
+
+    function testMergeStreetRevertsIfEmpty() public {
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.EmptyStreet.selector, uint32(1)));
+        cubes.mergeStreet(1);
+    }
+
+    function testMergeStreetRevertsIfAlreadyMerged() public {
+        _mintCubeAt(301, 0, MINTER);
+        vm.prank(MINTER);
+        cubes.mergeStreet(0);
+
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.StreetAlreadyMerged.selector, uint32(0)));
+        cubes.mergeStreet(0);
+    }
+
+    function testMergeStreetLeaderIsLowestOccupiedPlot() public {
+        // Slot 0 vacant; occupy 1 then 3 -> leader is the slot-1 cube.
+        uint256 c1 = _mintCubeAt(302, 1, MINTER);
+        _mintCubeAt(304, 3, MINTER);
+
+        vm.prank(MINTER);
+        uint256 streetId = cubes.mergeStreet(0);
+
+        CubeNFT.CubeData memory sd = cubes.cubeData(streetId);
+        assertEq(sd.slot, 1);
+        assertEq(sd.sourceTokenId, 302);
+
+        (, uint8 occ, uint256[8] memory plots) = cubes.streetPlots(streetId);
+        assertEq(occ, 2);
+        assertEq(plots[0], 0);
+        assertEq(plots[1], c1);
+    }
+
+    function testMergeStreetRevertsForOutOfRangeStreet() public {
+        // totalSlots = 64 -> valid streets are 0..7.
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.InvalidSlot.selector, uint32(64)));
+        cubes.mergeStreet(8);
+    }
+
+    // ---- Move ----------------------------------------------------------------
+
+    function testMoveCubeUpdatesSlotAndPreservesSeed() public {
+        uint256 cubeId = _mintCubeAt(401, 5, MINTER);
+        bytes32 seedBefore = cubes.cubeData(cubeId).seed;
+
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.CubeMoved(cubeId, 5, 40, MINTER);
+        vm.prank(MINTER);
+        cubes.moveCube(cubeId, 40);
+
+        assertEq(cubes.cubeForSlot(5), 0);
+        assertEq(cubes.cubeForSlot(40), cubeId);
+        CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
+        assertEq(data.slot, 40);
+        assertEq(data.seed, seedBefore); // edge-point identity is preserved across a move
+    }
+
+    function testMoveCubeRevertsWhenDisabled() public {
+        uint256 cubeId = _mintCubeAt(401, 5, MINTER);
+        vm.prank(MINTER);
+        vm.expectRevert(CubeNFT.MovesDisabled.selector);
+        cubes.moveCube(cubeId, 40);
+    }
+
+    function testMoveCubeRevertsForNonOwner() public {
+        uint256 cubeId = _mintCubeAt(401, 5, MINTER);
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        vm.prank(OTHER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.NotCubeOwner.selector, cubeId, OTHER));
+        cubes.moveCube(cubeId, 40);
+    }
+
+    function testMoveCubeRevertsForOccupiedTarget() public {
+        uint256 a = _mintCubeAt(401, 5, MINTER);
+        uint256 b = _mintCubeAt(402, 6, MINTER);
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.SlotOccupied.selector, uint32(6), b));
+        cubes.moveCube(a, 6);
+    }
+
+    function testMoveCubeRevertsForOutOfRangeSlot() public {
+        uint256 cubeId = _mintCubeAt(401, 5, MINTER);
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.InvalidSlot.selector, uint32(64)));
+        cubes.moveCube(cubeId, 64); // totalSlots = 64
+    }
+
+    function testCannotMoveMergedStreet() public {
+        _mintCubeAt(401, 0, MINTER); // street 0
+        vm.prank(MINTER);
+        uint256 streetId = cubes.mergeStreet(0);
+
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.CannotMoveStreet.selector, streetId));
+        cubes.moveCube(streetId, 40);
+    }
+
+    function testMoveCubeFreesOldSlotForReuse() public {
+        uint256 a = _mintCubeAt(401, 5, MINTER);
+        uint256 b = _mintCubeAt(402, 6, MINTER);
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        vm.startPrank(MINTER);
+        cubes.moveCube(a, 40); // frees slot 5
+        cubes.moveCube(b, 5); // reuse the freed slot
+        vm.stopPrank();
+
+        assertEq(cubes.cubeForSlot(40), a);
+        assertEq(cubes.cubeForSlot(5), b);
+        assertEq(cubes.cubeForSlot(6), 0);
+    }
+
+    function testSetMovesEnabledOnlyOwner() public {
+        vm.prank(OTHER);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, OTHER));
+        cubes.setMovesEnabled(true);
+    }
 }

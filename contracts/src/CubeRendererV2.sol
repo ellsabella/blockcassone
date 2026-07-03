@@ -6,6 +6,8 @@ import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import { CubeNFT } from "./CubeNFT.sol";
 import { ICubeRenderer } from "./interfaces/ICubeRenderer.sol";
 import { RendererAssetStore } from "./RendererAssetStore.sol";
+import { StrBuf } from "./lib/StrBuf.sol";
+import { CubeEnv } from "./lib/CubeEnv.sol";
 
 interface INormieRawImageStorage {
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
@@ -15,8 +17,13 @@ interface ICubeThumbnailRenderer {
     function thumbnailSVG(uint256 tokenId) external view returns (string memory);
 }
 
+interface INonNormieArtStore {
+    function imageBytesForCube(uint256 cubeId) external view returns (bytes memory);
+}
+
 contract CubeRendererV2 is ICubeRenderer {
     using Strings for uint256;
+    using StrBuf for bytes;
 
     uint256 public constant HTML_HEAD_CHUNK = 0;
     uint256 public constant HTML_SCRIPT_CHUNK = 1;
@@ -26,17 +33,20 @@ contract CubeRendererV2 is ICubeRenderer {
     RendererAssetStore public immutable assets;
     address public immutable normieStorage;
     address public immutable thumbnailRenderer;
+    address public immutable nonNormieStore;
 
     constructor(
         CubeNFT cubes_,
         RendererAssetStore assets_,
         address normieStorage_,
-        address thumbnailRenderer_
+        address thumbnailRenderer_,
+        address nonNormieStore_
     ) {
         cubes = cubes_;
         assets = assets_;
         normieStorage = normieStorage_;
         thumbnailRenderer = thumbnailRenderer_;
+        nonNormieStore = nonNormieStore_;
     }
 
     function tokenURI(uint256 tokenId) external view returns (string memory) {
@@ -59,7 +69,7 @@ contract CubeRendererV2 is ICubeRenderer {
             animationURI(tokenId),
             '",',
             '"attributes":[',
-            _attributesJSON(data),
+            _attributesJSON(tokenId, data),
             "]}"
         );
     }
@@ -97,11 +107,20 @@ contract CubeRendererV2 is ICubeRenderer {
         return uint256(slot) / 8;
     }
 
+    function _sourceKindLabel(uint8 sourceKind) private view returns (string memory) {
+        if (sourceKind == cubes.SOURCE_KIND_NORMIE()) return "Normie";
+        if (sourceKind == cubes.SOURCE_KIND_MERGED_STREET()) return "Merged Street";
+        return "External ERC-721";
+    }
+
     function _tokenConfig(uint256 tokenId, CubeNFT.CubeData memory data)
         private
         view
         returns (string memory)
     {
+        if (data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET()) {
+            return _streetTokenConfig(tokenId);
+        }
         return string.concat(
             "<script>window.BLOCKCASSONE_TOKEN={",
             "tokenId:",
@@ -120,54 +139,148 @@ contract CubeRendererV2 is ICubeRenderer {
             data.agentic ? "true" : "false",
             ",agentId:",
             data.agentId.toString(),
-            ",raw:'",
-            _rawImageBase64(data),
+            ",seed:'",
+            Strings.toHexString(uint256(data.seed), 32),
+            "',raw:'",
+            _rawImageBase64(tokenId, data),
             "'};</script>"
         );
     }
 
-    function _rawImageBase64(CubeNFT.CubeData memory data) private view returns (string memory) {
-        return Base64.encode(_rawImageBytes(data));
-    }
+    /// Street tokens inject `{kind:'street', plots:[...8...]}` so the renderer's
+    /// per-street view (entry.js) lights up. Each plot carries the source facts of
+    /// its (now-burned) cube; vacant plots carry only their slot.
+    function _streetTokenConfig(uint256 tokenId) private view returns (string memory) {
+        (uint32 street, uint8 occ, uint256[8] memory plotIds) = cubes.streetPlots(tokenId);
+        uint256 base = uint256(street) * 8;
 
-    function _rawImageBytes(CubeNFT.CubeData memory data) private view returns (bytes memory) {
-        if (data.sourceKind != cubes.SOURCE_KIND_NORMIE() || normieStorage == address(0)) return "";
-        try INormieRawImageStorage(normieStorage).getTokenRawImageData(data.sourceTokenId) returns (
-            bytes memory raw
-        ) {
-            return raw;
-        } catch {
-            return "";
+        // Pre-fetch each occupied plot's data + raw base64 so the buffer can be
+        // sized exactly (raw image data dominates and is variable length).
+        CubeNFT.CubeData[8] memory pds;
+        string[8] memory raws;
+        uint256 total = 512;
+        for (uint256 k = 0; k < 8; k++) {
+            if (plotIds[k] != 0) {
+                pds[k] = cubes.cubeDataUnchecked(plotIds[k]);
+                raws[k] = _rawImageBase64(plotIds[k], pds[k]);
+            }
+            total += bytes(raws[k]).length + 192;
         }
+
+        bytes memory buf = StrBuf.alloc(total + 64);
+        buf.cat("<script>window.BLOCKCASSONE_TOKEN={kind:'street',tokenId:");
+        buf.cat(tokenId.toString());
+        buf.cat(",street:");
+        buf.cat(uint256(street).toString());
+        buf.cat(",population:");
+        buf.cat(uint256(occ).toString());
+        buf.cat(",normieStorage:'");
+        buf.cat(Strings.toHexString(uint160(normieStorage), 20));
+        buf.cat("',plots:[");
+        for (uint256 k = 0; k < 8; k++) {
+            if (k != 0) buf.cat(",");
+            if (plotIds[k] == 0) {
+                buf.cat("{occupied:false,slot:");
+                buf.cat((base + k).toString());
+                buf.cat("}");
+            } else {
+                buf.cat("{occupied:true,slot:");
+                buf.cat(uint256(pds[k].slot).toString());
+                buf.cat(",sourceTokenId:");
+                buf.cat(pds[k].sourceTokenId.toString());
+                buf.cat(",seed:'");
+                buf.cat(Strings.toHexString(uint256(pds[k].seed), 32));
+                buf.cat("',agentic:");
+                buf.cat(pds[k].agentic ? "true" : "false");
+                buf.cat(",agentId:");
+                buf.cat(pds[k].agentId.toString());
+                buf.cat(",raw:'");
+                buf.cat(raws[k]);
+                buf.cat("'}");
+            }
+        }
+        buf.cat("]};</script>");
+        return buf.str();
     }
 
-    function _attributesJSON(CubeNFT.CubeData memory data) private view returns (string memory) {
-        return string.concat(
-            _trait("plot", uint256(data.slot).toString()),
-            ",",
-            _trait("region", regionForSlot(data.slot).toString()),
-            ",",
-            _trait("neighbourhood", neighbourhoodForSlot(data.slot).toString()),
-            ",",
-            _trait("street", streetForSlot(data.slot).toString()),
-            ",",
-            _trait(
-                "Source Kind",
-                data.sourceKind == cubes.SOURCE_KIND_NORMIE() ? "Normie" : "External ERC-721"
-            ),
-            ",",
-            _trait("Source Contract", Strings.toHexString(uint160(data.sourceContract), 20)),
-            ",",
-            _trait("Source Token ID", data.sourceTokenId.toString()),
-            ",",
-            _trait("Agentic", data.agentic ? "Y" : "N"),
-            ",",
-            _trait("Agent ID", data.agentId.toString()),
-            ",",
-            _trait("Renderer Version", "2"),
-            ",",
-            _trait("Payload Version", uint256(data.payloadVersion).toString())
-        );
+    function _rawImageBase64(uint256 cubeId, CubeNFT.CubeData memory data)
+        private
+        view
+        returns (string memory)
+    {
+        return Base64.encode(_rawImageBytes(cubeId, data));
+    }
+
+    function _rawImageBytes(uint256 cubeId, CubeNFT.CubeData memory data)
+        private
+        view
+        returns (bytes memory)
+    {
+        if (data.sourceKind == cubes.SOURCE_KIND_NORMIE()) {
+            if (normieStorage == address(0)) return "";
+            try INormieRawImageStorage(normieStorage).getTokenRawImageData(data.sourceTokenId) returns (
+                bytes memory raw
+            ) {
+                return raw;
+            } catch {
+                return "";
+            }
+        }
+        // External / customized cubes pull the store's recorded art (already the
+        // 1-bit bitmap the 3D view expects). Same source as the thumbnail.
+        if (nonNormieStore != address(0)) {
+            try INonNormieArtStore(nonNormieStore).imageBytesForCube(cubeId) returns (
+                bytes memory bitmap
+            ) {
+                return bitmap;
+            } catch {
+                return "";
+            }
+        }
+        return "";
+    }
+
+    function _attributesJSON(uint256 tokenId, CubeNFT.CubeData memory data) private view returns (string memory) {
+        // Built into the shared O(n) buffer: many trait calls in one concat risk
+        // the legacy stack limit (no via-IR).
+        bool isStreet = data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET();
+        uint256 street = streetForSlot(data.slot);
+        // Population is 1 for a single cube; a merged-street token reports its
+        // occupied-plot count.
+        string memory population = "1";
+        if (isStreet) {
+            (, uint8 occ,) = cubes.streetPlots(tokenId);
+            population = uint256(occ).toString();
+        }
+        bytes memory buf = StrBuf.alloc(2048);
+        buf.cat(_trait("plot", uint256(data.slot).toString()));
+        buf.cat(",");
+        buf.cat(_trait("region", regionForSlot(data.slot).toString()));
+        buf.cat(",");
+        buf.cat(_trait("neighbourhood", neighbourhoodForSlot(data.slot).toString()));
+        buf.cat(",");
+        buf.cat(_trait("street", street.toString()));
+        buf.cat(",");
+        buf.cat(_trait("Environment", CubeEnv.nameForStreet(street)));
+        buf.cat(",");
+        buf.cat(_trait("Population", population));
+        buf.cat(",");
+        buf.cat(_trait("Merged", isStreet ? "Y" : "N"));
+        buf.cat(",");
+        buf.cat(_trait("Source Kind", _sourceKindLabel(data.sourceKind)));
+        buf.cat(",");
+        buf.cat(_trait("Source Contract", Strings.toHexString(uint160(data.sourceContract), 20)));
+        buf.cat(",");
+        buf.cat(_trait("Source Token ID", data.sourceTokenId.toString()));
+        buf.cat(",");
+        buf.cat(_trait("Agentic", data.agentic ? "Y" : "N"));
+        buf.cat(",");
+        buf.cat(_trait("Agent ID", data.agentId.toString()));
+        buf.cat(",");
+        buf.cat(_trait("Renderer Version", "2"));
+        buf.cat(",");
+        buf.cat(_trait("Payload Version", uint256(data.payloadVersion).toString()));
+        return buf.str();
     }
 
     function _trait(string memory traitType, string memory value)
@@ -193,10 +306,21 @@ contract CubeRendererV2 is ICubeRenderer {
             return _chunkOrDefault(HTML_SCRIPT_CHUNK, _defaultHTMLScript());
         }
 
-        string memory out = "";
-        for (uint256 i = HTML_SCRIPT_START_CHUNK; i < count; i++) {
-            out = string.concat(out, assets.chunk(i));
+        // Fetch each chunk once, sum lengths, then build into the shared O(n)
+        // buffer — the old `out = concat(out, chunk)` loop was O(n^2) on a ~100KB
+        // bundle.
+        uint256 n = count - HTML_SCRIPT_START_CHUNK;
+        string[] memory parts = new string[](n);
+        uint256 total;
+        for (uint256 i = 0; i < n; i++) {
+            parts[i] = assets.chunk(HTML_SCRIPT_START_CHUNK + i);
+            total += bytes(parts[i]).length;
         }
+        bytes memory buf = StrBuf.alloc(total + 32);
+        for (uint256 i = 0; i < n; i++) {
+            buf.cat(parts[i]);
+        }
+        string memory out = buf.str();
         return bytes(out).length == 0 ? _defaultHTMLScript() : out;
     }
 
