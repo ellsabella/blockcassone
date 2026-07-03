@@ -1,0 +1,4 @@
+{
+  "//": "core/ holds the browser-and-Node ESM twins of on-chain logic (keccak, edge-points, etc.). The repo root has no \"type\", so Node would treat these .js files as CommonJS and fail on their `export` syntax; this scopes them to ESM for Node (the browser already loads them as modules) so scripts/tests can import them.",
+  "type": "module"
+}
