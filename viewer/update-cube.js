@@ -7,7 +7,8 @@
 
 import { loadWalletNftsAcrossChains } from './wallet-nfts.js';
 import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
-import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes, customizeCube, moveCube } from './preview-chain.js';
+import { previewThumbnailSVG, cubeThumbnailSVG, loadOwnedCubes, customizeCube, moveCube, setTransactionSender } from './preview-chain.js';
+import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js';
 
 const PAGE_SIZE = 50;
 // Until a target cube is picked (slice 4) the SVG preview renders on a *demo* cube.
@@ -17,6 +18,7 @@ const demoSlotFor = (tokenId) => Number(safeBig(tokenId) % 4096n);
 
 const els = {
   addr: document.getElementById('wallet-addr'),
+  connect: document.getElementById('wallet-connect'),
   load: document.getElementById('wallet-load'),
   status: document.getElementById('wallet-status'),
   list: document.getElementById('wallet-list'),
@@ -288,7 +290,7 @@ async function moveFlow() {
   els.moveBtn.disabled = true;
   setStatus(`moving cube #${state.target.cubeId} → slot ${slot}…`);
   try {
-    await moveCube({ cubeId: state.target.cubeId, owner: state.target.owner, newSlot: slot });
+    await moveCube({ cubeId: state.target.cubeId, owner: walletAccount() || state.target.owner, newSlot: slot });
     setStatus(`cube #${state.target.cubeId} moved to slot ${slot}`);
     await loadOwned();
   } catch (err) {
@@ -323,7 +325,7 @@ async function commit() {
   try {
     const tx = await customizeCube({
       cubeId: state.target.cubeId,
-      owner: state.target.owner,
+      owner: walletAccount() || state.target.owner,
       sourceContract: state.selectedNft.contract,
       sourceTokenId: state.selectedNft.tokenId,
       payload: state.payload,
@@ -384,6 +386,26 @@ els.confirmLfg.addEventListener('click', commit);
 els.overlay.addEventListener('click', (e) => { if (e.target === els.overlay) closeConfirm(); });
 els.moveBtn.addEventListener('click', moveFlow);
 els.moveSlot.addEventListener('keydown', (e) => { if (e.key === 'Enter') moveFlow(); });
+
+// Wallet connect (injected/EIP-1193). When connected, customize/move txs are signed
+// + sent by the holder's wallet, and the wallet address seeds the "load my NFTs"
+// field. With no wallet, the unlocked-node dev fallback stays in effect.
+if (els.connect) {
+  fetch('/data/chain-config.json', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((cfg) => {
+      mountConnectButton(els.connect, {
+        chainId: Number(cfg.chainId || 0) || undefined,
+        rpcUrl: cfg.rpcUrl || 'http://127.0.0.1:8545',
+        chainName: 'Blockcassone (local)',
+        onChange: (acct) => {
+          setTransactionSender(acct ? walletSend : null);
+          if (acct && els.addr) { els.addr.value = acct; loadWallet(); }
+        },
+      });
+    });
+}
 
 // Load the cubes on the local chain (the overwrite targets) on page open.
 loadOwned();

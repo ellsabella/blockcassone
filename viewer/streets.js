@@ -8,14 +8,16 @@
 // batch via "confirm changes on-chain". Merging lets you pick which cube leads
 // the street's art (the selected SVG).
 import { loadChainMintRecords } from './chain-cubes.js';
-import { cubeThumbnailSVG, mergeStreet, moveCube } from './preview-chain.js';
+import { cubeThumbnailSVG, mergeStreet, moveCube, setTransactionSender } from './preview-chain.js';
 import { environmentNameForStreet } from '/core/cube-env.js';
+import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js';
 
 const els = {
   list: document.getElementById('streets'),
   status: document.getElementById('status'),
   reload: document.getElementById('reload'),
   me: document.getElementById('me'),
+  connect: document.getElementById('connect'),
   overlay: document.getElementById('confirm-overlay'),
   confirmTitle: document.getElementById('confirm-title'),
   confirmText: document.getElementById('confirm-text'),
@@ -86,8 +88,17 @@ async function load() {
     counts.set(w, (counts.get(w) || 0) + 1);
   }
   const dominant = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
-  if (!els.me.value.trim() && dominant) els.me.value = dominant;
-  meAddr = (els.me.value.trim() || dominant).toLowerCase();
+  // A connected wallet is authoritative for "you are"; with none, fall back to the
+  // manual dev field (default: the dominant on-chain owner).
+  const wallet = walletAccount();
+  if (wallet) {
+    els.me.value = wallet;
+    els.me.readOnly = true;
+  } else {
+    els.me.readOnly = false;
+    if (!els.me.value.trim() && dominant) els.me.value = dominant;
+  }
+  meAddr = (wallet || els.me.value.trim() || dominant).toLowerCase();
 
   render();
 }
@@ -461,5 +472,25 @@ els.confirmGo.addEventListener('click', doConfirm);
 els.overlay.addEventListener('click', (e) => { if (e.target === els.overlay) closeModal(); });
 els.commitGo.addEventListener('click', askConfirmMoves);
 els.commitDiscard.addEventListener('click', () => { pendingMoves.clear(); render(); });
+
+// Wallet connect (injected/EIP-1193). When connected, move/merge txs are signed +
+// sent by the holder's wallet and "you are" is locked to their account; otherwise
+// the dev field + unlocked-node fallback stay in effect.
+if (els.connect) {
+  fetch('/data/chain-config.json', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}))
+    .then((cfg) => {
+      mountConnectButton(els.connect, {
+        chainId: Number(cfg.chainId || 0) || undefined,
+        rpcUrl: cfg.rpcUrl || 'http://127.0.0.1:8545',
+        chainName: 'Blockcassone (local)',
+        onChange: (acct) => {
+          setTransactionSender(acct ? walletSend : null);
+          load();
+        },
+      });
+    });
+}
 
 load();
