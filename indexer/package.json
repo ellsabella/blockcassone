@@ -1,0 +1,14 @@
+{
+  "name": "blockcassone-indexer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Chain indexer for the Big Cube world — follows contract events and serves a cached snapshot so the viewer stops re-scanning the chain per load.",
+  "scripts": {
+    "backfill": "node src/backfill.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  }
+}
