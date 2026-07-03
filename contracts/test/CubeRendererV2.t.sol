@@ -120,9 +120,13 @@ contract CubeRendererV2Test is Test {
         // edge-point orbs: additive white-glow group at r=10 (soft core group r=6).
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="10"'));
         assertTrue(_contains(svg, '<filter id="nfN"'));
-        // forest strand layer (thin strands + turbulence tip-clouds)
-        assertTrue(_contains(svg, '<g fill="none" stroke="#00ff00" stroke-width="1.4"'));
+        // forest strand layer: thin cores (per walker-rule colour) + turbulence
+        // tip-clouds. The wide blurred glow pass was dropped; strands are now a
+        // single thin core group (sw .7) in the #g filter, and clouds fill the
+        // per-colour gradient (#cg unique / #cg2 doubled) through the #pc filter.
+        assertTrue(_contains(svg, 'stroke-width=".7" opacity=".3" filter="url(#g)"'));
         assertTrue(_contains(svg, 'filter="url(#pc)"'));
+        assertTrue(_contains(svg, 'fill="url(#cg') && _contains(svg, ')" filter="url(#pc)"'));
         assertTrue(_contains(svg, '<use href="#l" stroke="#00ff00"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));

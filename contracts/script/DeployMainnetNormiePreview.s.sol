@@ -11,6 +11,7 @@ import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 import { NormieAddresses } from "../src/NormieAddresses.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
+import { GenesisMinterBase } from "../src/GenesisMinterBase.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
 contract DeployMainnetNormiePreview is Script {
@@ -164,7 +165,7 @@ contract DeployMainnetNormiePreview is Script {
         deployment.genesis.setSeaDrop(config.seaDrop);
 
         vm.broadcast();
-        deployment.genesis.setPhase(NormieGenesisMinter.Phase.Public);
+        deployment.genesis.setPhase(GenesisMinterBase.Phase.Public);
 
         vm.broadcast();
         deployment.genesis.mintPublicFor(config.previewRecipient, config.sampleMints);

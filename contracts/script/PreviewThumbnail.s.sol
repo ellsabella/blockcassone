@@ -10,6 +10,10 @@ import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 
+interface INormieRawStorage {
+    function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
+}
+
 // Minimal Normie source used only for previews.
 contract PreviewMockNormies is ERC721 {
     mapping(uint256 tokenId => bytes raw) private _raw;
@@ -26,23 +30,48 @@ contract PreviewMockNormies is ERC721 {
     }
 }
 
-/// @notice Dump thumbnail SVGs for a range of slots in ONE run, to eyeball the
-/// per-slot colour (main colour = the slot's unique Hilbert axis: x=red,
-/// y=green, z=blue). For each slot it logs the colour this script computes
-/// (independent copy of the renderer's formula) so the console and the SVGs
-/// can be compared directly.
+/// @notice Dump thumbnail SVGs to eyeball aesthetics, with NO viewer/anvil/deploy.
+///
+/// For each slot it writes TWO files so both render paths are tracked together:
+///   data/preview-slot-<N>.svg        Normie path (full art incl. forest strands)
+///   data/preview-nonnormie-<N>.svg   non-Normie path (same silhouette, no forest)
+///
+/// Art source, in priority order, per Normie id:
+///   1. cached fixture  data/normie-raw-<id>.hex  (real on-chain bitmap, fork-free)
+///   2. live chain      read from NormiesStorage IF run against a fork, then cached
+///   3. placeholder     a coherent face silhouette (the amusing fallback)
+///
+/// So: run ONCE against your fork to bake real art into fixtures, then every run
+/// after is fork-free and shows real Normies. Colour still comes from the SLOT
+/// (its unique Hilbert axis: x=red, y=green, z=blue), independent of the art.
 ///
 /// Usage (WSL):
+///   # fork-free, uses cached fixtures (or placeholder if none yet)
 ///   forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail
-///   COUNT=12 forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail
-///
-/// Writes: data/preview-slot-<N>.svg for N in [0, COUNT)
+///   # one-time real-art capture (reads + caches live bitmaps), needs your key
+///   source ~/blockcassone/.env  # exports ETH_RPC_URL
+///   forge script contracts/script/PreviewThumbnail.s.sol --tc PreviewThumbnail \
+///     --rpc-url "$ETH_RPC_URL"
+///   COUNT=12 REAL_IDS="1,42,1250" forge script ... --tc PreviewThumbnail
 contract PreviewThumbnail is Script {
     uint256 private constant HILBERT_ORDER = 5;
+    // Live Normies bitmap storage (mainnet). Has code only when forked.
+    address private constant NORMIES_STORAGE = 0x1B976bAf51cF51F0e369C070d47FBc47A706e602;
 
     function run() external {
+        uint256[] memory ids = _realIds();
         uint256 count = vm.envOr("COUNT", uint256(8));
+        if (count > ids.length) count = ids.length; // one cube per unique source id
+        uint256 nnCount = vm.envOr("NONNORMIE_COUNT", uint256(4));
+        if (nnCount > count) nnCount = count;
         address dev = address(0xBEEF);
+
+        bool forked = NORMIES_STORAGE.code.length > 0;
+        console2.log(
+            forked
+                ? "mode: FORKED - reading live Normie art and caching to data/normie-raw-*.hex"
+                : "mode: fork-free - using cached fixtures, else placeholder silhouette"
+        );
 
         PreviewMockNormies normies = new PreviewMockNormies();
         CubeNFT cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, dev);
@@ -56,31 +85,91 @@ contract PreviewThumbnail is Script {
         );
 
         for (uint256 s = 0; s < count; s++) {
-            uint256 normieId = 1000 + s; // a normie can only be cubed once, so vary it
-            normies.mint(dev, normieId, _sampleBitmap(normieId));
+            uint256 id = ids[s];
+            (bytes memory raw, string memory artSrc) = _bitmapFor(id, forked);
 
+            // Normie path: mint a cube on the mock holding this (real) art and render.
+            normies.mint(dev, id, raw);
+            bytes32 seed = keccak256(abi.encode("preview", s));
             vm.prank(dev);
-            uint256 cubeId =
-                cubes.mintNormieCube(normieId, uint32(s), keccak256(abi.encode("preview", s)));
-
-            // read the slot back to prove it round-trips, and render
-            CubeNFT.CubeData memory data = cubes.resolvedCubeData(cubeId);
+            uint256 cubeId = cubes.mintNormieCube(id, uint32(s), seed);
             string memory svg = thumb.thumbnailSVG(cubeId);
             vm.writeFile(string.concat("data/preview-slot-", vm.toString(s), ".svg"), svg);
 
             console2.log("slot", s);
-            console2.log("  data.slot (round-trip):", uint256(data.slot));
+            console2.log("  normie id / art:", id, artSrc);
             console2.log("  expected colour:", _colourName(_axis(s)));
-            console2.log("  emitted in SVG:", _emittedColour(svg));
+            console2.log("  emitted in SVG :", _emittedColour(svg));
+
+            // Non-Normie path: same silhouette as a 2-bit tonal payload, rendered
+            // statelessly. Verifies walkers/glass/frame on the customized route.
+            if (s < nnCount) {
+                string memory nn = thumb.previewThumbnailSVG(seed, uint32(s), id, _toPayload(raw));
+                vm.writeFile(string.concat("data/preview-nonnormie-", vm.toString(s), ".svg"), nn);
+            }
         }
     }
 
-    // Detect the figure colour the renderer actually emitted. #ff1919 (red) and
-    // #1f3bff (blue) only ever appear as the plane colour; if neither is present
-    // the plane colour is green (#1fff3a).
+    // ---- art sourcing -------------------------------------------------------
+
+    // Real on-chain bitmap if we have it (cached or via fork), else placeholder.
+    function _bitmapFor(uint256 id, bool forked) private returns (bytes memory raw, string memory src) {
+        string memory path = string.concat("data/normie-raw-", vm.toString(id), ".hex");
+
+        bytes memory cached = _readCached(path);
+        if (cached.length == 200) return (cached, "real (cached)");
+
+        if (forked) {
+            try INormieRawStorage(NORMIES_STORAGE).getTokenRawImageData(id) returns (bytes memory r) {
+                if (r.length == 200) {
+                    vm.writeFile(path, vm.toString(r)); // 0x-prefixed hex, no newline
+                    return (r, "real (chain->cached)");
+                }
+            } catch { }
+        }
+        return (_sampleBitmap(id), "placeholder");
+    }
+
+    function _readCached(string memory path) private view returns (bytes memory) {
+        try vm.readFile(path) returns (string memory h) {
+            try vm.parseBytes(h) returns (bytes memory r) {
+                return r;
+            } catch {
+                return "";
+            }
+        } catch {
+            return "";
+        }
+    }
+
+    // Curated revealed Normie ids (override with REAL_IDS="a,b,c"). Any id whose
+    // real bitmap can't be fetched degrades to a placeholder, so a bad id is safe.
+    function _realIds() private view returns (uint256[] memory) {
+        uint256[] memory d = new uint256[](12);
+        d[0] = 1;    d[1] = 42;   d[2] = 100;  d[3] = 250;
+        d[4] = 777;  d[5] = 1250; d[6] = 2222; d[7] = 3333;
+        d[8] = 4444; d[9] = 5555; d[10] = 6722; d[11] = 8888;
+        return vm.envOr("REAL_IDS", ",", d);
+    }
+
+    // Expand a 200-byte 1-bit silhouette into the 400-byte 2-bit tonal payload the
+    // non-Normie route expects: every "on" pixel becomes band 3 (toBinaryBitmap
+    // collapses any non-zero band back to "on", so the silhouette is preserved).
+    function _toPayload(bytes memory bmp) private pure returns (bytes memory payload) {
+        payload = new bytes(400);
+        for (uint256 cell = 0; cell < 1600; cell++) {
+            bool on = (uint8(bmp[cell >> 3]) >> uint8(7 - (cell & 7))) & 1 == 1;
+            if (on) payload[cell >> 2] |= bytes1(uint8(3) << uint8((cell & 3) << 1));
+        }
+    }
+
+    // ---- diagnostics --------------------------------------------------------
+
+    // Detect the figure colour the renderer emitted (now pure axis hues). Look at
+    // the figure's first <use> so walker/frame hues don't confuse it.
     function _emittedColour(string memory svg) private pure returns (string memory) {
-        if (_contains(svg, "#1f3bff")) return "BLUE (z)";
-        if (_contains(svg, "#ff1919")) return "RED (x)";
+        if (_contains(svg, '<use href="#o" stroke="#0000ff"')) return "BLUE (z)";
+        if (_contains(svg, '<use href="#o" stroke="#ff0000"')) return "RED (x)";
         return "GREEN (y)";
     }
 
@@ -125,14 +214,13 @@ contract PreviewThumbnail is Script {
     }
 
     function _colourName(uint256 axis) private pure returns (string memory) {
-        if (axis == 0) return "red (x) #ff1919";
-        if (axis == 1) return "green (y) #1fff3a";
-        return "blue (z) #1f3bff";
+        if (axis == 0) return "red (x) #ff0000";
+        if (axis == 1) return "green (y) #00ff00";
+        return "blue (z) #0000ff";
     }
 
     // A COHERENT face-ish silhouette (contiguous body + eye/mouth holes) so the
-    // outline path stays small. The old ring/wave pattern was noisy (thousands
-    // of scattered pixels) which produced a huge outline and a MemoryOOG. Real
+    // outline path stays small. Used only when no real bitmap is available. Real
     // Normies are coherent like this. Width varies slightly by id.
     function _sampleBitmap(uint256 id) private pure returns (bytes memory raw) {
         raw = new bytes(200);

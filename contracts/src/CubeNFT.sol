@@ -5,6 +5,14 @@ import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import {IERC721} from "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import {ICubeRenderer} from "./interfaces/ICubeRenderer.sol";
+import {
+    INonFungibleSeaDropToken,
+    ISeaDrop,
+    PublicDrop,
+    AllowListData,
+    TokenGatedDropStage,
+    SignedMintValidationParams
+} from "./interfaces/ISeaDrop.sol";
 
 interface IAgentStatusRegistry {
     function currentAgentBinding(address sourceContract, uint256 sourceTokenId)
@@ -13,7 +21,16 @@ interface IAgentStatusRegistry {
         returns (bool hasBinding, bool agentic, uint256 agentId, uint64 updatedAt);
 }
 
-contract CubeNFT is ERC721, Ownable {
+// The genesis source-assignment controller (NormieGenesisMinter) the token routes
+// SeaDrop mints to. Kept as an interface so the token has no compile dependency
+// on the minter implementation.
+interface INormieGenesisMinter {
+    function mintSeaDrop(address minter, uint256 quantity) external returns (uint256[] memory);
+    function mintedCount() external view returns (uint256);
+    function walletGenesisMinted(address wallet) external view returns (uint256);
+}
+
+contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     uint8 public constant SOURCE_KIND_NORMIE = 1;
     uint8 public constant SOURCE_KIND_EXTERNAL_ERC721 = 2;
     uint8 public constant SOURCE_KIND_MERGED_STREET = 3;
@@ -61,6 +78,9 @@ contract CubeNFT is ERC721, Ownable {
     error OnlyCustomizer(address caller);
     error CannotCustomizeStreet(uint256 cubeId);
     error RendererNotSet();
+    error OnlyOwnerOrGenesisMinter(address caller);
+    error OnlyAllowedSeaDrop(address caller);
+    error GenesisMinterNotSet();
 
     event CubeMinted(
         uint256 indexed cubeId,
@@ -84,6 +104,8 @@ contract CubeNFT is ERC721, Ownable {
         uint256 sourceTokenId,
         uint8 payloadVersion
     );
+    event GenesisMinterUpdated(address indexed oldMinter, address indexed newMinter);
+    event AllowedSeaDropUpdated(address[] allowedSeaDrop);
 
     address public immutable normieContract;
     uint32 public immutable totalSlots;
@@ -101,6 +123,16 @@ contract CubeNFT is ERC721, Ownable {
     // Set to the customization controller, which verifies cube ownership and a
     // flattening attestation before calling.
     address public customizer;
+
+    // ---- SeaDrop (OpenSea) genesis-mint integration -------------------------
+    // This token is the SeaDrop-facing ERC-721: OpenSea's SeaDrop singleton calls
+    // mintSeaDrop / getMintStats here, and mintSeaDrop routes the bespoke Normie
+    // source assignment to `genesisMinter`. Minting authorization is decoupled from
+    // Ownable so a human/admin can stay owner (to configure the drop on SeaDrop)
+    // while the minter contract does the actual minting.
+    address public genesisMinter;
+    mapping(address seaDrop => bool allowed) public allowedSeaDrop;
+    address[] private _allowedSeaDropList;
 
     mapping(uint256 cubeId => CubeData data) private _cubeData;
     mapping(uint32 slot => uint256 cubeId) public cubeForSlot;
@@ -187,9 +219,18 @@ contract CubeNFT is ERC721, Ownable {
         cubeForNormieId[normieId] = cubeId;
     }
 
+    // Genesis mints come from the source-assignment controller (`genesisMinter`),
+    // or the owner in dev/tests; other mint variants stay owner-only.
+    modifier onlyOwnerOrGenesisMinter() {
+        if (msg.sender != owner() && msg.sender != genesisMinter) {
+            revert OnlyOwnerOrGenesisMinter(msg.sender);
+        }
+        _;
+    }
+
     function mintSnapshotNormieCubeFor(address minter, uint256 normieId, uint32 slot, bytes32 seed)
         external
-        onlyOwner
+        onlyOwnerOrGenesisMinter
         returns (uint256 cubeId)
     {
         uint256 existingCubeId = cubeForNormieId[normieId];
@@ -217,7 +258,7 @@ contract CubeNFT is ERC721, Ownable {
         uint32 slot,
         bytes32 seed,
         uint256 agentId
-    ) external onlyOwner returns (uint256 cubeId) {
+    ) external onlyOwnerOrGenesisMinter returns (uint256 cubeId) {
         uint256 existingCubeId = cubeForNormieId[normieId];
         if (existingCubeId != 0) revert NormieAlreadyCubed(normieId, existingCubeId);
 
@@ -235,6 +276,36 @@ contract CubeNFT is ERC721, Ownable {
             agentId
         ));
         cubeForNormieId[normieId] = cubeId;
+    }
+
+    /// @notice Genesis mint of an external-source cube (e.g. a Brainrot). NO
+    ///         source-ownership check — the committed genesis pool is the authority,
+    ///         exactly like snapshot Normies. Callable by the genesis minter (or
+    ///         owner). The tonal art payload is recorded separately by the minter
+    ///         into the non-Normie art store. sourceKey dedup prevents double-cubing.
+    function mintSnapshotExternalCubeFor(
+        address minter,
+        address sourceContract,
+        uint256 sourceTokenId,
+        uint32 slot,
+        bytes32 seed,
+        uint8 payloadVersion
+    ) external onlyOwnerOrGenesisMinter returns (uint256 cubeId) {
+        if (sourceContract == normieContract) revert ExternalSourceIsNormie();
+        if (sourceContract.code.length == 0) revert InvalidSourceContract();
+        bytes32 key = sourceKey(block.chainid, sourceContract, sourceTokenId);
+        cubeId = _mintCube(_mintParams(
+            minter,
+            slot,
+            SOURCE_KIND_EXTERNAL_ERC721,
+            sourceContract,
+            sourceTokenId,
+            key,
+            seed,
+            payloadVersion,
+            false,
+            0
+        ));
     }
 
     function mintExternalERC721Cube(
@@ -525,6 +596,132 @@ contract CubeNFT is ERC721, Ownable {
     function setCustomizer(address newCustomizer) external onlyOwner {
         emit CustomizerUpdated(customizer, newCustomizer);
         customizer = newCustomizer;
+    }
+
+    // ---- SeaDrop (OpenSea) genesis-mint integration --------------------------
+    // The token is the SeaDrop-facing ERC-721. Deploy wiring: owner (admin) sets
+    // `genesisMinter` + `updateAllowedSeaDrop([seaDrop])`, points the minter's
+    // caller at this token, and configures the drop on SeaDrop via the forwarders
+    // below. SeaDrop then drives mints through `mintSeaDrop` / `getMintStats`.
+
+    function setGenesisMinter(address newMinter) external onlyOwner {
+        emit GenesisMinterUpdated(genesisMinter, newMinter);
+        genesisMinter = newMinter;
+    }
+
+    /// @inheritdoc INonFungibleSeaDropToken
+    function updateAllowedSeaDrop(address[] calldata allowedSeaDrop_) external onlyOwner {
+        for (uint256 i = 0; i < _allowedSeaDropList.length; i++) {
+            allowedSeaDrop[_allowedSeaDropList[i]] = false;
+        }
+        delete _allowedSeaDropList;
+        for (uint256 i = 0; i < allowedSeaDrop_.length; i++) {
+            allowedSeaDrop[allowedSeaDrop_[i]] = true;
+            _allowedSeaDropList.push(allowedSeaDrop_[i]);
+        }
+        emit AllowedSeaDropUpdated(allowedSeaDrop_);
+    }
+
+    /// @inheritdoc INonFungibleSeaDropToken
+    /// @dev SeaDrop handles payment / phase / limit validation, then calls this to
+    ///      mint. Source assignment (which Normie each cube gets) is delegated to
+    ///      the genesis minter, which mints back into this token as `genesisMinter`.
+    function mintSeaDrop(address minter, uint256 quantity) external {
+        if (!allowedSeaDrop[msg.sender]) revert OnlyAllowedSeaDrop(msg.sender);
+        if (genesisMinter == address(0)) revert GenesisMinterNotSet();
+        INormieGenesisMinter(genesisMinter).mintSeaDrop(minter, quantity);
+    }
+
+    /// @inheritdoc INonFungibleSeaDropToken
+    /// @dev Stats describe the GENESIS drop (cap = totalSlots), not this token's
+    ///      full supply (which also includes post-mint external cubes).
+    function getMintStats(address minter)
+        external
+        view
+        returns (uint256 minterNumMinted, uint256 currentTotalSupply, uint256 maxSupply)
+    {
+        maxSupply = totalSlots;
+        if (genesisMinter != address(0)) {
+            INormieGenesisMinter gm = INormieGenesisMinter(genesisMinter);
+            minterNumMinted = gm.walletGenesisMinted(minter);
+            currentTotalSupply = gm.mintedCount();
+        }
+    }
+
+    // ---- creator drop config: forward to the given (allowed) SeaDrop impl ----
+    function _requireAllowedSeaDrop(address seaDropImpl) private view {
+        if (!allowedSeaDrop[seaDropImpl]) revert OnlyAllowedSeaDrop(seaDropImpl);
+    }
+
+    function updatePublicDrop(address seaDropImpl, PublicDrop calldata publicDrop)
+        external
+        onlyOwner
+    {
+        _requireAllowedSeaDrop(seaDropImpl);
+        ISeaDrop(seaDropImpl).updatePublicDrop(publicDrop);
+    }
+
+    function updateAllowList(address seaDropImpl, AllowListData calldata allowListData)
+        external
+        onlyOwner
+    {
+        _requireAllowedSeaDrop(seaDropImpl);
+        ISeaDrop(seaDropImpl).updateAllowList(allowListData);
+    }
+
+    function updateTokenGatedDrop(
+        address seaDropImpl,
+        address allowedNftToken,
+        TokenGatedDropStage calldata dropStage
+    ) external onlyOwner {
+        _requireAllowedSeaDrop(seaDropImpl);
+        ISeaDrop(seaDropImpl).updateTokenGatedDrop(allowedNftToken, dropStage);
+    }
+
+    function updateDropURI(address seaDropImpl, string calldata dropURI) external onlyOwner {
+        _requireAllowedSeaDrop(seaDropImpl);
+        ISeaDrop(seaDropImpl).updateDropURI(dropURI);
+    }
+
+    function updateCreatorPayoutAddress(address seaDropImpl, address payoutAddress)
+        external
+        onlyOwner
+    {
+        _requireAllowedSeaDrop(seaDropImpl);
+        ISeaDrop(seaDropImpl).updateCreatorPayoutAddress(payoutAddress);
+    }
+
+    function updateAllowedFeeRecipient(address seaDropImpl, address feeRecipient, bool allowed)
+        external
+        onlyOwner
+    {
+        _requireAllowedSeaDrop(seaDropImpl);
+        ISeaDrop(seaDropImpl).updateAllowedFeeRecipient(feeRecipient, allowed);
+    }
+
+    function updateSignedMintValidationParams(
+        address seaDropImpl,
+        address signer,
+        SignedMintValidationParams calldata signedMintValidationParams
+    ) external onlyOwner {
+        _requireAllowedSeaDrop(seaDropImpl);
+        ISeaDrop(seaDropImpl).updateSignedMintValidationParams(signer, signedMintValidationParams);
+    }
+
+    function updatePayer(address seaDropImpl, address payer, bool allowed) external onlyOwner {
+        _requireAllowedSeaDrop(seaDropImpl);
+        ISeaDrop(seaDropImpl).updatePayer(payer, allowed);
+    }
+
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override
+        returns (bool)
+    {
+        return interfaceId == type(INonFungibleSeaDropToken).interfaceId
+            || super.supportsInterface(interfaceId);
     }
 
     /// @notice Re-base a cube's displayed source. Sets it to an external source

@@ -65,7 +65,9 @@
       <button data-tab="points">Edge points</button>
       <button data-tab="glass">Glass</button>
       <button data-tab="walkers">Walkers</button>
+      <button data-tab="forest">Forest</button>
     </div>
+    <div id="forest-note" style="display:none;color:#c8a;font-size:10px;margin-bottom:4px">Normie-only layer — non-Normie / customized cubes never grow forest.</div>
     <div id="glass-blend-row" style="display:none;align-items:center;gap:8px;margin-bottom:4px">
       <label style="color:#aab;font-size:11px">glass blend (the brightness lever)</label>
       <select id="glassBlend">
@@ -80,6 +82,7 @@
     <div id="rows_points" style="display:none"></div>
     <div id="rows_glass" style="display:none"></div>
     <div id="rows_walkers" style="display:none"></div>
+    <div id="rows_forest" style="display:none"></div>
     <div class="grp">PORTABLE OUTPUT (40-grid units · scale(25))</div>
     <textarea id="dump" readonly></textarea>
     <div class="hint">All widths/σ in 40-grid units → paste straight into the .sol scale(25) group. feBlend screen = on-chain-safe additive. Frame = the plane's 3 border sides; orbs = corners + edge slots.</div>
@@ -389,11 +392,53 @@ const FRAME_DEF ={glowSrcW:0.345,tightSigma:0.11,tightGain:1,tightAlpha:1.35,wid
 const POINT_DEF ={pR:0.42,pSigma:0.11,pGain:3,pAlpha:1.05,pCoreR:0.23,pCoreOp:0.44,pCoreBlur:0.035};
 const GLASS_DEF ={convMin:5,coverage:38,seed:20,inset:0.05,size:0.8,lightRot:120,lightSpread:16,lightR:16,colorGain:2.6,saturate:3,whiteBloom:0.15,fillBase:0.58,fillScale:0.55,fillCap:1,whiten:0.1,rimW:0.012,rimLight:1,rimOp:1.6,glowS1:0.02,glowG1:1,glowS2:0.05,glowG2:1,sparkleThr:0.92,sparkleR:0,sparkleOp:0};
 const WALKER_DEF={walkAxis:0,frontWalks:11,sideWalks:23,straightLen:16,steps:10,turnBias:0.4,seed:3,coreW:0.03,coreOp:0.44,glowW:0.11,glowSigma:0.02,glowGain:4.5,glowOp:0.54,beadW:0.09,beadStep:0.8,beadOp:0.82};
+// Forest = inward-branching strand trees + particle clouds, Normie-only, in the
+// figure's plane colour. Mirrors the contract _forestLayer (trunk -> hub ->
+// branches -> tip/canopy clouds) so tuned values port straight across.
+const FOREST_SCHEMA=[
+  ['trees','# trees (edge pts)',0,9,1],
+  ['sideAxis','doubled axis 0/1',0,1,1],
+  ['seed','forest seed',1,40,1],
+  ['trunkLen','trunk length',2,30,0.5],
+  ['trunkJitter','trunk len jitter',0,1,0.05],
+  ['maxDepth','branch depth',1,5,1],
+  ['spread','fork spread (rad)',0,1.2,0.02],
+  ['spreadJit','spread jitter',0,1,0.05],
+  ['decay','child length ×',0.4,0.95,0.01],
+  ['decayJit','length jitter',0,0.8,0.05],
+  ['inward','inward bias (−=out)',-0.5,0.8,0.02],
+  ['initVar','start dir var',0,1.6,0.05],
+  ['fibers','fibres / seg',1,12,1],
+  ['fiberDecay','fibre decay/depth',0,3,0.5],
+  ['fiberSpread','bundle spread',0,1.2,0.02],
+  ['bend','fibre bend',0,0.5,0.02],
+  ['glowW','strand glow w',0.005,0.25,0.005],
+  ['glowOp','strand glow α',0,1,0.02],
+  ['glowS1','glow σ tight',0.01,0.3,0.005],
+  ['glowG1','glow gain tight',1,12,0.5],
+  ['glowS2','glow σ wide',0.02,0.8,0.02],
+  ['glowG2','glow gain wide',1,8,0.5],
+  ['coreW','strand core w (thin)',0,0.1,0.002],
+  ['coreOp','strand core α',0,1,0.02],
+  ['particles','particles / seg',0,24,1],
+  ['partSize','particle size',0.05,1.5,0.05],
+  ['partSpread','particle spread',0,2.5,0.05],
+  ['haloCount','canopy halo #',0,30,1],
+  ['haloSize','canopy halo size',0.1,2.5,0.05],
+  ['haloSpread','canopy spread',0,10,0.2],
+  ['whiteFrac','white particle %',0,1,0.05],
+  ['partOp','particle α',0,1,0.02],
+  ['partBlur','particle blur',0,1,0.02],
+  ['partGain','particle gain',1,10,0.5],
+  ['partAlpha','particle bloom α',0.1,3,0.05],
+];
+const FOREST_DEF={trees:9,sideAxis:0,seed:3,trunkLen:7,trunkJitter:0.7,maxDepth:4,spread:0.48,spreadJit:0.6,decay:0.76,decayJit:0.8,inward:0.12,initVar:1,fibers:2,fiberDecay:2.5,fiberSpread:1.2,bend:0.18,glowW:0.035,glowOp:0,glowS1:0.025,glowG1:2.5,glowS2:0.08,glowG2:2,coreW:0.048,coreOp:0.26,particles:8,partSize:0.35,partSpread:0.6,haloCount:14,haloSize:0.85,haloSpread:5.2,whiteFrac:0,partOp:0.12,partBlur:0.4,partGain:3.5,partAlpha:1.55};
 const G={ normie:{schema:LINE_SCHEMA, state:{...NORMIE_DEF}, def:NORMIE_DEF},
           frame :{schema:LINE_SCHEMA, state:{...FRAME_DEF},  def:FRAME_DEF},
           points:{schema:POINT_SCHEMA,state:{...POINT_DEF},  def:POINT_DEF},
           glass :{schema:GLASS_SCHEMA,state:{...GLASS_DEF},  def:GLASS_DEF},
-          walkers:{schema:WALKER_SCHEMA,state:{...WALKER_DEF}, def:WALKER_DEF} };
+          walkers:{schema:WALKER_SCHEMA,state:{...WALKER_DEF}, def:WALKER_DEF},
+          forest:{schema:FOREST_SCHEMA,state:{...FOREST_DEF}, def:FOREST_DEF} };
 
 const amplify=(gain,alpha)=>{ const g=(+gain).toFixed(2),a=(+alpha).toFixed(2); return `${g} 0 0 0 0  0 ${g} 0 0 0  0 0 ${g} 0 0  0 0 0 ${a} 0`; };
 // neon LINE layer -> {defs, body}. Hue-preserving (works for any stroke colour).
@@ -476,6 +521,128 @@ function buildWalkers(tagged, p){
   return {defs, body:body+`</g>`};
 }
 
+// ---- forest: recursive strand trees + particle clouds (Normie-only) ----
+// Many thin fibres bundle from each edge point, converge at fork nodes then
+// re-branch (recursive, like the WebGL tree); particles cluster along every
+// segment + a big canopy cloud at each leaf tip. Growth is NOT clamped, so
+// strands + clouds spill BEYOND the cube. Colour follows the walker rule: the
+// unique (figure) axis is the minority hue, the doubled axis the 2x majority,
+// assigned per edge point (~1 in 3 = unique).
+const FOREST_SLOTS=ORBS.slice(4);   // 9 edge-slot points (3 per visible side)
+const frnd=(s,a,b)=>hashCell(s>>>0,a|0,b|0)/4294967296;
+// one bezier fibre between EXACT endpoints (so adjacent segments meet at shared
+// nodes — the bundle bows apart only in the middle), with per-fibre lateral lane.
+function forestFiber(x1,y1,x2,y2,seed,p,f,nf){
+  let dx=x2-x1,dy=y2-y1; const dl=Math.hypot(dx,dy)||1; const px=-dy/dl, py=dx/dl;
+  const lane=(nf>1?(f/(nf-1)-0.5):0)*p.fiberSpread;
+  const jit=(frnd(seed,f,2)-0.5)*p.fiberSpread*0.6, off=lane+jit;
+  const bend=p.bend*dl*(frnd(seed,f,1)-0.5)*2;
+  const c1x=x1+(x2-x1)*0.33+px*(off+bend), c1y=y1+(y2-y1)*0.33+py*(off+bend);
+  const c2x=x1+(x2-x1)*0.67+px*(off-bend), c2y=y1+(y2-y1)*0.67+py*(off-bend);
+  return `M${x1.toFixed(2)} ${y1.toFixed(2)}C${c1x.toFixed(2)} ${c1y.toFixed(2)} ${c2x.toFixed(2)} ${c2y.toFixed(2)} ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+}
+// recursive binary grower -> flat segment list {a,b,depth,leaf}. inward bias may
+// be negative (outward). No boundary clamp: trees may exit the cube.
+function forestGrow(seed,x,y,dx,dy,len,depth,p,segs){
+  if(len<0.4 || segs.length>800) return;
+  const leaf=depth>=(p.maxDepth|0);
+  let tx=20-x, ty=20-y; const tl=Math.hypot(tx,ty)||1; tx/=tl; ty/=tl;
+  let bx=dx*(1-p.inward)+tx*p.inward, by=dy*(1-p.inward)+ty*p.inward;
+  const bl=Math.hypot(bx,by)||1; bx/=bl; by/=bl;
+  const ex=x+bx*len, ey=y+by*len;
+  segs.push({a:[x,y], b:[ex,ey], depth, leaf});
+  if(leaf) return;
+  const s=(seed+depth*131+segs.length*7)>>>0, ang=Math.atan2(by,bx);
+  const spA=p.spread*(1+(frnd(s,1,0)-0.5)*p.spreadJit), spB=p.spread*(1+(frnd(s,2,0)-0.5)*p.spreadJit);
+  const lenA=len*p.decay*(1+(frnd(s,3,0)-0.5)*p.decayJit), lenB=len*p.decay*(1+(frnd(s,4,0)-0.5)*p.decayJit);
+  forestGrow((s+11)>>>0, ex,ey, Math.cos(ang-spA),Math.sin(ang-spA), lenA, depth+1, p, segs);
+  forestGrow((s+23)>>>0, ex,ey, Math.cos(ang+spB),Math.sin(ang+spB), lenB, depth+1, p, segs);
+}
+function forestTrees(p){
+  const trees=[], n=Math.min(p.trees|0, FOREST_SLOTS.length);
+  const doubled=[0,1,2].filter(a=>a!==AXIS)[(p.sideAxis|0)%2];
+  for(let ti=0; ti<n; ti++){
+    const [rx,ry]=FOREST_SLOTS[ti];
+    let dx=20-rx, dy=20-ry; const dl=Math.hypot(dx,dy)||1; dx/=dl; dy/=dl;
+    const a0=Math.atan2(dy,dx)+(frnd((p.seed+ti)>>>0,0,0)-0.5)*2*p.initVar;
+    const tlen=p.trunkLen*(1+(frnd((p.seed+ti)>>>0,1,0)-0.5)*2*p.trunkJitter);
+    const segs=[];
+    forestGrow((p.seed+ti*101)>>>0, rx,ry, Math.cos(a0),Math.sin(a0), tlen, 0, p, segs);
+    trees.push({ti, segs, axis: (ti%3===0) ? AXIS : doubled}); // ~1 in 3 = unique
+  }
+  return trees;
+}
+function forestStrandD(trees,p,axis){
+  let d='';
+  for(const tr of trees){ if(tr.axis!==axis) continue;
+    for(const sg of tr.segs){
+      const nf=Math.max(1, Math.round(p.fibers - sg.depth*p.fiberDecay));
+      const sd=(p.seed+tr.ti*17+sg.depth*5+Math.round(sg.a[0]*3+sg.b[1]*7))>>>0;
+      for(let f=0; f<nf; f++) d+=forestFiber(sg.a[0],sg.a[1],sg.b[0],sg.b[1],sd,p,f,nf);
+    }
+  }
+  return d;
+}
+function forestParts(trees,p,axis){
+  let col='',wht=''; const dot=(x,y,r)=>`<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${r.toFixed(2)}"/>`;
+  for(const tr of trees){ if(tr.axis!==axis) continue;
+    for(const sg of tr.segs){
+      const [x1,y1]=sg.a,[x2,y2]=sg.b;
+      const cnt=Math.round(p.particles*Math.max(0.3,1-sg.depth*0.12));
+      const s=(p.seed+tr.ti*97+sg.depth*131+Math.round(x1*3+y2*7))>>>0;
+      for(let i=0;i<cnt;i++){
+        const t=(i+frnd(s,i,1)*0.7)/Math.max(1,cnt);
+        const ja=frnd(s,i,2)*Math.PI*2, jr=frnd(s,i,3)*p.partSpread;
+        const x=x1+(x2-x1)*t+Math.cos(ja)*jr, y=y1+(y2-y1)*t+Math.sin(ja)*jr;
+        const r=p.partSize*(0.6+frnd(s,i,4)*0.8);
+        (frnd(s,i,5)<p.whiteFrac?wht+=dot(x,y,r):col+=dot(x,y,r));
+      }
+      // big canopy cloud at each LEAF tip (may sit outside the cube)
+      if(sg.leaf && p.haloCount>0){
+        const hs=(s+555)>>>0;
+        for(let h=0;h<(p.haloCount|0);h++){
+          const ang=frnd(hs,h,0)*Math.PI*2, rad=Math.sqrt(frnd(hs,h,1))*p.haloSpread;
+          const x=x2+Math.cos(ang)*rad, y=y2+Math.sin(ang)*rad;
+          const r=p.haloSize*(0.5+frnd(hs,h,2)*0.9);
+          (frnd(hs,h,3)<p.whiteFrac?wht+=dot(x,y,r):col+=dot(x,y,r));
+        }
+      }
+    }
+  }
+  return {col,wht};
+}
+// one mono-hue forest layer (strand glow+core + particle/white clouds)
+function forestHueLayer(trees,p,axis){
+  const hue=HEX[axis], d=forestStrandD(trees,p,axis), {col,wht}=forestParts(trees,p,axis);
+  if(!d && !col && !wht) return '';
+  return `<g fill="none" stroke="${hue}" stroke-linecap="round" style="mix-blend-mode:screen">`+
+      (d?`<g stroke-width="${p.glowW}" opacity="${p.glowOp}" filter="url(#fGlow)"><path d="${d}"/></g>`+
+         (p.coreW>0?`<g stroke-width="${p.coreW}" opacity="${p.coreOp}"><path d="${d}"/></g>`:''):'')+
+    `</g>`+
+    ((col||wht)?`<g filter="url(#fPart)" style="mix-blend-mode:screen">`+
+      (col?`<g fill="${hue}" opacity="${p.partOp}">${col}</g>`:'')+
+      (wht?`<g fill="#fff" opacity="${p.partOp}">${wht}</g>`:'')+
+    `</g>`:'');
+}
+function buildForest(p){
+  if((p.trees|0)<=0) return {defs:'',body:''};
+  const trees=forestTrees(p);
+  const defs=
+    `<filter id="fGlow" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB">`+
+      `<feGaussianBlur in="SourceGraphic" stdDeviation="${p.glowS2}" result="m"/>`+
+      `<feColorMatrix in="m" type="matrix" values="${amplify(p.glowG2,0.62)}" result="mc"/>`+
+      `<feGaussianBlur in="SourceGraphic" stdDeviation="${p.glowS1}" result="t"/>`+
+      `<feColorMatrix in="t" type="matrix" values="${amplify(p.glowG1,1)}" result="tc"/>`+
+      `<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`+
+    `<filter id="fPart" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">`+
+      `<feGaussianBlur stdDeviation="${p.partBlur}" result="b"/>`+
+      `<feColorMatrix in="b" type="matrix" values="${amplify(p.partGain,p.partAlpha)}"/></filter>`;
+  // unique (figure) hue + doubled (2x majority) hue — both present per cube.
+  const doubled=[0,1,2].filter(a=>a!==AXIS)[(p.sideAxis|0)%2];
+  const body=forestHueLayer(trees,p,AXIS)+forestHueLayer(trees,p,doubled);
+  return {defs,body};
+}
+
 function viewBoxStr(){ const w=1000*VS_N/view.z; return `${(view.cx*1000-w/2).toFixed(2)} ${(view.cy*1000-w/2).toFixed(2)} ${w.toFixed(2)} ${w.toFixed(2)}`; }
 let svgEl=null;
 function buildSVG(){
@@ -486,11 +653,12 @@ function buildSVG(){
   const glass=buildGlass(cells, G.glass.state);
   const wkAxisHex=HEX[[0,1,2].filter(a=>a!==AXIS)[(G.walkers.state.walkAxis|0)%2]];
   const walk=buildWalkers(walkerPaths(GRID, G.walkers.state), G.walkers.state);
+  const forest=buildForest(G.forest.state);
   const svg=
    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBoxStr()}">`+
      `<rect x="-2000" y="-2000" width="6000" height="6000" fill="#050507"/>`+
-     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}${walk.defs}<path id="o" d="${svgPath(GRID)}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
-     `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${fig.body}${walk.body}${glass.body}${frm.body}${orb.body}</g>`+
+     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}${walk.defs}${forest.defs}<path id="o" d="${svgPath(GRID)}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
+     `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${forest.body}${fig.body}${walk.body}${glass.body}${frm.body}${orb.body}</g>`+
    `</svg>`;
   document.getElementById('svgwrap').innerHTML=svg;
   svgEl=document.querySelector('#svgwrap svg');
@@ -500,6 +668,7 @@ function buildSVG(){
     `[NORMIE] ${ps(G.normie.state)}\n\n[FRAME] ${ps(G.frame.state)}\n\n[POINTS] ${ps(G.points.state)}\n\n`+
     `[GLASS] blend=${glassBlend}  ${ps(G.glass.state)}  (${cells.length} cells)\n\n`+
     `[WALKERS] figure=${HEX[AXIS]} (front) walker=${wkAxisHex} (sides, majority)  ${ps(G.walkers.state)}\n\n`+
+    `[FOREST] (Normie-only) unique=${HEX[AXIS]} doubled=${HEX[[0,1,2].filter(a=>a!==AXIS)[(G.forest.state.sideAxis|0)%2]]} (1:2 by walker rule)  ${ps(G.forest.state)}\n\n`+
     `--- figure defs ---\n${fig.defs}\n--- figure body ---\n${fig.body}\n\n`+
     `--- frame defs ---\n${frm.defs}\n--- frame body ---\n${frm.body}\n\n`+
     `--- orb defs ---\n${orb.defs}\n--- orb body ---\n${orb.body}\n\n`+
@@ -533,7 +702,7 @@ function makeRows(grpName){
     cont.appendChild(row);
   });
 }
-['normie','frame','points','glass','walkers'].forEach(makeRows);
+['normie','frame','points','glass','walkers','forest'].forEach(makeRows);
 document.querySelector('.controls').addEventListener('input',e=>{
   const grp=e.target.dataset.grp, k=e.target.dataset.k; if(!grp)return;
   G[grp].state[k]=parseFloat(e.target.value); document.getElementById(`v_${grp}_${k}`).textContent=G[grp].state[k]; buildSVG();
@@ -541,14 +710,15 @@ document.querySelector('.controls').addEventListener('input',e=>{
 });
 document.getElementById('tabs').addEventListener('click',e=>{ const t=e.target.dataset.tab; if(!t)return;
   [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
-  ['normie','frame','points','glass','walkers'].forEach(g=>document.getElementById('rows_'+g).style.display=(g===t?'':'none'));
-  document.getElementById('glass-blend-row').style.display=(t==='glass'?'flex':'none'); });
+  ['normie','frame','points','glass','walkers','forest'].forEach(g=>document.getElementById('rows_'+g).style.display=(g===t?'':'none'));
+  document.getElementById('glass-blend-row').style.display=(t==='glass'?'flex':'none');
+  document.getElementById('forest-note').style.display=(t==='forest'?'':'none'); });
 document.getElementById('glassBlend').addEventListener('change',e=>{ glassBlend=e.target.value; buildSVG(); });
 document.getElementById('axis').addEventListener('click',e=>{ const a=e.target.dataset.axis; if(a==null)return;
   AXIS=+a; [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.axis===a)); drawGL(); buildSVG(); });
 document.getElementById('shape').addEventListener('change',e=>{ SHAPE=+e.target.value; GRID=buildGrid(SHAPE); rebuildGL(); buildSVG(); });
 document.getElementById('reset').addEventListener('click',()=>{
-  for(const g of ['normie','frame','points','glass','walkers']){ G[g].state={...G[g].def};
+  for(const g of ['normie','frame','points','glass','walkers','forest']){ G[g].state={...G[g].def};
     G[g].schema.forEach(([k])=>{ const el=document.querySelector(`[data-grp="${g}"][data-k="${k}"]`); if(el){el.value=G[g].state[k]; document.getElementById(`v_${g}_${k}`).textContent=G[g].state[k];} }); }
   buildSVG(); });
 document.getElementById('resetView').addEventListener('click',()=>{ view={z:1,cx:0.5,cy:0.5}; updateView(); });

@@ -53,11 +53,23 @@ contract NonNormieArtStoreTest is Test {
     function testNonOwnerCannotRecordPayload() public {
         bytes memory payload = _samplePayload();
 
+        // recordTonalBands2Bit is now gated to owner OR an authorized recorder.
         vm.prank(OTHER);
         vm.expectRevert(
-            abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, OTHER)
+            abi.encodeWithSelector(NonNormieArtStore.NotAuthorizedRecorder.selector, OTHER)
         );
         store.recordTonalBands2Bit(1, payload);
+    }
+
+    function testAuthorizedRecorderCanRecord() public {
+        bytes memory payload = _samplePayload();
+
+        vm.prank(OWNER);
+        store.setAuthorizedRecorder(OTHER, true);
+
+        vm.prank(OTHER);
+        store.recordTonalBands2Bit(1, payload);
+        assertEq(store.payloadForCube(1).length, payload.length);
     }
 
     function testCannotRecordCubeZero() public {

@@ -10,8 +10,11 @@ import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
+import { BrainrotGenesisMinter } from "../src/BrainrotGenesisMinter.sol";
+import { GenesisMinterBase } from "../src/GenesisMinterBase.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 import { NonNormieArtStore } from "../src/NonNormieArtStore.sol";
+import { NonNormieArt } from "../src/NonNormieArt.sol";
 import { FlatteningAttestation } from "../src/FlatteningAttestation.sol";
 import { CubeMintController } from "../src/CubeMintController.sol";
 
@@ -79,6 +82,21 @@ contract LocalMockNormies {
     }
 }
 
+/// @notice Minimal stand-in for the CC0 BRAINROT ERC-721 (the Brainrot genesis
+///         source). Genesis external-cube minting checks only that the source has
+///         code and isn't the Normie contract (the committed payload pool is the
+///         authority — no source-ownership check), so this needs no real ERC-721
+///         machinery. Off-chain art is committed on-chain as tonal payloads.
+contract LocalMockBrainrot {
+    string public constant name = "BRAINROT";
+    string public constant symbol = "BRAINROT";
+    mapping(uint256 tokenId => address owner) public ownerOf;
+
+    function mint(address to, uint256 tokenId) external {
+        ownerOf[tokenId] = to;
+    }
+}
+
 contract DeployLocalGenesis is Script {
     uint32 internal constant DEFAULT_TOTAL_SLOTS = 4096;
     // Anvil account #1 — the dev flattening-attestation signer. It's an unlocked
@@ -94,6 +112,8 @@ contract DeployLocalGenesis is Script {
         CubeThumbnailRendererV1 thumbnailRenderer;
         CubeRendererV2 renderer;
         NormieGenesisMinter genesis;
+        LocalMockBrainrot brainrotSource;
+        BrainrotGenesisMinter brainrot;
         NonNormieArtStore artStore;
         FlatteningAttestation attestation;
         CubeMintController customizer;
@@ -110,7 +130,7 @@ contract DeployLocalGenesis is Script {
         bytes32 publicSeed = vm.envOr("BLOCKCASSONE_PUBLIC_SEED", keccak256("blockcassone-local"));
 
         uint256 gasBefore = gasleft();
-        Deployment memory d = _deploy(initialOwner, totalSlots, publicSeed);
+        Deployment memory d = _deploy(initialOwner, totalSlots, publicSeed, seaDrop);
         console2.log(
             "full-suite deploy gas (contracts only; EXCLUDES RendererAssetStore engine chunks):",
             gasBefore - gasleft()
@@ -119,7 +139,7 @@ contract DeployLocalGenesis is Script {
         _report(d, seaDrop, sampleMints);
     }
 
-    function _deploy(address initialOwner, uint32 totalSlots, bytes32 publicSeed)
+    function _deploy(address initialOwner, uint32 totalSlots, bytes32 publicSeed, address seaDrop)
         private
         returns (Deployment memory d)
     {
@@ -169,6 +189,18 @@ contract DeployLocalGenesis is Script {
         vm.broadcast();
         d.genesis = new NormieGenesisMinter(d.cubes, publicSeed, initialOwner);
 
+        // Brainrot (CC0) genesis stack: an external source collection + a minter that
+        // records the off-chain-flattened tonal payload into the shared art store at
+        // mint. Wired now; activated by pointing CubeNFT.genesisMinter at it.
+        vm.broadcast();
+        d.brainrotSource = new LocalMockBrainrot();
+
+        vm.broadcast();
+        d.brainrot = new BrainrotGenesisMinter(
+            d.cubes, keccak256(abi.encode(publicSeed, "brainrot")), initialOwner,
+            address(d.brainrotSource), d.artStore
+        );
+
         vm.broadcast();
         d.cubes.setRenderer(address(d.renderer));
 
@@ -182,20 +214,34 @@ contract DeployLocalGenesis is Script {
         vm.broadcast();
         d.cubes.setCustomizer(address(d.customizer));
 
+        // Authorize the Brainrot minter to record tonal payloads. Must precede the
+        // art-store ownership transfer (setAuthorizedRecorder is onlyOwner).
+        vm.broadcast();
+        d.artStore.setAuthorizedRecorder(address(d.brainrot), true);
+
         vm.broadcast();
         d.artStore.transferOwnership(address(d.customizer));
 
         vm.broadcast();
         d.attestation.setAuthorizedConsumer(address(d.customizer));
 
-        // Dev only: enable the post-mint move game now (setMovesEnabled is onlyOwner
-        // and ownership is about to move to the genesis minter, which has no
-        // passthrough). Production needs a real post-mint enable path.
+        // Decoupled SeaDrop wiring: the admin STAYS the token owner (to configure the
+        // drop on SeaDrop + flip minters + enable moves), while the minter contract
+        // does the actual minting via the `genesisMinter` role. The real SeaDrop
+        // singleton is the only allowed mintSeaDrop caller. The Normie genesis is the
+        // active genesisMinter; flip to `d.brainrot` to run the Brainrot drop.
+        vm.broadcast();
+        d.cubes.setGenesisMinter(address(d.genesis));
+
+        address[] memory allowed = new address[](1);
+        allowed[0] = seaDrop;
+        vm.broadcast();
+        d.cubes.updateAllowedSeaDrop(allowed);
+
+        // Enable the post-mint move game (admin retains this now that ownership stays
+        // with the admin rather than moving to the minter).
         vm.broadcast();
         d.cubes.setMovesEnabled(true);
-
-        vm.broadcast();
-        d.cubes.transferOwnership(address(d.genesis));
     }
 
     function _mintAndFinalize(
@@ -204,6 +250,12 @@ contract DeployLocalGenesis is Script {
         address seaDrop,
         uint256 sampleMints
     ) private {
+        // The active drop is driven by the real SeaDrop singleton, which calls
+        // CubeNFT.mintSeaDrop; the minter's authorized caller is therefore the TOKEN
+        // (not the SeaDrop address). `seaDrop` was already allowlisted on the token in
+        // _deploy.
+        seaDrop; // silence unused-param (SeaDrop caller is the token, wired below)
+
         uint256[] memory sampleNormies = new uint256[](sampleMints);
         for (uint256 i = 0; i < sampleMints; i++) {
             vm.broadcast();
@@ -219,10 +271,10 @@ contract DeployLocalGenesis is Script {
             d.genesis.finalizeSnapshot();
 
             vm.broadcast();
-            d.genesis.setSeaDrop(seaDrop);
+            d.genesis.setSeaDrop(address(d.cubes));
 
             vm.broadcast();
-            d.genesis.setPhase(NormieGenesisMinter.Phase.Public);
+            d.genesis.setPhase(GenesisMinterBase.Phase.Public);
 
             vm.broadcast();
             d.genesis.mintPublicFor(initialOwner, sampleMints);
@@ -235,6 +287,46 @@ contract DeployLocalGenesis is Script {
                 d.cubes.transferFrom(initialOwner, DEV_ATTESTATION_SIGNER, 1);
             }
         }
+
+        _finalizeBrainrot(d, initialOwner);
+    }
+
+    // Commit the off-chain-flattened tonal payloads for a small Brainrot pool and
+    // finalize its snapshot so the Brainrot drop is mint-ready. It becomes active the
+    // moment the admin points CubeNFT.genesisMinter at `d.brainrot` (owner = admin).
+    function _finalizeBrainrot(Deployment memory d, address initialOwner) private {
+        uint256 pool = vm.envOr("BLOCKCASSONE_BRAINROT_POOL", uint256(4));
+        if (pool == 0) return;
+
+        uint256[] memory ids = new uint256[](pool);
+        for (uint256 i = 0; i < pool; i++) {
+            uint256 sourceId = 5001 + i;
+            ids[i] = sourceId;
+            vm.broadcast();
+            d.brainrot.setBrainrotPayload(sourceId, _sampleBrainrotPayload(sourceId));
+        }
+
+        vm.broadcast();
+        d.brainrot.addSnapshotNormies(initialOwner, ids);
+
+        vm.broadcast();
+        d.brainrot.finalizeSnapshot();
+
+        vm.broadcast();
+        d.brainrot.setSeaDrop(address(d.cubes));
+
+        vm.broadcast();
+        d.brainrot.setPhase(GenesisMinterBase.Phase.Public);
+    }
+
+    // Deterministic 400-byte 2-bit tonal payload (validate only checks length +
+    // version); stands in for the off-chain nft-art-grid flattening for local dev.
+    function _sampleBrainrotPayload(uint256 sourceId) private pure returns (bytes memory p) {
+        p = new bytes(NonNormieArt.TONAL_BANDS_2BIT_BYTE_LENGTH);
+        bytes32 h = keccak256(abi.encode(sourceId));
+        for (uint256 i = 0; i < p.length; i++) {
+            p[i] = h[i % 32];
+        }
     }
 
     function _report(Deployment memory d, address seaDrop, uint256 sampleMints) private {
@@ -244,6 +336,8 @@ contract DeployLocalGenesis is Script {
         console2.log("AgentStatusRegistry", address(d.agentRegistry));
         console2.log("CubeRendererV2", address(d.renderer));
         console2.log("NormieGenesisMinter", address(d.genesis));
+        console2.log("BrainrotSource (mock)", address(d.brainrotSource));
+        console2.log("BrainrotGenesisMinter", address(d.brainrot));
         console2.log("NonNormieArtStore", address(d.artStore));
         console2.log("FlatteningAttestation", address(d.attestation));
         console2.log("CubeMintController", address(d.customizer));
@@ -262,6 +356,8 @@ contract DeployLocalGenesis is Script {
         vm.serializeString(root, "rpcUrl", "http://127.0.0.1:8545");
         vm.serializeAddress(root, "cubeNft", address(d.cubes));
         vm.serializeAddress(root, "genesisMinter", address(d.genesis));
+        vm.serializeAddress(root, "brainrotMinter", address(d.brainrot));
+        vm.serializeAddress(root, "brainrotSource", address(d.brainrotSource));
         vm.serializeAddress(root, "renderer", address(d.renderer));
         vm.serializeAddress(root, "rendererAssetStore", address(d.assetStore));
         vm.serializeAddress(root, "agentStatusRegistry", address(d.agentRegistry));

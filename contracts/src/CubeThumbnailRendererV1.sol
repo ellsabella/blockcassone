@@ -117,12 +117,13 @@ contract CubeThumbnailRendererV1 {
     }
 
     function _svgDefs(CubeNFT.CubeData memory data, bytes memory raw) private view returns (string memory) {
-        uint256 axis = geometry.mainAxis(uint256(data.slot));
+        uint256 slot = uint256(data.slot);
         return _thumbnailDefs(
             _bitmapPath(raw),
             _outlinePath(raw, data.sourceTokenId),
             _labelPath(data.sourceTokenId),
-            _colour(axis)
+            _colour(geometry.mainAxis(slot)),
+            _colour(geometry.sideAxis(slot))
         );
     }
 
@@ -130,10 +131,12 @@ contract CubeThumbnailRendererV1 {
         // Forest strands are Normie-only; non-Normie / customized cubes show only
         // the bare edge-point orbs (drawn by the frame layer).
         if (data.sourceKind != cubes.SOURCE_KIND_NORMIE()) return "";
+        uint256 slot = uint256(data.slot);
         return _forestLayer(
             data,
-            _colour(geometry.mainAxis(uint256(data.slot))),
-            geometry.motifLayout(uint256(data.slot))
+            _colour(geometry.mainAxis(slot)),
+            _colour(geometry.sideAxis(slot)),
+            geometry.motifLayout(slot)
         );
     }
 
@@ -205,7 +208,8 @@ contract CubeThumbnailRendererV1 {
         string memory bitmapPath,
         string memory outlinePath,
         string memory labelPath,
-        string memory planeColor
+        string memory planeColor,
+        string memory sideColor
     )
         private
         pure
@@ -213,7 +217,7 @@ contract CubeThumbnailRendererV1 {
     {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
         bytes memory buf = StrBuf.alloc(
-            8192 + bytes(bitmapPath).length + bytes(outlinePath).length + bytes(labelPath).length
+            8600 + bytes(bitmapPath).length + bytes(outlinePath).length + bytes(labelPath).length
         );
         buf.cat('<defs>');
         // shared white-ish glow tiers #g / #p / #h
@@ -239,10 +243,18 @@ contract CubeThumbnailRendererV1 {
         buf.cat('<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/><feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/><feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/><feGaussianBlur in="clip" stdDeviation="5" result="gr"/><feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/><feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>');
         buf.cat('<radialGradient id="cg"><stop offset="0" stop-color="');
         buf.cat(planeColor);
-        buf.cat('" stop-opacity=".82"/><stop offset=".4" stop-color="');
+        buf.cat('" stop-opacity=".5"/><stop offset=".4" stop-color="');
         buf.cat(planeColor);
-        buf.cat('" stop-opacity=".36"/><stop offset="1" stop-color="');
+        buf.cat('" stop-opacity=".22"/><stop offset="1" stop-color="');
         buf.cat(planeColor);
+        buf.cat('" stop-opacity="0"/></radialGradient>');
+        // second cloud gradient (#cg2) for the doubled side-plane colour
+        buf.cat('<radialGradient id="cg2"><stop offset="0" stop-color="');
+        buf.cat(sideColor);
+        buf.cat('" stop-opacity=".5"/><stop offset=".4" stop-color="');
+        buf.cat(sideColor);
+        buf.cat('" stop-opacity=".22"/><stop offset="1" stop-color="');
+        buf.cat(sideColor);
         buf.cat('" stop-opacity="0"/></radialGradient>');
         // path data referenced by <use>
         buf.cat('<path id="n" d="');
@@ -707,38 +719,58 @@ contract CubeThumbnailRendererV1 {
 
     // Forest: thin inward strands from active edge points to a hub, branching to
     // tips; each tip carries a turbulence particle-cloud (colour + white passes).
-    function _forestLayer(CubeNFT.CubeData memory data, string memory planeColor, uint256 layout)
-        private
-        pure
-        returns (string memory)
-    {
-        string memory glow = "";
+    // Two colour passes (walker rule): ~1 in 3 owned strands take the unique
+    // (figure) plane colour, the rest the doubled side-plane colour, so the forest
+    // reads e.g. "blue + 2x red" like the walkers. Each pass draws thin cores +
+    // faint turbulence clouds (gradient #cg = unique, #cg2 = side). The wide blurred
+    // glow pass was dropped (lab glowOp=0) — the thin core + soft cloud reads cleaner
+    // and halves the strand element count.
+    function _forestLayer(
+        CubeNFT.CubeData memory data,
+        string memory planeColor,
+        string memory sideColor,
+        uint256 layout
+    ) private pure returns (string memory) {
+        return string.concat(
+            _forestPass(data, layout, planeColor, "url(#cg)", true),
+            _forestPass(data, layout, sideColor, "url(#cg2)", false)
+        );
+    }
+
+    // Render the owned strands whose colour-class matches `unique`. Strands sprout
+    // only at sub-slots this plane OWNS (strandMask); the 2..6 count + ownership
+    // split do the thinning, so no artificial cap.
+    function _forestPass(
+        CubeNFT.CubeData memory data,
+        uint256 layout,
+        string memory hue,
+        string memory cloud,
+        bool unique
+    ) private pure returns (string memory) {
         string memory core = "";
         string memory tips = "";
-        // Strands sprout only at sub-slots this plane OWNS (strandMask). Bare orbs
-        // (neighbour-owned, and empty slots) grow nothing — the frame layer draws
-        // those nodes. The 2..6 count + ownership split now do all the thinning,
-        // so no artificial cap.
         for (uint256 edge = 0; edge < 3; edge++) {
             (, uint256 strandMask) = _sidePlan(data.seed, edge);
             for (uint256 bit = 0; bit < 7; bit++) {
                 if (((strandMask >> bit) & 1) == 0) continue;
                 uint256 bi = edge * 7 + bit;
-                glow = string.concat(glow, _treeStrands(data, bi, false, layout));
-                core = string.concat(core, _treeStrands(data, bi, true, layout));
+                if (_forestIsUnique(data, bi) != unique) continue;
+                core = string.concat(core, _treeStrands(data, bi, layout));
                 tips = string.concat(tips, _treeTips(data, bi, layout));
             }
         }
         if (bytes(core).length == 0) return "";
-
-        // No white sparkle pass — the single coloured cloud reads cleaner.
         return string.concat(
-            '<g fill="none" stroke="', planeColor,
-            '" stroke-width="1.4" opacity=".16" filter="url(#p)">', glow, "</g>",
-            '<g fill="none" stroke="', planeColor,
-            '" stroke-width=".5" opacity=".5" filter="url(#g)">', core, "</g>",
-            '<g fill="url(#cg)" filter="url(#pc)">', tips, "</g>"
+            '<g fill="none" stroke="', hue,
+            '" stroke-width=".7" opacity=".3" filter="url(#g)">', core, "</g>",
+            '<g fill="', cloud, '" filter="url(#pc)">', tips, "</g>"
         );
+    }
+
+    // ~1 in 3 owned strands are the unique (figure) colour; the rest the doubled
+    // side colour (walker-rule 1:2 majority). Deterministic per cube + edge slot.
+    function _forestIsUnique(CubeNFT.CubeData memory data, uint256 bi) private pure returns (bool) {
+        return _rand(data, bi + 777, 3) == 0;
     }
 
     function _treeHub(CubeNFT.CubeData memory data, uint256 bi, uint256 layout)
@@ -758,31 +790,26 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (uint256 tipX, uint256 tipY)
     {
-        uint256 len = 120 + _rand(data, bi + b * 41 + 200, 220);
-        tipX = _offsetCanvas(hubX, data, bi + b * 59 + 260, len);
-        tipY = _offsetCanvas(hubY, data, bi + b * 73 + 320, len);
+        // Tips fan OUTWARD from the cube centre so the canopy spills toward (and
+        // over) the edge into the margin — the "extends beyond the cube" look.
+        uint256 len = 160 + _rand(data, bi + b * 41 + 200, 300);
+        tipX = _outwardCanvas(hubX, 600, data, bi + b * 59 + 260, len);
+        tipY = _outwardCanvas(hubY, 585, data, bi + b * 73 + 320, len);
     }
 
-    // bunch=false -> one curve per segment (used by the blurred glow layer).
-    // bunch=true  -> a 3-fibre bundle per segment (the visible core): fibres
-    // share a base curve, converge at the root and fan slightly at the tip.
-    function _treeStrands(CubeNFT.CubeData memory data, uint256 bi, bool bunch, uint256 layout)
+    // A 2-fibre bundle per segment (the visible core): fibres share a base curve,
+    // converge at the shared nodes and fan slightly at the tip. Trunk (root->hub)
+    // + 3 branches (hub->tip) — the bundle converges at the hub then fans out.
+    function _treeStrands(CubeNFT.CubeData memory data, uint256 bi, uint256 layout)
         private
         pure
         returns (string memory)
     {
         (uint256 rootX, uint256 rootY, uint256 hubX, uint256 hubY) = _treeHub(data, bi, layout);
-        string memory s = bunch
-            ? _forestBunch(data, bi, rootX, rootY, hubX, hubY, 0)
-            : _forestCurve(data, bi, rootX, rootY, hubX, hubY, 0);
+        string memory s = _forestBunch(data, bi, rootX, rootY, hubX, hubY, 0);
         for (uint256 b = 0; b < 3; b++) {
             (uint256 tipX, uint256 tipY) = _treeTip(data, bi, hubX, hubY, b);
-            s = string.concat(
-                s,
-                bunch
-                    ? _forestBunch(data, bi, hubX, hubY, tipX, tipY, b + 1)
-                    : _forestCurve(data, bi, hubX, hubY, tipX, tipY, b + 1)
-            );
+            s = string.concat(s, _forestBunch(data, bi, hubX, hubY, tipX, tipY, b + 1));
         }
         return s;
     }
@@ -878,8 +905,8 @@ contract CubeThumbnailRendererV1 {
     {
         return string.concat(
             '<ellipse cx="', x.toString(), '" cy="', y.toString(),
-            '" rx="', (38 + _rand(data, bi + b * 80 + 360, 30)).toString(),
-            '" ry="', (11 + _rand(data, bi + b * 90 + 420, 13)).toString(),
+            '" rx="', (52 + _rand(data, bi + b * 80 + 360, 40)).toString(),
+            '" ry="', (16 + _rand(data, bi + b * 90 + 420, 18)).toString(),
             '" transform="rotate(', _rand(data, bi + b * 100 + 480, 180).toString(),
             " ", x.toString(), " ", y.toString(), ')"/>'
         );
@@ -891,52 +918,14 @@ contract CubeThumbnailRendererV1 {
         pure
         returns (string memory)
     {
-        uint256 ox = _offsetCanvas(x, data, bi + b * 31 + 540, 25);
-        uint256 oy = _offsetCanvas(y, data, bi + b * 37 + 580, 25);
+        uint256 ox = _offsetCanvas(x, data, bi + b * 31 + 540, 32);
+        uint256 oy = _offsetCanvas(y, data, bi + b * 37 + 580, 32);
         return string.concat(
             '<ellipse cx="', ox.toString(), '" cy="', oy.toString(),
-            '" rx="', (22 + _rand(data, bi + b * 41 + 620, 22)).toString(),
-            '" ry="', (7 + _rand(data, bi + b * 47 + 660, 10)).toString(),
+            '" rx="', (32 + _rand(data, bi + b * 41 + 620, 28)).toString(),
+            '" ry="', (11 + _rand(data, bi + b * 47 + 660, 13)).toString(),
             '" transform="rotate(', _rand(data, bi + b * 53 + 700, 180).toString(),
             " ", ox.toString(), " ", oy.toString(), ')"/>'
-        );
-    }
-
-    function _forestCurve(
-        CubeNFT.CubeData memory data,
-        uint256 bi,
-        uint256 x1,
-        uint256 y1,
-        uint256 x2,
-        uint256 y2,
-        uint256 salt
-    )
-        private
-        pure
-        returns (string memory)
-    {
-        uint256 cx1 = _offsetCanvas(_mix(x1, x2, 34), data, bi + salt * 29 + 170, 90);
-        uint256 cy1 = _offsetCanvas(_mix(y1, y2, 34), data, bi + salt * 31 + 210, 90);
-        uint256 cx2 = _offsetCanvas(_mix(x1, x2, 68), data, bi + salt * 37 + 250, 115);
-        uint256 cy2 = _offsetCanvas(_mix(y1, y2, 68), data, bi + salt * 41 + 290, 115);
-        return string.concat(
-            '<path d="M',
-            x1.toString(),
-            " ",
-            y1.toString(),
-            "C",
-            cx1.toString(),
-            " ",
-            cy1.toString(),
-            " ",
-            cx2.toString(),
-            " ",
-            cy2.toString(),
-            " ",
-            x2.toString(),
-            " ",
-            y2.toString(),
-            '"/>'
         );
     }
 
@@ -974,10 +963,24 @@ contract CubeThumbnailRendererV1 {
         return _clampCanvas(base > delta ? base - delta : 0);
     }
 
+    // Widened from [105,1095] to [8,1192]: strands/clouds may now spill past the
+    // frame border (~105..1095) into the surrounding margin, up to the viewBox edge.
     function _clampCanvas(uint256 v) private pure returns (uint256) {
-        if (v < 105) return 105;
-        if (v > 1095) return 1095;
+        if (v < 8) return 8;
+        if (v > 1192) return 1192;
         return v;
+    }
+
+    // Push `coord` AWAY from `center` by ~len (plus jitter), clamped to canvas, so
+    // branch tips / canopy clouds drift toward the perimeter and into the margin.
+    function _outwardCanvas(uint256 coord, uint256 center, CubeNFT.CubeData memory data, uint256 salt, uint256 len)
+        private
+        pure
+        returns (uint256)
+    {
+        uint256 push = len / 2 + _rand(data, salt, len);
+        if (coord >= center) return _clampCanvas(coord + push);
+        return _clampCanvas(coord > push ? coord - push : 0);
     }
 
     function _rand(CubeNFT.CubeData memory data, uint256 salt, uint256 max)

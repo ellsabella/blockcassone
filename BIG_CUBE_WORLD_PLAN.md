@@ -164,31 +164,80 @@ edge-point identity. This is the crux that makes move/merge coherent.
 
 ## Status snapshot (already built)
 
-- Genesis mint: SeaDrop hook, allowlist (Merkle), public pull, claim tracking,
-  phases. Snapshot + Merkle tooling with real artifacts.
+- Genesis mint: **full OpenSea SeaDrop compliance** — `CubeNFT` implements
+  `INonFungibleSeaDropToken` (mintSeaDrop/getMintStats/config forwarders), routing
+  to the minter; allowlist (Merkle), public pull, claim tracking, phases; snapshot +
+  Merkle tooling with real artifacts. Minting **decoupled from Ownable** (`genesisMinter`
+  role) so a human/admin stays token owner. Genesis engine refactored to an abstract
+  `GenesisMinterBase` + `NormieGenesisMinter` / `BrainrotGenesisMinter` subclasses
+  (Brainrot = external-source cubes with SSTORE2-committed tonal payloads). Tests:
+  `CubeSeaDrop.t.sol`, `BrainrotGenesis.t.sol`; suite 164/164.
 - Renderer: cube SVG (`image`) + interactive 3D HTML (`animation_url`), edge-point
   trait 2D/3D parity, agent-status registry, chunked asset store.
 - Shared `StrBuf` string builder.
 
 ## To-do / follow-ups
 
-- **Wallet connect** — the dev viewer uses Anvil's unlocked accounts (signs typed
-  data + sends txs directly via RPC). Production needs real wallet connection
-  (MetaMask / WalletConnect) so the holder signs/sends customize, move, and merge
-  txs from their own wallet. (The Update Cube page's `from`/signer wiring becomes
-  the connected account.)
-- **Move + merge UI flows** — IN PROGRESS (on the Update Cube / manage surface,
-  reusing owned-cubes loading + chain helpers + the confirm modal).
-- **`movesEnabled` production gate** — `setMovesEnabled` is `onlyOwner` on CubeNFT,
-  but ownership transfers to the genesis minter, which has no passthrough — so
-  post-mint nobody can enable moves. Needs a genesis passthrough or a post-mint
-  ownership handback. (Dev: `DeployLocalGenesis` flips it on before transfer.)
+- **Wallet connect** — ✅ injected/EIP-1193 DONE (`viewer/wallet.js`). Streets
+  (move/merge) + Update Cube (customize/move) have a Connect Wallet button; when
+  connected the holder's account becomes "you are" / the tx `from` and signs+sends
+  via their wallet (`preview-chain.js` `setTransactionSender` seam), replacing the
+  Anvil-unlocked + "you are" perspective stand-in, which remains the no-wallet dev
+  fallback. Works with MetaMask on local Anvil (chainId 31337). The EIP-712
+  flattening attestation is unchanged (still the backend signer, not the wallet).
+  **Follow-ups:** WalletConnect v2 for mobile/multi-wallet (needs a bundler +
+  projectId); live click-through test with MetaMask on Anvil.
+- **Move + merge UI flows** — ✅ DONE (Streets page: `viewer/streets.html` +
+  `streets.js` + `street-preview.html`). Street-centric merge+move: merge preview
+  (leader SVG + 3D street), drag-and-drop staged moves committed as a batch behind
+  the irreversible confirm, selectable merge lead, green/red/orange/pink states.
+  Uses a "you are" perspective field as a DEV STAND-IN until wallet-connect lands.
+- **Big Cube page performance** — heavy wallet scenes (200+ NFTs) cause slow loads
+  + rAF "handler took too long" violations; relies on the Reset button to recover.
+  Needs profiling/virtualisation before launch (see memory `big_cube_performance`).
+- **`movesEnabled` production gate** — ~RESOLVED by the SeaDrop ownership-decoupling:
+  minting no longer requires transferring CubeNFT ownership to the minter (it's the
+  `genesisMinter` role now), so a human/admin can stay owner and call `setMovesEnabled`
+  post-mint. Just ensure the deploy keeps owner = admin (don't transferOwnership to
+  the minter).
 - Production off-chain **flatten + attestation signer** service (dev uses Anvil).
-- **`core/keccak.js`** multi-block bug (only bit client-side >136-byte hashing,
-  now routed through `web3_sha3`).
+- **`core/keccak.js`** multi-block bug — ✅ RESOLVED. `core/keccak.js` is now
+  byte-exact vs Solidity/Foundry for inputs of any length (verified against
+  `cast keccak` and `js-sha3` across 0..600 B + the 400-byte tonal preimage). The
+  `web3_sha3` RPC workaround in `viewer/preview-chain.js` is removed — the customize
+  attestation `payloadHash` is hashed client-side. Guarded by `npm run check:keccak`
+  (`scripts/check-keccak.mjs`); `core/package.json` (`type: module`) lets Node import
+  the core ESM twins.
+- **Brainrot genesis payloads** — generate the 400-byte flattened tonal payload for
+  every pool Brainrot (off-chain via `nft-art-grid`, with the background-key fix),
+  then commit them to `BrainrotGenesisMinter` before finalize (no paid mint may
+  yield a placeholder → mint reverts `MissingSourcePayload` if absent). **Optimise
+  the commit with batched SSTORE2**: pack ~60 payloads per 24 KB blob (one `CREATE`
+  amortised across the batch) instead of the current one-blob-per-payload — ~30–40%
+  cheaper on the full-collection upload. Also decide the pool size/curation (full
+  10k vs a subset) since every pool token needs a committed payload.
+- **Sequential genesis drops** — Normie + Brainrot cubes are the SAME CubeNFT token,
+  so the two drops run one after the other: repoint `cubes.setGenesisMinter` +
+  reconfigure the SeaDrop public/allowlist drop between them.
+- **Deploy wiring for SeaDrop + Brainrot** — extend `DeployLocalGenesis` to set
+  `genesisMinter`, `updateAllowedSeaDrop`, the minter's `seaDrop` (= the token), and
+  authorize the Brainrot minter as a `NonNormieArtStore` recorder.
 
 ## Open decisions
 
-- Merge **"leader" rule** + whether merge is reversible (current: lowest occupied
-  plot; irreversible v1).
-- Customization **source allow-list policy** (CC0 registry `data/cc0-projects.json`).
+- Merge **reversibility** — **RESOLVED: do NOT allow. Irreversible is final** (v1
+  behaviour stands; CubeData is still retained for rendering, not for un-merge).
+  Leader rule RESOLVED: default lowest occupied plot, owner can choose any owned
+  occupied plot via `mergeStreet(uint32,uint256)`.
+- **Empty-street policy** — **RESOLVED: allow fully-empty streets** (move everyone
+  out → 0 occupied → reverts to biome; no ≥1 floor). Current `moveCube` behaviour is
+  correct as-is.
+- **Brainrot CC0 status** — **RESOLVED: confirmed CC0.** Brainrot-at-mint is cleared
+  legally. (Still review any OTHER collections added to the customize CC0 registry.)
+- **Brainrot pool size** — **PENDING an upstream burn**: the Brainrot supply will
+  shrink before we deploy and the surviving ids aren't known yet. So the genesis
+  Brainrot snapshot + payload commit must happen **after** the burn settles — snapshot
+  the surviving ids (like the Normie snapshot) and commit payloads only for those.
+  Don't pre-generate/upload the full 10k.
+- Customization **source allow-list policy** (CC0 registry `data/cc0-projects.json`)
+  — still open for collections beyond Brainrot.

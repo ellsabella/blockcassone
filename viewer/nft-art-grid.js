@@ -645,9 +645,62 @@ function downsampleGrayscale(src, srcSize, dstSize) {
   return dst;
 }
 
+// A subject on a flat, dominant background (solid-colour character art — e.g.
+// BRAINROT) can't be separated by luminance Otsu: the subject holds both bright
+// (bandages) and dark (outlines) parts, so Otsu keeps only the darkest sliver and
+// the cube reads as sparse noise. Instead, key off the background — foreground =
+// cells whose colour differs from the detected border colour. Returns 40×40 tonal
+// bands (0 = background, 1..2 by darkness) or NULL when there is no clean flat
+// background (caller falls back to Otsu, e.g. photos / full-bleed art).
+const BG_KEY_DIST2 = 0.02;      // squared RGBA colour distance to call a cell "not background"
+const BG_EDGE_FRACTION = 0.6;   // >=60% of border cells must match the bg to key off it
+const BG_KEY_MIN_LIT = 12;      // ignore near-empty results
+const BG_KEY_MAX_FILL = 0.9;    // ignore results that fill almost everything (bad bg guess)
+
+export function bandsFromBackgroundKey(colors, rawSize) {
+  if (!colors || colors.length < rawSize * rawSize) return null;
+  const bg = backgroundColor(colors, rawSize, rawSize);
+  // Is the border actually dominated by one flat colour?
+  let edge = 0, edgeBg = 0;
+  for (let row = 0; row < rawSize; row++) {
+    for (let col = 0; col < rawSize; col++) {
+      if (row !== 0 && col !== 0 && row !== rawSize - 1 && col !== rawSize - 1) continue;
+      edge++;
+      if (colorDistance2(colors[row * rawSize + col], bg) < BG_KEY_DIST2) edgeBg++;
+    }
+  }
+  if (edge === 0 || edgeBg / edge < BG_EDGE_FRACTION) return null;
+
+  // Down-sample foreground coverage + subject luminance from rawSize -> 40.
+  const factor = rawSize / GRID_SIZE;
+  const bands = new Uint8Array(GRID_SIZE * GRID_SIZE);
+  let lit = 0;
+  for (let row = 0; row < GRID_SIZE; row++) {
+    const r0 = Math.floor(row * factor), r1 = Math.min(rawSize, Math.ceil((row + 1) * factor));
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const c0 = Math.floor(col * factor), c1 = Math.min(rawSize, Math.ceil((col + 1) * factor));
+      let fg = 0, n = 0, lsum = 0;
+      for (let r = r0; r < r1; r++) {
+        for (let c = c0; c < c1; c++) {
+          const px = colors[r * rawSize + c]; n++;
+          if (colorDistance2(px, bg) >= BG_KEY_DIST2) { fg++; lsum += grayFor(px); }
+        }
+      }
+      if (n > 0 && fg / n >= 0.5) {                                 // cell is majority foreground
+        bands[row * GRID_SIZE + col] = (lsum / fg) < 0.45 ? 2 : 1;  // darker subject -> higher band
+        lit++;
+      }
+    }
+  }
+  if (lit < BG_KEY_MIN_LIT || lit > GRID_SIZE * GRID_SIZE * BG_KEY_MAX_FILL) return null;
+  return bands;
+}
+
 // 40×40 tonal bands (0..2) via the same 2-level Otsu the cube outline uses, so the
 // on-chain SVG silhouette matches the 3D cube form. band = #thresholds exceeded.
+// Prefers a background-keyed silhouette (grid.bgBands40) when one was found.
 export function gridToBands40(grid) {
+  if (grid && grid.bgBands40) return grid.bgBands40;
   const grayscale = grid?.grayscale;
   if (!grayscale) return null;
   const rawSize = grid.gridSize || GRID_SIZE;
@@ -666,8 +719,17 @@ export function gridToBands40(grid) {
 // 2 bits/cell; band 0 = background -> "off" in the on-chain renderer). Feeds
 // CubeThumbnailRendererV1.previewThumbnailSVG and, on commit, customizeCube.
 export function gridToTonalPayload(grid) {
-  const bands = gridToBands40(grid);
   const payload = new Uint8Array(400);
+  // Background-keyed silhouette already has the subject as foreground (band>0):
+  // pack directly, NO flip (the flip below is only for the Otsu light/dark ambiguity).
+  if (grid && grid.bgBands40) {
+    const bands = grid.bgBands40;
+    for (let i = 0; i < bands.length; i++) {
+      if (bands[i]) payload[i >> 2] |= (bands[i] & 3) << ((i & 3) << 1);
+    }
+    return payload;
+  }
+  const bands = gridToBands40(grid);
   if (!bands) return payload;
   // The on-chain art + glass land on band>0 (the "foreground"). Otsu makes the
   // lit region band>0, but for a light-background image that's the background —
@@ -914,6 +976,9 @@ export async function imageUrlToBinaryGrid(imageUrl) {
       smooth.depthValues = smooth.grayscale;
       smooth.depthMode = 'grayscale';
     }
+    // Background-keyed silhouette for solid-bg subject art (null if no flat bg).
+    // Computed here while the full-res colour grid is still available.
+    smooth.bgBands40 = bandsFromBackgroundKey(smooth.colors, SMOOTH_GRID_SIZE);
     delete smooth.colors;
     console.info(`[nft-grid] smooth art grid ready`, {
       normalizedUrl,

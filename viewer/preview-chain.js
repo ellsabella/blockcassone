@@ -5,8 +5,10 @@
 // renderer address is derived from the V2 `renderer` in chain-config.json.
 
 import { loadChainMintRecords } from './chain-cubes.js';
+import { keccak256 } from '../core/keccak.js';
 
 const CUSTOMIZE_SELECTOR = 'c029bfed'; // customizeCube(uint256,address,uint256,bytes,(...),bytes)
+const MINT_EXTERNAL_SELECTOR = '4c92acf4'; // mintExternalERC721CubeWithPayload(address,uint256,uint32,bytes32,bytes,(...),bytes)
 // keccak256("BLOCKCASSONE_NON_NORMIE_TONAL_BANDS_2BIT_V1") — NonNormieArt.TONAL_BANDS_2BIT_HASH_DOMAIN
 const TONAL_HASH_DOMAIN = '2424f34564746cf332e7899072209873d7b38b19d87170b49d20de18f6a251dd';
 const THUMBNAIL_RENDERER_SELECTOR = 'ad125d79'; // thumbnailRenderer()
@@ -85,19 +87,17 @@ function encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, si
   return '0x' + CUSTOMIZE_SELECTOR + head + tonalEnc + sigEnc;
 }
 
-// Re-base cube `cubeId` (owned by `owner`) onto the wallet token
-// (sourceContract,sourceTokenId) with the flattened `payload`. Dev flow: Anvil
-// signs the EIP-712 attestation (unlocked signer) and sends the tx (unlocked owner).
-export async function customizeCube({ cubeId, owner, sourceContract, sourceTokenId, payload }) {
-  const cfg = await loadConfig();
-  if (!cfg.cubeMintController || !cfg.flatteningAttestation || !cfg.attestationSigner) {
-    throw new Error('chain-config.json missing customize addresses — redeploy with the customize stack');
-  }
+// Build + EIP-712-sign a FlatteningAttestation for `payload` deriving from the
+// wallet token (sourceContract,sourceTokenId), minted by `owner`. Shared by both
+// the fresh external mint and the re-base (customize). Dev flow: the node signs
+// with the unlocked attestationSigner. Returns { att, signature }.
+async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTokenId, payload }) {
   // On-chain hashTonalBands2Bit = keccak256(abi.encode(DOMAIN, payload)). Rebuild
-  // that exact preimage (domain word + bytes offset/length/data) and hash it on
-  // the node (web3_sha3) so attestation.payloadHash matches byte-for-byte.
+  // that exact preimage (domain word + bytes offset/length/data) and hash it
+  // client-side so attestation.payloadHash matches byte-for-byte — no RPC round
+  // trip. core/keccak.js is the byte-exact Solidity twin (verified multi-block).
   const preimage = TONAL_HASH_DOMAIN + word(64) + word(payload.length) + padRight32(bytesToHex(payload));
-  const payloadHash = await rpcRaw(cfg, 'web3_sha3', ['0x' + preimage]);
+  const payloadHash = '0x' + keccak256(hexToBytes(preimage));
   const att = {
     minter: owner,
     sourceContract,
@@ -158,16 +158,70 @@ export async function customizeCube({ cubeId, owner, sourceContract, sourceToken
   } catch (e) {
     signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, JSON.stringify(typedData)]);
   }
+  return { att, signature };
+}
+
+// Re-base cube `cubeId` (owned by `owner`) onto the wallet token
+// (sourceContract,sourceTokenId) with the flattened `payload`. Dev flow: Anvil
+// signs the EIP-712 attestation (unlocked signer) and sends the tx (unlocked owner).
+export async function customizeCube({ cubeId, owner, sourceContract, sourceTokenId, payload }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeMintController || !cfg.flatteningAttestation || !cfg.attestationSigner) {
+    throw new Error('chain-config.json missing customize addresses — redeploy with the customize stack');
+  }
+  const { att, signature } = await signFlatteningAttestation(cfg, { owner, sourceContract, sourceTokenId, payload });
   const data = encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, signature);
   return sendTx(cfg, owner, cfg.cubeMintController, data, 'customizeCube');
 }
+
+// ABI-encode mintExternalERC721CubeWithPayload. Same inline-Attestation layout as
+// encodeCustomize, but leads with sourceContract/sourceTokenId/slot/seed (5 words)
+// instead of cubeId (1 word), so offsetTonal = 16 words.
+function encodeMintExternal(sourceContract, sourceTokenId, slot, seed, payload, att, signature) {
+  const tonalEnc = word(payload.length) + padRight32(bytesToHex(payload));
+  const sigHex = String(signature).replace(/^0x/, '');
+  const sigEnc = word(sigHex.length / 2) + padRight32(sigHex);
+  const offsetTonal = 16 * 32; // 5 leading words + 10 attestation words + 1 sig-offset word
+  const offsetSig = offsetTonal + tonalEnc.length / 2;
+  const head =
+    addrWord(sourceContract) + word(sourceTokenId) + word(slot) + seedWord(seed) + word(offsetTonal)
+    + addrWord(att.minter) + addrWord(att.sourceContract) + word(att.sourceTokenId)
+    + word(att.payloadVersion) + word(att.agentic ? 1 : 0) + word(att.agentId)
+    + word(att.flatteningVersion) + seedWord(att.payloadHash) + word(att.nonce) + word(att.deadline)
+    + word(offsetSig);
+  return '0x' + MINT_EXTERNAL_SELECTOR + head + tonalEnc + sigEnc;
+}
+
+// Mint a NEW cube from a wallet-held external token (sourceContract,sourceTokenId)
+// with the flattened `payload`, at `slot`. `owner` must OWN the source token — the
+// mint reverts otherwise. Dev/local: a mainnet-fork Anvil with the holder
+// impersonated, or a mock external ERC-721 minted to `owner`. Dev flow: the node
+// signs the EIP-712 attestation (unlocked signer) and sends the tx (unlocked owner).
+export async function mintExternalCubeOnChain({ slot, owner, sourceContract, sourceTokenId, payload, seed }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeMintController || !cfg.flatteningAttestation || !cfg.attestationSigner) {
+    throw new Error('chain-config.json missing mint addresses — redeploy with the customize stack');
+  }
+  const sd = seed || ('0x' + word(BigInt(sourceTokenId) * 2654435761n + BigInt(Date.now())).slice(-64));
+  const { att, signature } = await signFlatteningAttestation(cfg, { owner, sourceContract, sourceTokenId, payload });
+  const data = encodeMintExternal(sourceContract, sourceTokenId, slot, sd, payload, att, signature);
+  return sendTx(cfg, owner, cfg.cubeMintController, data, 'mintExternalERC721CubeWithPayload');
+}
+
+// Route eth_sendTransaction through a connected wallet (EIP-1193) when set — the
+// holder signs + sends from their own account. Left null in local dev, where sendTx
+// falls back to the unlocked-account node RPC. See viewer/wallet.js.
+let txSender = null;
+export function setTransactionSender(fn) { txSender = fn; }
 
 // Send a tx + wait for the receipt. eth_sendTransaction returns a hash even when
 // the tx reverts on mine, so verify status and, on revert, replay as eth_call to
 // surface the real reason.
 async function sendTx(cfg, from, to, data, label) {
   const tx = { from, to, data };
-  const txHash = await rpcRaw(cfg, 'eth_sendTransaction', [tx]);
+  const txHash = txSender
+    ? await txSender(tx)
+    : await rpcRaw(cfg, 'eth_sendTransaction', [tx]);
   let receipt = null;
   for (let i = 0; i < 40 && !receipt; i++) {
     receipt = await rpcRaw(cfg, 'eth_getTransactionReceipt', [txHash]);
@@ -226,6 +280,13 @@ function bytesToHex(u8) {
   let s = '';
   for (let i = 0; i < u8.length; i++) s += u8[i].toString(16).padStart(2, '0');
   return s;
+}
+
+function hexToBytes(hex) {
+  const h = hex.replace(/^0x/, '');
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  return out;
 }
 
 function padRight32(hex) {
