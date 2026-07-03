@@ -13,20 +13,37 @@ contract NonNormieArtStore is Ownable {
     error InvalidCubeId();
     error PayloadAlreadyRecorded(uint256 cubeId);
     error MissingPayload(uint256 cubeId);
+    error NotAuthorizedRecorder(address caller);
 
     event NonNormiePayloadRecorded(
         uint256 indexed cubeId,
         uint8 indexed version,
         bytes32 indexed payloadHash
     );
+    event AuthorizedRecorderUpdated(address indexed recorder, bool allowed);
 
     mapping(uint256 cubeId => PayloadRecord record) public payloadRecordForCube;
     mapping(uint256 cubeId => bytes payload) private _payloadForCube;
+    // Contracts allowed to record payloads besides the owner (e.g. the genesis
+    // minter for a CC0 collection + the customize controller).
+    mapping(address recorder => bool allowed) public authorizedRecorder;
 
     constructor(address initialOwner_) Ownable(initialOwner_) {}
 
+    modifier onlyRecorder() {
+        if (msg.sender != owner() && !authorizedRecorder[msg.sender]) {
+            revert NotAuthorizedRecorder(msg.sender);
+        }
+        _;
+    }
+
+    function setAuthorizedRecorder(address recorder, bool allowed) external onlyOwner {
+        authorizedRecorder[recorder] = allowed;
+        emit AuthorizedRecorderUpdated(recorder, allowed);
+    }
+
     /// @notice Record a payload for a cube that has none yet (the mint path).
-    function recordTonalBands2Bit(uint256 cubeId, bytes calldata payload) external onlyOwner {
+    function recordTonalBands2Bit(uint256 cubeId, bytes calldata payload) external onlyRecorder {
         if (payloadRecordForCube[cubeId].payloadHash != bytes32(0)) {
             revert PayloadAlreadyRecorded(cubeId);
         }
