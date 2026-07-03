@@ -49,6 +49,13 @@ import { updateNftLabel, updateLightsLabel }            from './ui/labels.js';
 import {
   updateWalletStatus, updateMintStatus, mintCountValue, setMintCountValue,
 } from './ui/wallet-mint.js';
+import { noteRebuild, noteFrame, formatSnapshot, resetMetrics, getSnapshot } from './perf-metrics.js';
+// Console accessors: type `perf()` at the devtools console prompt to dump the
+// current metrics, or `perfReset()` to zero the cumulative counters.
+if (typeof window !== 'undefined') {
+  window.perf = () => { const s = getSnapshot(); console.log(formatSnapshot(s)); return s; };
+  window.perfReset = () => { resetMetrics(); return 'perf metrics reset'; };
+}
 
 const canvas = document.getElementById('gl');
 const logEl  = document.getElementById('log');
@@ -1505,6 +1512,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'g' || e.key === 'G') { showCubeGlass      = !showCubeGlass;      rebuildScene(); log(`cube-glass overlay: ${showCubeGlass ? 'on' : 'off'}`); }
   if (e.key === 'l' || e.key === 'L') { showLightMarkers   = !showLightMarkers;   rebuildScene(); log(`light markers: ${showLightMarkers ? 'on' : 'off'}`); }
   if (e.key === 'e' || e.key === 'E') { showEdgePoints     = !showEdgePoints;     rebuildScene(); log(`edge points: ${showEdgePoints ? 'on' : 'off'}`); }
+  if (e.key === 'p' || e.key === 'P') { togglePerfHud(); }
 });
 
 // ---------- Meshes ----------
@@ -2355,7 +2363,35 @@ function fullArtworkMotifSet() {
   return new Set();
 }
 
+// Coalesce rebuilds: data-ready callbacks (wallet / mint / normie pixels /
+// banner) each fire as their data streams in during a load, previously
+// triggering a full rebuildScene() apiece (~8 heavy rebuilds per load). Collapse
+// any burst within a frame into a single rebuild on the next animation frame.
+let _rebuildScheduled = false;
+function scheduleRebuild() {
+  if (_rebuildScheduled) return;
+  _rebuildScheduled = true;
+  requestAnimationFrame(() => { _rebuildScheduled = false; rebuildScene(); });
+}
+
+// Per-slot cache for the static empty-world scaffold. The biome / Hilbert /
+// cardioid / edge-point items for a slot depend only on its fixed world
+// position — never on selection or dim — so build the GL meshes once and reuse
+// them across rebuilds instead of reallocating ~6000 buffers every interaction.
+// Styling (applyDim) mutates uniforms in place and compounds, so each rebuild
+// gets a shallow CLONE: fresh item + uniforms objects that share the cached
+// base's GL `mesh` handle (the expensive resource) but can be dimmed safely.
+const _emptySlotCache = new Map();
+const EMPTY_SLOT_CACHE_CAP = 2048; // soft bound on retained slot meshes
+const SCAFFOLD_BUILD_BUDGET = 40;  // max NEW (uncached) slots built per frame
+let _scaffoldIncomplete = false;   // a rebuild deferred some slot builds
+function cloneSceneItems(items) {
+  return items.map(it => (it && it.uniforms) ? { ...it, uniforms: { ...it.uniforms } } : { ...it });
+}
+
 function rebuildScene() {
+  const _rebuildStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  _scaffoldIncomplete = false;
   sceneItems = [];
   detailSceneItems = [];
   miniMapSceneItems = [];
@@ -2486,9 +2522,21 @@ function rebuildScene() {
 
   if (mode === 'BIG') {
     const detailedEmpty = detailedEmptyMotifSet();
+    let builtThisRebuild = 0;
     for (const motifIdx of detailedEmpty) {
       if (isMintedSlot(motifIdx)) continue;
-      const items = emptySlotItemsFor(motifIdx);
+      // Reuse the cached pristine scaffold for this slot (built once); dim a clone.
+      let base = _emptySlotCache.get(motifIdx);
+      if (!base) {
+        // Budget NEW builds per frame: entering a cold scope reveals over a few
+        // frames instead of one ~200ms hitch. Cached slots are always shown.
+        if (builtThisRebuild >= SCAFFOLD_BUILD_BUDGET) { _scaffoldIncomplete = true; continue; }
+        base = emptySlotItemsFor(motifIdx);
+        builtThisRebuild++;
+        if (_emptySlotCache.size >= EMPTY_SLOT_CACHE_CAP) _emptySlotCache.clear();
+        _emptySlotCache.set(motifIdx, base);
+      }
+      const items = cloneSceneItems(base);
       applyDim(items, emptyBiomeDimForMotif(motifIdx));
       sceneItems.push(...items);
     }
@@ -2545,14 +2593,19 @@ function rebuildScene() {
   const cnt = {};
   for (const it of sceneItems) cnt[it.material] = (cnt[it.material] || 0) + 1;
   log(`scene: ${sceneItems.length} items | ${Object.entries(cnt).map(([m, n]) => `${m}=${n}`).join(', ')}`);
+  const _rebuildEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  noteRebuild(_rebuildEnd - _rebuildStart, sceneItems.length + detailSceneItems.length + miniMapSceneItems.length);
+  // Deferred some slot builds to stay within the per-frame budget — continue
+  // filling the scope next frame. Cached slots make this converge in a few frames.
+  if (_scaffoldIncomplete) scheduleRebuild();
 }
 
 // Trigger a scene rebuild when normie pixel data arrives so 3D voxel meshes
 // get built once their pixel data is available.
-setDataReadyCallback(() => rebuildScene());
-setBannerDataReadyCallback(() => rebuildScene());
-setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); rebuildScene(); });
-setMintDataReadyCallback(() => { _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); applyMintedCubeSeeds(); rebuildScene(); });
+setDataReadyCallback(() => scheduleRebuild());
+setBannerDataReadyCallback(() => scheduleRebuild());
+setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); scheduleRebuild(); });
+setMintDataReadyCallback(() => { _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); applyMintedCubeSeeds(); scheduleRebuild(); });
 
 // Recompute edge points for real minted cubes from their on-chain seed, so a
 // minted cube's unique-plane grown points match its on-chain 2D thumbnail.
@@ -2726,8 +2779,45 @@ function drawScene(items, cam, t) {
   drawItems(additiveItems, 'additive');
 }
 
+// ---------- Perf HUD (dev) ----------
+// Toggle with `P`. Measures the two Big Cube cost axes separately: RENDER
+// (rebuildScene ms + item count + FPS) and DATA (chain RPC round-trips/calls,
+// the indexer target). Turning it on resets the cumulative counters so each
+// session reads clean; the FPS ring keeps running. See viewer/perf-metrics.js.
+let perfHudEl = null;
+let perfHudOn = false;
+let _lastHudUpdate = 0;
+function ensurePerfHud() {
+  if (perfHudEl) return perfHudEl;
+  perfHudEl = document.createElement('div');
+  perfHudEl.id = 'perf-hud';
+  perfHudEl.style.cssText =
+    'position:fixed;top:12px;right:12px;z-index:50;padding:8px 10px;' +
+    'background:rgba(8,10,14,0.86);border:1px solid #2a3a2a;color:#7fdca0;' +
+    'font:11px/1.5 "Courier New",monospace;white-space:pre;pointer-events:none;' +
+    'text-shadow:0 0 2px rgba(0,0,0,0.8);';
+  document.body.appendChild(perfHudEl);
+  return perfHudEl;
+}
+function togglePerfHud() {
+  perfHudOn = !perfHudOn;
+  const el = ensurePerfHud();
+  el.style.display = perfHudOn ? 'block' : 'none';
+  // Do NOT reset on open — the counters are cumulative since page load, so the
+  // wallet-load + chain-hydration work is still visible. Use perfReset() to zero.
+  log(`perf HUD: ${perfHudOn ? 'on' : 'off'}`);
+}
+function updatePerfHud() {
+  if (!perfHudOn || !perfHudEl) return;
+  const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  if (nowMs - _lastHudUpdate < 250) return; // ~4 Hz is plenty and avoids self-cost
+  _lastHudUpdate = nowMs;
+  perfHudEl.textContent = 'BIG CUBE PERF  (P to hide)\n' + formatSnapshot();
+}
+
 function frame() {
   resize();
+  noteFrame();
   const t = (performance.now() - startT) * 0.001;
   if (mode !== '2D' && showLightMarkers) {
     const activeMotif = (mode === 'BIG') ? selectedMotifIdx : currentPlane().hierarchy.motifIndex;
@@ -2816,6 +2906,7 @@ function frame() {
   gl.depthMask(true);
   gl.depthFunc(gl.LESS);
 
+  updatePerfHud();
   requestAnimationFrame(frame);
 }
 log('entering render loop');

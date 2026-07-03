@@ -167,16 +167,41 @@ function applyNftDetail(target, raw) {
   return target;
 }
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// OpenSea's account/nfts endpoint transiently returns 404 (and 429/5xx under
+// load) even for valid wallets that succeed on retry. A large wallet paginates
+// over several pages, so without retry one flaky page aborts the whole load.
+// Retry these statuses with linear backoff before giving up.
+const RETRYABLE_STATUS = new Set([404, 408, 425, 429, 500, 502, 503, 504]);
+const MAX_PAGE_ATTEMPTS = 4;
+
 async function fetchWalletPage(address, chain, cursor) {
   const url = new URL(`/api/opensea/chain/${chain}/account/${address}/nfts`, window.location.origin);
   url.searchParams.set('limit', '200');
   if (cursor) url.searchParams.set('next', cursor);
-  const res = await fetch(url);
-  if (!res.ok) {
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_PAGE_ATTEMPTS; attempt++) {
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (netErr) {
+      lastError = netErr; // network hiccup — retry
+      if (attempt < MAX_PAGE_ATTEMPTS) { await sleep(220 * attempt); continue; }
+      throw netErr;
+    }
+    if (res.ok) return res.json();
+
     const text = await res.text().catch(() => '');
-    throw new Error(`OpenSea wallet fetch failed ${res.status}: ${text.slice(0, 160)}`);
+    lastError = new Error(`OpenSea wallet fetch failed ${res.status}: ${text.slice(0, 160)}`);
+    if (attempt < MAX_PAGE_ATTEMPTS && RETRYABLE_STATUS.has(res.status)) {
+      await sleep(220 * attempt);
+      continue;
+    }
+    throw lastError;
   }
-  return res.json();
+  throw lastError || new Error('OpenSea wallet fetch failed');
 }
 
 async function fetchNftDetail(nft) {

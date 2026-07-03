@@ -6,6 +6,7 @@
 
 import { loadChainMintRecords } from './chain-cubes.js';
 import { keccak256 } from '../core/keccak.js';
+import { startRpc } from './perf-metrics.js';
 
 const CUSTOMIZE_SELECTOR = 'c029bfed'; // customizeCube(uint256,address,uint256,bytes,(...),bytes)
 const MINT_EXTERNAL_SELECTOR = '4c92acf4'; // mintExternalERC721CubeWithPayload(address,uint256,uint32,bytes32,bytes,(...),bytes)
@@ -29,15 +30,22 @@ async function loadConfig() {
 
 async function ethCall(cfg, to, data) {
   const endpoint = cfg.directRpc ? (cfg.rpcUrl || 'http://127.0.0.1:8545') : '/api/chain-rpc';
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
-  });
-  if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
-  const j = await res.json();
-  if (j.error) throw new Error(j.error.message || 'eth_call error');
-  return j.result;
+  const done = startRpc('eth_call', 1);
+  let ok = false;
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
+    });
+    if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+    const j = await res.json();
+    if (j.error) throw new Error(j.error.message || 'eth_call error');
+    ok = true;
+    return j.result;
+  } finally {
+    done(ok);
+  }
 }
 
 async function thumbnailRendererAddress(cfg) {
@@ -57,15 +65,22 @@ const addrWord = (a) => String(a).replace(/^0x/, '').toLowerCase().padStart(64, 
 // Generic JSON-RPC (eth_signTypedData_v4 / eth_sendTransaction), via the proxy.
 async function rpcRaw(cfg, method, params) {
   const endpoint = cfg.directRpc ? (cfg.rpcUrl || 'http://127.0.0.1:8545') : '/api/chain-rpc';
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
-  const j = await res.json();
-  if (j.error) throw new Error(j.error.message || `${method} error`);
-  return j.result;
+  const done = startRpc(method, 1);
+  let ok = false;
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    });
+    if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+    const j = await res.json();
+    if (j.error) throw new Error(j.error.message || `${method} error`);
+    ok = true;
+    return j.result;
+  } finally {
+    done(ok);
+  }
 }
 
 // ABI-encode customizeCube. The Attestation struct is all-static (10 words), so it

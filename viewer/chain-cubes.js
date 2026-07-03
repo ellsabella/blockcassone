@@ -1,5 +1,6 @@
 import { NORMIES_CONTRACT } from './wallet-nfts.js';
 import { compactNormieArtFromRaw } from './art-snapshot.js';
+import { startRpc, recordHydration } from './perf-metrics.js';
 
 const SELECTORS = {
   nextCubeId: '0xfee34352',
@@ -83,22 +84,33 @@ async function loadChainConfig() {
 }
 
 async function rpc(config, payload) {
-  const res = await fetch(config.directRpc ? config.rpcUrl : '/api/chain-rpc', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
-  const data = await res.json();
-  if (Array.isArray(payload)) {
-    // Tolerant: a reverting call (e.g. ownerOf/resolvedCubeData of a burned cube
-    // after a merge) yields null for that row, so the caller can skip it rather
-    // than failing the whole batch.
-    const rows = data.slice().sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0));
-    return rows.map(row => (row?.error ? null : row.result));
+  const done = startRpc(
+    Array.isArray(payload) ? (payload[0]?.method || 'batch') : (payload?.method || 'rpc'),
+    Array.isArray(payload) ? payload.length : 1,
+  );
+  let ok = false;
+  try {
+    const res = await fetch(config.directRpc ? config.rpcUrl : '/api/chain-rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(payload)) {
+      // Tolerant: a reverting call (e.g. ownerOf/resolvedCubeData of a burned cube
+      // after a merge) yields null for that row, so the caller can skip it rather
+      // than failing the whole batch.
+      const rows = data.slice().sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0));
+      ok = true;
+      return rows.map(row => (row?.error ? null : row.result));
+    }
+    if (data?.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    ok = true;
+    return data.result;
+  } finally {
+    done(ok);
   }
-  if (data?.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  return data.result;
 }
 
 async function call(config, to, data) {
@@ -159,6 +171,7 @@ function recordFromChain(config, cubeId, owner, dataHex) {
 export async function loadChainMintRecords() {
   const config = await loadChainConfig();
   if (!config.enabled) return { enabled: false, records: [] };
+  const hydrateStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   const nextHex = await call(config, config.cubeNft, SELECTORS.nextCubeId);
   const nextCubeId = Math.max(1, Math.min(config.maxCubes + 1, numberWord(words(nextHex)[0])));
@@ -217,5 +230,7 @@ export async function loadChainMintRecords() {
     }
   }
 
+  const hydrateEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  recordHydration(hydrateEnd - hydrateStart, records.length);
   return { enabled: true, config, records };
 }
