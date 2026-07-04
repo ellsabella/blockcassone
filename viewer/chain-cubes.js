@@ -194,8 +194,9 @@ async function loadSnapshotRecords(config) {
 // per normieId). Shared by the snapshot fast-path; the chain scan hydrates
 // inline. Goes away once the indexer serves art (M4).
 async function hydrateNormieArt(config, records) {
+  // Skip records the indexer already baked art into (M4) — those need no RPC.
   const normieRecords = records.filter(r =>
-    r && r.sourceKind === 'normie' && Number.isInteger(Number(r.source?.tokenId))
+    r && r.sourceKind === 'normie' && !r.art && Number.isInteger(Number(r.source?.tokenId))
   );
   const chunkSize = 100;
   for (let offset = 0; offset < normieRecords.length; offset += chunkSize) {

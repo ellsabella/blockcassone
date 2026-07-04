@@ -1,0 +1,6 @@
+{
+  "name": "blockcassone-viewer",
+  "private": true,
+  "type": "module",
+  "description": "Viewer ES modules. `type: module` lets Node tooling (e.g. the indexer) import shared browser codecs like art-snapshot.js; the browser loads these as <script type=module> regardless."
+}
