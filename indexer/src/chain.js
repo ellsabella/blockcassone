@@ -33,6 +33,23 @@ export function groupByEvent(logs) {
   return g;
 }
 
-export function writeSnapshot(cfg, worldState) {
-  writeFileSync(cfg.snapshotOut, JSON.stringify(worldState.toSnapshot(cfg), null, 2) + '\n');
+// Build the snapshot from the fold, bake in cached Normie art (M4), write it.
+// `artCache` optional — without it, records keep art:null (the viewer hydrates).
+export async function buildAndWriteSnapshot(client, cfg, ws, artCache) {
+  const snap = ws.toSnapshot(cfg);
+  if (artCache) {
+    const normieIds = snap.records.filter((r) => r.sourceKind === 'normie').map((r) => r.source.tokenId);
+    await artCache.ensure(client, normieIds);
+    for (const r of snap.records) {
+      if (r.sourceKind !== 'normie') continue;
+      const base = artCache.get(r.source.tokenId);
+      if (!base) continue;
+      // Cached pixels are agentic-neutral; apply the record's live agentic flag.
+      const art = { ...base, a: r.agentic ? 1 : 0 };
+      if (r.agentId) art.ai = String(r.agentId); else delete art.ai;
+      r.art = art;
+    }
+  }
+  writeFileSync(cfg.snapshotOut, JSON.stringify(snap, null, 2) + '\n');
+  return snap;
 }

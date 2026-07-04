@@ -1,6 +1,6 @@
-// Live indexer: backfill the snapshot, then keep it current by watching CubeNFT
-// events and re-writing data/world-snapshot.json on each new batch. Long-running
-// — leave it in a terminal (Ctrl+C to stop). No more manual re-backfills.
+// Live indexer: backfill the snapshot (with baked-in Normie art), then keep it
+// current by watching CubeNFT events and re-writing data/world-snapshot.json on
+// each new batch. Long-running — leave it in a terminal (Ctrl+C to stop).
 //
 // Uses viem's watchEvent. Over an http transport it polls (eth_getFilterChanges);
 // swap the transport to webSocket(ws://…) for true eth_subscribe push — the rest
@@ -9,7 +9,8 @@ import { createPublicClient, http } from 'viem';
 import { loadConfig } from './config.js';
 import { WorldState } from './snapshot.js';
 import { CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER } from './events.js';
-import { fetchLogs, fetchMintTimestamps, groupByEvent, writeSnapshot } from './chain.js';
+import { fetchLogs, fetchMintTimestamps, groupByEvent, buildAndWriteSnapshot } from './chain.js';
+import { NormieArtCache } from './art.js';
 
 const POLL_MS = Number(process.env.INDEXER_POLL_MS || 1000);
 
@@ -18,15 +19,17 @@ async function main() {
   const client = createPublicClient({ transport: http(cfg.rpcUrl), pollingInterval: POLL_MS });
 
   const ws = new WorldState();
+  const artCache = new NormieArtCache(cfg);
 
   // Initial backfill.
   const latest = await client.getBlockNumber();
   const batch = await fetchLogs(client, cfg, cfg.fromBlock, latest);
   ws.setBlockTimestamps(await fetchMintTimestamps(client, batch.minted));
   ws.applyLogs(batch);
-  writeSnapshot(cfg, ws);
+  const snap = await buildAndWriteSnapshot(client, cfg, ws, artCache);
   console.log(
-    `[indexer] backfilled ${ws.count()} records @ block ${latest} → ${cfg.snapshotOut}`
+    `[indexer] backfilled ${snap.count} records (art baked: ${snap.records.filter((r) => r.art).length}) ` +
+    `@ block ${latest} → ${cfg.snapshotOut}`
   );
   console.log(`[indexer] watching CubeNFT ${cfg.cubeNft} for new events (poll ${POLL_MS}ms)… Ctrl+C to stop`);
 
@@ -42,9 +45,9 @@ async function main() {
           ws.setBlockTimestamps(await fetchMintTimestamps(client, grouped.minted));
         }
         ws.applyLogs(grouped);
-        writeSnapshot(cfg, ws);
+        const s = await buildAndWriteSnapshot(client, cfg, ws, artCache);
         const last = logs[logs.length - 1];
-        console.log(`[indexer] +${logs.length} logs @ block ${last?.blockNumber} → ${ws.count()} records`);
+        console.log(`[indexer] +${logs.length} logs @ block ${last?.blockNumber} → ${s.count} records`);
       } catch (err) {
         console.error('[indexer] update failed:', err?.message || err);
       }
