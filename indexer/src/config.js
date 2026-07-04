@@ -8,7 +8,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(HERE, '../..'); // indexer/src -> repo root
 
 export function loadConfig() {
-  const path = resolve(REPO_ROOT, 'data/chain-config.json');
+  // INDEXER_CHAIN_CONFIG lets us point at an alternate config (e.g. a genesis
+  // deploy on a side anvil) without disturbing the viewer's data/chain-config.json.
+  const path = resolve(REPO_ROOT, process.env.INDEXER_CHAIN_CONFIG || 'data/chain-config.json');
   let raw = {};
   try {
     raw = JSON.parse(readFileSync(path, 'utf8'));
@@ -24,6 +26,7 @@ export function loadConfig() {
     cubeNft,
     cubeMintController: raw.cubeMintController || null,
     normieStorage: raw.normieStorage || null,
+    nonNormieStore: raw.nonNormieStore || null,   // NonNormieArtStore (external/CC0 tonal art)
     // Backfill window. Default 0n; override for big/mainnet forks to skip the
     // pre-deploy range (INDEXER_FROM_BLOCK=<deploy block>).
     fromBlock: process.env.INDEXER_FROM_BLOCK != null ? BigInt(process.env.INDEXER_FROM_BLOCK) : 0n,

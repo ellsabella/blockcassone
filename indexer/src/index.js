@@ -10,7 +10,7 @@ import { loadConfig } from './config.js';
 import { WorldState } from './snapshot.js';
 import { CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER } from './events.js';
 import { fetchLogs, fetchMintTimestamps, groupByEvent, buildAndWriteSnapshot } from './chain.js';
-import { NormieArtCache } from './art.js';
+import { NormieArtCache, NonNormieArtCache } from './art.js';
 
 const POLL_MS = Number(process.env.INDEXER_POLL_MS || 1000);
 
@@ -20,13 +20,14 @@ async function main() {
 
   const ws = new WorldState();
   const artCache = new NormieArtCache(cfg);
+  const nonNormieArtCache = new NonNormieArtCache(cfg);
 
   // Initial backfill.
   const latest = await client.getBlockNumber();
   const batch = await fetchLogs(client, cfg, cfg.fromBlock, latest);
   ws.setBlockTimestamps(await fetchMintTimestamps(client, batch.minted));
   ws.applyLogs(batch);
-  const snap = await buildAndWriteSnapshot(client, cfg, ws, artCache);
+  const snap = await buildAndWriteSnapshot(client, cfg, ws, artCache, nonNormieArtCache);
   console.log(
     `[indexer] backfilled ${snap.count} records (art baked: ${snap.records.filter((r) => r.art).length}) ` +
     `@ block ${latest} → ${cfg.snapshotOut}`
@@ -45,7 +46,7 @@ async function main() {
           ws.setBlockTimestamps(await fetchMintTimestamps(client, grouped.minted));
         }
         ws.applyLogs(grouped);
-        const s = await buildAndWriteSnapshot(client, cfg, ws, artCache);
+        const s = await buildAndWriteSnapshot(client, cfg, ws, artCache, nonNormieArtCache);
         const last = logs[logs.length - 1];
         console.log(`[indexer] +${logs.length} logs @ block ${last?.blockNumber} → ${s.count} records`);
       } catch (err) {

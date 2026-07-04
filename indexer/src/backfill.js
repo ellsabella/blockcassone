@@ -5,7 +5,7 @@ import { createPublicClient, http } from 'viem';
 import { loadConfig } from './config.js';
 import { WorldState } from './snapshot.js';
 import { fetchLogs, fetchMintTimestamps, buildAndWriteSnapshot } from './chain.js';
-import { NormieArtCache } from './art.js';
+import { NormieArtCache, NonNormieArtCache } from './art.js';
 
 async function main() {
   const cfg = loadConfig();
@@ -26,7 +26,8 @@ async function main() {
   ws.applyLogs(batch);
 
   const artCache = new NormieArtCache(cfg);
-  const snap = await buildAndWriteSnapshot(client, cfg, ws, artCache);
+  const nonNormieArtCache = new NonNormieArtCache(cfg);
+  const snap = await buildAndWriteSnapshot(client, cfg, ws, artCache, nonNormieArtCache);
   const withArt = snap.records.filter((r) => r.art).length;
   console.log(`[indexer] wrote ${snap.count} cube records (art baked: ${withArt}) → ${cfg.snapshotOut}`);
 }
