@@ -18,7 +18,7 @@ import {
 } from '../renderer/src/math.js';
 import { loadMaterialFromSource } from '../renderer/src/materials.js';
 import { buildCubeDetailScene } from '../viewer/detail-scene-builder.js';
-import { buildEmptySlotItems } from '../viewer/environments.js';
+import { buildEmptySlotItems } from '../viewer/crystal-biome.js';
 import { buildHilbertPathRange } from '../viewer/hilbert-lines.js';
 import { buildEdgePointDebug } from '../viewer/materials/debug-edge-points.js';
 import { setCubeAssignmentResolver } from '../viewer/assignment.js';

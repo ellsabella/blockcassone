@@ -192,7 +192,7 @@ function runInitialRay(startNode, axIdx, dir, filled, occupied, allSegs) {
 //   Flight  — travels straight until the next glass surface or cube boundary.
 // Alternates: surface → flight → surface → ...
 
-function runRandomWalk(startNode, initAxis, initDir, seed, occupied, allSegs, filled) {
+function runRandomWalk(startNode, initAxis, initDir, seed, occupied, allSegs, filled, maxSteps = Infinity) {
   let cur          = [...startNode];
   let s            = seed;
   let curAxis      = initAxis;
@@ -204,7 +204,9 @@ function runRandomWalk(startNode, initAxis, initDir, seed, occupied, allSegs, fi
   let dbgGlassHits    = 0;
   const dbgStart      = [...startNode];
 
+  let stepCount = 0;
   while (true) {
+    if (stepCount++ >= maxSteps) break;
     s = hash1([s, 0, 0]);
     if (s < TERMINATE_PROB) break;
 
@@ -488,5 +490,63 @@ export function buildStoneWalker(motifIdx, hilbert, allPlanes, gl, meshes) {
       uniforms: { uBaseCol: vividCol, uLineOpacity: isAwake ? 0.72 : LINE_OPACITY },
     });
   }
+  return items;
+}
+
+// ---- Walk a PROCEDURAL shape (empty-slot crystal biomes) --------------------
+// Reuses the exact walk core, but on a caller-supplied `filled` voxel array
+// instead of normie pixels. `mn`/`vs` are the local grid origin + voxel size the
+// segments are emitted in; `transform` orients that local space onto the cube's
+// unique-axis plane (same matrix the crystal glass uses). One shared occupied-
+// edge set across all faces so cross-path termination works. Cached under
+// `prefix`. Colour is a single tint (empty slots have no per-plane axis art).
+export function buildWalkerItemsFromFilled(gl, meshes, prefix, filled, mn, vs, transform, seed, opts = {}) {
+  const {
+    walksPerFace = 4,
+    maxSteps = 24,               // bound each walk — empty-slot traces stay short + cheap
+    tint = new Float32Array([1.6, 1.7, 1.9]),
+    coreOpacity = LINE_OPACITY,
+    glowOpacity = GLOW_OPACITY,
+    glowWidth = GLOW_WIDTH,
+    normal = [0, 1, 0],
+  } = opts;
+
+  const builtKey = `${prefix}-built`;
+  const coreKey  = `${prefix}-core`;
+  const glowKey  = `${prefix}-glow`;
+
+  if (meshes[builtKey] === undefined) {
+    const allSegs = [];
+    const occupied = new Set();
+    let wi = 0;
+    for (let axIdx = 0; axIdx < 3; axIdx++) {
+      for (const faceIdx of [0, 40]) {
+        const dir = faceIdx === 0 ? 1 : -1;
+        const candidates = glassColumnNodes(filled, axIdx, faceIdx);
+        if (candidates.length === 0) continue;
+        const selected = pickRandom(candidates, walksPerFace, seed + axIdx * 13.1 + faceIdx * 0.07);
+        for (const startNode of selected) {
+          const end = runInitialRay(startNode, axIdx, dir, filled, occupied, allSegs);
+          runRandomWalk(end, axIdx, dir, seed + wi * 0.5731 + 1.3, occupied, allSegs, filled, maxSteps);
+          wi++;
+        }
+      }
+    }
+    meshes[coreKey] = buildWalkerMesh(gl, allSegs, mn, vs, normal);
+    meshes[glowKey] = buildWalkerGlowMesh(gl, allSegs, mn, vs, normal, glowWidth, false);
+    meshes[builtKey] = allSegs.length;
+  }
+
+  if (!meshes[builtKey]) return [];
+  const xf = transform || identity(mat4());
+  const items = [];
+  if (meshes[glowKey]) items.push({
+    mesh: glowKey, material: 'normie-glow', transform: xf, blend: 'additive',
+    uniforms: { uTint: tint, uAlpha: glowOpacity },
+  });
+  if (meshes[coreKey]) items.push({
+    mesh: coreKey, material: 'lines', transform: xf, blend: 'additive',
+    uniforms: { uBaseCol: tint, uLineOpacity: coreOpacity },
+  });
   return items;
 }
