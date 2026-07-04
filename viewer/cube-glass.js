@@ -229,7 +229,7 @@ function buildInnerWiresMesh(gl, aabb, innerBoxes) {
 // "graph paper engraved on every face" look.
 function buildFaceGridMesh(gl, aabb, innerBoxes) {
   const positions = [], alphas = [];
-  pushBoxFaceGrid(positions, alphas, aabb.mn, aabb.mx, FACE_GRID_OUTER);
+  if (aabb) pushBoxFaceGrid(positions, alphas, aabb.mn, aabb.mx, FACE_GRID_OUTER);
   for (const b of innerBoxes) {
     pushBoxFaceGrid(positions, alphas, b.mn, b.mx, FACE_GRID_INNER);
   }
@@ -254,7 +254,7 @@ function buildVertexSparklesMesh(gl, aabb, innerBoxes, motifIdx) {
       [mn[0], mx[1], mx[2]], [mx[0], mx[1], mx[2]],
     );
   };
-  pushCorners(aabb.mn, aabb.mx);
+  if (aabb) pushCorners(aabb.mn, aabb.mx);
   for (const b of innerBoxes) pushCorners(b.mn, b.mx);
 
   const data = new Float32Array(corners.length * 6);
@@ -273,83 +273,79 @@ function buildVertexSparklesMesh(gl, aabb, innerBoxes, motifIdx) {
 
 // ---------------------------------------------------------------------------
 
-export function buildCubeGlass(motifIdx, hilbert, gl, meshes, mode) {
-  if (mode !== '3D') return [];
+// Generic glass renderer: given an outer AABB and a list of inner boxes, build
+// the nested-glass scene items (outer shell + inner glass + wireframes + face
+// grid + vertex sparkles). Shared by the per-cube glass (concentric boxes) and
+// the empty-slot crystal biome (per-environment box layouts). All meshes are
+// cached under `prefix`-suffixed keys so distinct callers never collide.
+//
+// opts:
+//   includeOuter  render the full outer AABB glass shell (true for cubes; false
+//                 for biomes so an empty slot reads as a crystal growth, not a
+//                 minted glass cube)
+//   innerGlassCount   how many inner boxes also get translucent glass faces
+//   seed              sparkle seed (defaults to a hash of prefix)
+//   outerTint/wireTint/gridTint/sparkTint  colour (Float32Array vec3)
+//   outerAlpha/innerAlpha/wireOpacity/gridOpacity/sparkleOpacity  strengths
+export function buildGlassBoxItems(gl, meshes, prefix, aabb, boxes, opts = {}) {
+  const {
+    includeOuter   = true,
+    innerGlassCount = INNER_GLASS_COUNT,
+    outerTint = WHITE_TINT, wireTint = WIRE_TINT, gridTint = GRID_TINT, sparkTint = SPARK_TINT,
+    outerAlpha = OUTER_GLASS_ALPHA, innerAlpha = INNER_GLASS_ALPHA,
+    wireOpacity = WIRE_OPACITY, gridOpacity = FACE_GRID_OPACITY, sparkleOpacity = SPARKLE_OPACITY,
+    seed = null,
+    transform: itemTransform = null,   // orient local-space boxes onto a plane
+  } = opts;
 
-  const aabb = cubeAABB(hilbert, motifIdx);
-  const innerBoxes = computeInnerBoxes(aabb, motifIdx);
+  const outerKey = `${prefix}-outer`;
+  const innerKey = `${prefix}-inner`;
+  const wireKey  = `${prefix}-wires`;
+  const gridKey  = `${prefix}-grid`;
+  const sparkKey = `${prefix}-spark`;
+  const sparkSeed = seed == null ? hash1([prefix.length, boxes.length, 7]) * 1000 : seed;
+  // Skip the outer AABB's grid + corner sparkles when there's no outer shell,
+  // so a crystal growth doesn't sparkle the empty slot's own bounding corners.
+  const gridAABB = includeOuter ? aabb : null;
 
-  const outerKey = `cube-outer-${motifIdx}`;
-  const innerKey = `cube-inner-${motifIdx}`;
-  const wireKey  = `cube-wires-${motifIdx}`;
-  const gridKey  = `cube-grid-${motifIdx}`;
-  const sparkKey = `cube-spark-${motifIdx}`;
-
-  if (!meshes[outerKey]) meshes[outerKey] = buildOuterGlassMesh(gl, aabb);
-  if (!meshes[innerKey]) {
-    const m = buildInnerGlassMesh(gl, innerBoxes.slice(0, INNER_GLASS_COUNT));
-    if (m) meshes[innerKey] = m;
+  if (includeOuter && !meshes[outerKey]) meshes[outerKey] = buildOuterGlassMesh(gl, aabb);
+  if (meshes[innerKey] === undefined) {
+    meshes[innerKey] = buildInnerGlassMesh(gl, boxes.slice(0, innerGlassCount)) || null;
   }
-  if (!meshes[wireKey])  meshes[wireKey]  = buildInnerWiresMesh(gl, aabb, innerBoxes);
-  if (!meshes[gridKey]) {
-    const m = buildFaceGridMesh(gl, aabb, innerBoxes);
-    if (m) meshes[gridKey] = m;
-  }
-  if (!meshes[sparkKey]) meshes[sparkKey] = buildVertexSparklesMesh(gl, aabb, innerBoxes, motifIdx);
+  if (meshes[wireKey] === undefined) meshes[wireKey] = buildInnerWiresMesh(gl, aabb, boxes);
+  if (meshes[gridKey] === undefined) meshes[gridKey] = buildFaceGridMesh(gl, gridAABB, boxes) || null;
+  if (meshes[sparkKey] === undefined) meshes[sparkKey] = buildVertexSparklesMesh(gl, gridAABB, boxes, sparkSeed);
 
-  const transform = mat4(); identity(transform);
+  const transform = itemTransform || identity(mat4());
   const items = [];
 
-  // Outer translucent glass shell.
-  items.push({
-    mesh: outerKey,
-    material: 'stone-glass',
-    transform,
-    blend: 'alpha',
-    uniforms: { uTint: WHITE_TINT, uAlpha: OUTER_GLASS_ALPHA },
-  });
-
-  // Inner translucent glass boxes (subset of the nested set).
+  if (includeOuter && meshes[outerKey]) {
+    items.push({ mesh: outerKey, material: 'stone-glass', transform, blend: 'alpha',
+      uniforms: { uTint: outerTint, uAlpha: outerAlpha } });
+  }
   if (meshes[innerKey]) {
-    items.push({
-      mesh: innerKey,
-      material: 'stone-glass',
-      transform,
-      blend: 'alpha',
-      uniforms: { uTint: WHITE_TINT, uAlpha: INNER_GLASS_ALPHA },
-    });
+    items.push({ mesh: innerKey, material: 'stone-glass', transform, blend: 'alpha',
+      uniforms: { uTint: outerTint, uAlpha: innerAlpha } });
   }
-
-  // All nested wireframes — additive so they read as bright wires.
-  items.push({
-    mesh: wireKey,
-    material: 'lines',
-    transform,
-    blend: 'additive',
-    uniforms: { uBaseCol: WIRE_TINT, uLineOpacity: WIRE_OPACITY },
-  });
-
-  // Fine face-grid lines on outer cube + every inner box — the engraved
-  // graph-paper layer.
+  items.push({ mesh: wireKey, material: 'lines', transform, blend: 'additive',
+    uniforms: { uBaseCol: wireTint, uLineOpacity: wireOpacity } });
   if (meshes[gridKey]) {
-    items.push({
-      mesh: gridKey,
-      material: 'lines',
-      transform,
-      blend: 'additive',
-      uniforms: { uBaseCol: GRID_TINT, uLineOpacity: FACE_GRID_OPACITY },
-    });
+    items.push({ mesh: gridKey, material: 'lines', transform, blend: 'additive',
+      uniforms: { uBaseCol: gridTint, uLineOpacity: gridOpacity } });
   }
-
-  // Sparkle billboards at every wireframe vertex — bright glints that
-  // catch the camera as it orbits.
-  items.push({
-    mesh: sparkKey,
-    material: 'edge-glow',
-    transform,
-    blend: 'additive',
-    uniforms: { uTint: SPARK_TINT, uOpacity: SPARKLE_OPACITY },
-  });
+  items.push({ mesh: sparkKey, material: 'edge-glow', transform, blend: 'additive',
+    uniforms: { uTint: sparkTint, uOpacity: sparkleOpacity } });
 
   return items;
+}
+
+// Per-cube glass: concentric nested boxes, full outer shell, cool white tint.
+export function buildCubeGlass(motifIdx, hilbert, gl, meshes, mode) {
+  if (mode !== '3D') return [];
+  const aabb = cubeAABB(hilbert, motifIdx);
+  const innerBoxes = computeInnerBoxes(aabb, motifIdx);
+  return buildGlassBoxItems(gl, meshes, `cube-${motifIdx}`, aabb, innerBoxes, {
+    includeOuter: true,
+    seed: motifIdx,
+  });
 }

@@ -39,7 +39,8 @@ import {
   applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor,
 } from './scene/styling.js';
 import { pushDetailMotifItems, pushDetailPlaneItems } from './detail-scene-builder.js';
-import { buildEmptySlotItems, environmentNameForStreet } from './environments.js';
+import { buildEmptySlotItems } from './crystal-biome.js';
+import { environmentNameForStreet } from '/core/cube-env.js';
 import {
   ensureMotifCategory, visibleMotifs, visiblePlanes, categoryCounts,
   motifPassesCategory,
@@ -1605,62 +1606,6 @@ const materialDefs = [
     fragPath: '/renderer/shaders/text-banner.frag.glsl',
     uniforms: {},
   },
-  {
-    key: 'sand-grain',
-    name: 'sand-grain',
-    phase: 'ADDITIVE',
-    vertPath: '/renderer/shaders/sand-grain.vert.glsl',
-    fragPath: '/renderer/shaders/sand-grain.frag.glsl',
-    uniforms: {},
-  },
-  {
-    key: 'water-surface',
-    name: 'water-surface',
-    phase: 'TRANSPARENT',
-    vertPath: '/renderer/shaders/water-surface.vert.glsl',
-    fragPath: '/renderer/shaders/water-surface.frag.glsl',
-    uniforms: {},
-  },
-  {
-    key: 'grass-ground',
-    name: 'grass-ground',
-    phase: 'TRANSPARENT',
-    vertPath: '/renderer/shaders/smooth-ground.vert.glsl',
-    fragPath: '/renderer/shaders/smooth-ground.frag.glsl',
-    uniforms: {},
-  },
-  {
-    key: 'desert-dunes',
-    name: 'desert-dunes',
-    phase: 'OPAQUE',
-    vertPath: '/renderer/shaders/smooth-ground.vert.glsl',
-    fragPath: '/renderer/shaders/smooth-ground.frag.glsl',
-    uniforms: {},
-  },
-  {
-    key: 'grass-blade',
-    name: 'grass-blade',
-    phase: 'TRANSPARENT',
-    vertPath: '/renderer/shaders/grass-blade.vert.glsl',
-    fragPath: '/renderer/shaders/grass-blade.frag.glsl',
-    uniforms: {},
-  },
-  {
-    key: 'mountain-range',
-    name: 'mountain-range',
-    phase: 'TRANSPARENT',
-    vertPath: '/renderer/shaders/ridge-terrain.vert.glsl',
-    fragPath: '/renderer/shaders/mountain-range.frag.glsl',
-    uniforms: {},
-  },
-  {
-    key: 'ice-surface',
-    name: 'ice-surface',
-    phase: 'TRANSPARENT',
-    vertPath: '/renderer/shaders/ridge-terrain.vert.glsl',
-    fragPath: '/renderer/shaders/ice-surface.frag.glsl',
-    uniforms: {},
-  },
 ];
 
 const materialsMap = {};
@@ -2383,7 +2328,7 @@ function scheduleRebuild() {
 // base's GL `mesh` handle (the expensive resource) but can be dimmed safely.
 const _emptySlotCache = new Map();
 const EMPTY_SLOT_CACHE_CAP = 2048; // soft bound on retained slot meshes
-const SCAFFOLD_BUILD_BUDGET = 40;  // max NEW (uncached) slots built per frame
+const SCAFFOLD_BUILD_BUDGET = 12;  // max NEW (uncached) slots built per frame
 let _scaffoldIncomplete = false;   // a rebuild deferred some slot builds
 function cloneSceneItems(items) {
   return items.map(it => (it && it.uniforms) ? { ...it, uniforms: { ...it.uniforms } } : { ...it });
