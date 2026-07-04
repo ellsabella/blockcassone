@@ -171,6 +171,21 @@ export function inflateNormieArt(art) {
   };
 }
 
+// Non-normie (external / CC0) art: the on-chain flattened 2-bit TONAL payload
+// (400 bytes = 1600 pixels x 2 bits) from NonNormieArtStore.payloadForCube. Kept
+// as the raw tonal (not just a 1-bit silhouette) so renderers can shade by band.
+export function compactNonNormieArt({ id, tonal, payloadHash }) {
+  if (!tonal || tonal.length !== 400) return null;
+  const art = { v: BIT_VERSION, k: 'x', id: Number(id), p: bytesToBase64(tonal) };
+  if (payloadHash) art.h = String(payloadHash);
+  return art;
+}
+
+export function inflateNonNormieArt(art) {
+  if (!art || art.k !== 'x') return null;
+  return { id: Number(art.id), tonal: base64ToBytes(art.p), payloadHash: art.h || '' };
+}
+
 function fnv1a(value) {
   let h = 0x811c9dc5;
   for (let i = 0; i < value.length; i++) {

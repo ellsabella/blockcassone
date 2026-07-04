@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { REPO_ROOT } from './config.js';
-import { compactNormieArtFromRaw } from '../../viewer/art-snapshot.js';
+import { compactNormieArtFromRaw, compactNonNormieArt } from '../../viewer/art-snapshot.js';
 
 // Raw selector the viewer uses (viewer/chain-cubes.js SELECTORS.rawImageData).
 // NB: this is NOT keccak("rawImageData(uint256)") (0x02cdab14) — the on-chain
@@ -26,6 +26,14 @@ function decodeAbiBytes(hex) {
   const dataHex = clean.slice(lenStart + 64, lenStart + 64 + len * 2);
   const out = new Uint8Array(len);
   for (let i = 0; i < len; i++) out[i] = parseInt(dataHex.slice(i * 2, i * 2 + 2) || '00', 16);
+  return out;
+}
+
+// Plain hex -> bytes (for viem-decoded `bytes` returns, already ABI-unwrapped).
+function hexToBytes(hex) {
+  const h = String(hex || '').replace(/^0x/, '');
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
   return out;
 }
 
@@ -77,5 +85,69 @@ export class NormieArtCache {
     }
     this._save();
     return missing.length;
+  }
+}
+
+// Non-normie (external / CC0) art cache. Unlike Normie art, a cube's flattened
+// tonal payload CHANGES on re-base, so it's keyed by payloadHash (immutable per
+// hash) — fetched once via NonNormieArtStore.payloadForCube. The store's function
+// name matches its selector, so viem readContract decodes the bytes directly.
+const PAYLOAD_FOR_CUBE_ABI = [{
+  type: 'function', name: 'payloadForCube', stateMutability: 'view',
+  inputs: [{ type: 'uint256' }], outputs: [{ type: 'bytes' }],
+}];
+const ZERO_HASH = '0x' + '0'.repeat(64);
+
+export class NonNormieArtCache {
+  constructor(cfg) {
+    this.cfg = cfg;
+    this.path = resolve(REPO_ROOT, process.env.INDEXER_NONNORMIE_CACHE || 'data/nonnormie-art-cache.json');
+    this.map = new Map(); // payloadHash -> compact tonal art (id-neutral; id set per record)
+    this._load();
+  }
+
+  _load() {
+    try {
+      if (!existsSync(this.path)) return;
+      const j = JSON.parse(readFileSync(this.path, 'utf8'));
+      if (j?.nonNormieStore && this.cfg.nonNormieStore &&
+          String(j.nonNormieStore).toLowerCase() !== String(this.cfg.nonNormieStore).toLowerCase()) return;
+      if (j?.art) for (const [k, v] of Object.entries(j.art)) this.map.set(String(k), v);
+    } catch { /* start empty */ }
+  }
+
+  _save() {
+    const art = {};
+    for (const [k, v] of this.map) art[k] = v;
+    writeFileSync(this.path, JSON.stringify({ nonNormieStore: this.cfg.nonNormieStore, art }) + '\n');
+  }
+
+  get(payloadHash) { return this.map.get(String(payloadHash)) || null; }
+
+  // entries: [{ cubeId, payloadHash }]. Fetch each not-yet-cached hash once.
+  async ensure(client, entries) {
+    if (!this.cfg.nonNormieStore) return 0;
+    const need = new Map(); // hash -> a cubeId that carries it
+    for (const { cubeId, payloadHash } of entries) {
+      const h = String(payloadHash || '');
+      if (!h || h === ZERO_HASH || this.map.has(h) || need.has(h)) continue;
+      need.set(h, cubeId);
+    }
+    if (!need.size) return 0;
+    for (const [payloadHash, cubeId] of need) {
+      try {
+        const hex = await client.readContract({
+          address: this.cfg.nonNormieStore, abi: PAYLOAD_FOR_CUBE_ABI,
+          functionName: 'payloadForCube', args: [BigInt(cubeId)],
+        });
+        const tonal = hexToBytes(hex);
+        const art = compactNonNormieArt({ id: 0, tonal, payloadHash }); // id set per record at bake
+        if (art) this.map.set(payloadHash, art);
+      } catch (err) {
+        console.warn(`[indexer] non-normie art fetch failed for cube ${cubeId}:`, err?.message || err);
+      }
+    }
+    this._save();
+    return need.size;
   }
 }

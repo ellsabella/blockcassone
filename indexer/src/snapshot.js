@@ -14,6 +14,7 @@ export class WorldState {
     this.ownerByToken = new Map(); // tokenId(str) -> owner (lowercased); 0x0 = burned
     this.records = new Map();      // cubeId(str) -> record (owner attached at snapshot time)
     this.tsByBlock = new Map();    // blockNumber(str) -> unix seconds
+    this.payloadHashByCube = new Map(); // cubeId(str) -> current tonal payloadHash (external)
   }
 
   setBlockTimestamps(tsByBlock) {
@@ -23,9 +24,13 @@ export class WorldState {
   // Apply a batch of logs. Safe for both the full-history backfill and later
   // incremental batches (later batches are later blocks, so last-write-wins on
   // owner/slot stays correct across calls).
-  applyLogs({ minted = [], moved = [], customized = [], transfers = [] }) {
+  applyLogs({ minted = [], moved = [], customized = [], transfers = [], payloadRecorded = [] }) {
     for (const l of [...transfers].sort(byOrder)) {
       this.ownerByToken.set(String(l.args.tokenId), lc(l.args.to));
+    }
+    // Latest NonNormiePayloadRecorded wins → each external cube's current tonal hash.
+    for (const l of [...payloadRecorded].sort(byOrder)) {
+      this.payloadHashByCube.set(String(l.args.cubeId), String(l.args.payloadHash));
     }
     for (const l of [...minted].sort(byOrder)) {
       const a = l.args;

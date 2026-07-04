@@ -8,3 +8,4 @@ dist/
 # generated indexer snapshot (local/fork state)
 data/world-snapshot.json
 data/normie-art-cache.json
+data/nonnormie-art-cache.json

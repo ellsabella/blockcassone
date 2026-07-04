@@ -25,4 +25,10 @@ export const TRANSFER = parseAbiItem(
   'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'
 );
 
+// On the NonNormieArtStore address: fires on mint-record + every re-base, so the
+// latest gives each external cube's current flattened-tonal payload hash.
+export const NON_NORMIE_PAYLOAD_RECORDED = parseAbiItem(
+  'event NonNormiePayloadRecorded(uint256 indexed cubeId, uint8 indexed version, bytes32 indexed payloadHash)'
+);
+
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
