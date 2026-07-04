@@ -200,9 +200,6 @@ function runRandomWalk(startNode, initAxis, initDir, seed, occupied, allSegs, fi
   let flying       = false;
   let surfaceSteps = 0;
   let flightSteps  = 0;
-  let dbgSurfaceTurns = 0;
-  let dbgGlassHits    = 0;
-  const dbgStart      = [...startNode];
 
   let stepCount = 0;
   while (true) {
@@ -242,7 +239,6 @@ function runRandomWalk(startNode, initAxis, initDir, seed, occupied, allSegs, fi
       curAxis = ax;
       curDir  = d;
       cur     = nxt;
-      dbgSurfaceTurns++;
 
       if (++surfaceSteps >= MAX_SURFACE_STEPS) {
         flying       = true;
@@ -281,12 +277,9 @@ function runRandomWalk(startNode, initAxis, initDir, seed, occupied, allSegs, fi
       if (flightSteps >= 1 && nodeIsOnGlassSurface(cur, filled)) {
         flying       = false;
         surfaceSteps = 0;
-        dbgGlassHits++;
       }
     }
   }
-  if (dbgSurfaceTurns === 0)
-    console.log(`[stone-walk] walk from [${dbgStart}] ax=${initAxis} dir=${initDir}: 0 surface turns, ${dbgGlassHits} glass hits`);
 }
 
 // ---- Mesh builder ----------------------------------------------------------
