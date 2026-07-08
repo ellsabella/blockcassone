@@ -22,14 +22,17 @@ contract CubeWalkerLayer {
     uint256 private constant WK_STEPS = 10;    // tour steps
     uint256 private constant WK_TURN = 40;     // % chance to turn each tour step
 
-    function render(bytes memory raw, bytes32 seed, string memory figCol, string memory sideCol)
+    /// @param bodyN Shared body mask from the renderer: bodyN[i] = 8-neighbour lit
+    ///        count (0..8) for a lit cell, 0 otherwise. Replaces the old raw bitmap +
+    ///        the layer's own `_neigh8` (the renderer already computes this for glass).
+    function render(bytes memory bodyN, bytes32 seed, string memory figCol, string memory sideCol)
         external
         pure
         returns (string memory)
     {
-        if (raw.length != 200) return "";
-        string memory frontD = _walkFront(raw, seed);
-        string memory sideD = _walkSides(raw, seed);
+        if (bodyN.length != 1600) return "";
+        string memory frontD = _walkFront(bodyN, seed);
+        string memory sideD = _walkSides(bodyN, seed);
         if (bytes(frontD).length == 0 && bytes(sideD).length == 0) return "";
         bytes memory buf = StrBuf.alloc(bytes(frontD).length + bytes(sideD).length + 2048);
         buf.cat('<defs><filter id="wk" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".02" result="b"/><feColorMatrix in="b" type="matrix" values="4.5 0 0 0 0 0 4.5 0 0 0 0 0 4.5 0 0 0 0 0 1 0"/></filter><path id="ws" d="');
@@ -57,16 +60,18 @@ contract CubeWalkerLayer {
         buf.cat(y.toString());
     }
 
-    function _walkHitsBody(bytes memory raw, uint256 col, uint256 row) private pure returns (bool) {
-        return _bitmapBit(raw, row * 40 + col) && _neigh8(raw, col, row) >= 3;
+    // bodyN[i] >= 3 == "lit AND neigh8 >= 3" — identical to the old
+    // `_bitmapBit(raw) && _neigh8(raw) >= 3`, now a single byte read on the shared mask.
+    function _walkHitsBody(bytes memory bodyN, uint256 col, uint256 row) private pure returns (bool) {
+        return uint8(bodyN[row * 40 + col]) >= 3;
     }
 
-    function _walkFront(bytes memory raw, bytes32 seed) private pure returns (string memory) {
+    function _walkFront(bytes memory bodyN, bytes32 seed) private pure returns (string memory) {
         bytes memory buf = StrBuf.alloc(8192);
         uint256[] memory cells = new uint256[](1600);
         uint256 n;
         for (uint256 i = 0; i < 1600; i++) {
-            if (_walkHitsBody(raw, i % 40, i / 40)) cells[n++] = i;
+            if (_walkHitsBody(bodyN, i % 40, i / 40)) cells[n++] = i;
         }
         if (n == 0) return "";
         for (uint256 w = 0; w < WK_FRONT; w++) {
@@ -81,31 +86,31 @@ contract CubeWalkerLayer {
         _tourSteps(buf, ci % 40, ci / 40, h >> 8, (h >> 4) & 3);
     }
 
-    function _walkSides(bytes memory raw, bytes32 seed) private pure returns (string memory) {
+    function _walkSides(bytes memory bodyN, bytes32 seed) private pure returns (string memory) {
         bytes memory buf = StrBuf.alloc(16384);
         uint256[] memory rows = new uint256[](40);
         uint256 nr;
         for (uint256 r = 0; r < 40; r++) {
             for (uint256 c = 0; c < 40; c++) {
-                if (_walkHitsBody(raw, c, r)) { rows[nr++] = r; break; }
+                if (_walkHitsBody(bodyN, c, r)) { rows[nr++] = r; break; }
             }
         }
         if (nr == 0) return "";
         for (uint256 w = 0; w < WK_SIDE; w++) {
             uint256 h = uint256(keccak256(abi.encodePacked(seed, uint256(1), w)));
-            _sideWalk(buf, raw, h, rows[(h >> 1) % nr]);
+            _sideWalk(buf, bodyN, h, rows[(h >> 1) % nr]);
         }
         return buf.str();
     }
 
-    function _sideWalk(bytes memory buf, bytes memory raw, uint256 h, uint256 y) private pure {
+    function _sideWalk(bytes memory buf, bytes memory bodyN, uint256 h, uint256 y) private pure {
         bool fromLeft = (h & 1) == 0;
         uint256 x = fromLeft ? 0 : 40;
         _catXY(buf, "M", x, y);
         for (uint256 s2 = 0; s2 < WK_STRAIGHT; s2++) {
             x = fromLeft ? x + 1 : x - 1;
             _catXY(buf, "L", x, y);
-            if (_walkHitsBody(raw, x > 39 ? 39 : x, y)) break; // reached body
+            if (_walkHitsBody(bodyN, x > 39 ? 39 : x, y)) break; // reached body
             if (fromLeft ? x >= 40 : x == 0) break;
         }
         _tourSteps(buf, x, y, h >> 8, fromLeft ? 0 : 2);
@@ -123,24 +128,4 @@ contract CubeWalkerLayer {
         }
     }
 
-    // --- bitmap helpers (own copies; the renderer keeps its own) ---
-    function _bitmapBit(bytes memory raw, uint256 index) private pure returns (bool) {
-        uint256 byteIndex = index / 8;
-        uint256 bitIndex = 7 - (index % 8);
-        return (uint8(raw[byteIndex]) & (uint8(1) << uint8(bitIndex))) != 0;
-    }
-
-    function _neigh8(bytes memory raw, uint256 col, uint256 row) private pure returns (uint256 nb) {
-        for (int256 dr = -1; dr <= 1; dr++) {
-            for (int256 dc = -1; dc <= 1; dc++) {
-                if (dr == 0 && dc == 0) continue;
-                nb += _cellOn(raw, int256(col) + dc, int256(row) + dr);
-            }
-        }
-    }
-
-    function _cellOn(bytes memory raw, int256 c, int256 r) private pure returns (uint256) {
-        if (c < 0 || c >= 40 || r < 0 || r >= 40) return 0;
-        return _bitmapBit(raw, uint256(r) * 40 + uint256(c)) ? 1 : 0;
-    }
 }

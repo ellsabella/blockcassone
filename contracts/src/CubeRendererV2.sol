@@ -19,6 +19,11 @@ interface ICubeThumbnailRenderer {
 
 interface INonNormieArtStore {
     function imageBytesForCube(uint256 cubeId) external view returns (bytes memory);
+    function payloadForCube(uint256 cubeId) external view returns (bytes memory);
+}
+
+interface ICollectionName {
+    function name() external view returns (string memory);
 }
 
 contract CubeRendererV2 is ICubeRenderer {
@@ -143,6 +148,8 @@ contract CubeRendererV2 is ICubeRenderer {
             Strings.toHexString(uint256(data.seed), 32),
             "',raw:'",
             _rawImageBase64(tokenId, data),
+            "',tonal:'",
+            _tonalBase64(tokenId, data),
             "'};</script>"
         );
     }
@@ -211,6 +218,22 @@ contract CubeRendererV2 is ICubeRenderer {
         return Base64.encode(_rawImageBytes(cubeId, data));
     }
 
+    // The 2-bit tonal payload (base64) for external/customized cubes, so the WebGL
+    // renderer can draw band contours + band-shaded voxels instead of a 1-bit
+    // silhouette. Empty for Normie (intrinsically 1-bit) or if none is recorded.
+    function _tonalBase64(uint256 cubeId, CubeNFT.CubeData memory data)
+        private
+        view
+        returns (string memory)
+    {
+        if (data.sourceKind == cubes.SOURCE_KIND_NORMIE() || nonNormieStore == address(0)) return "";
+        try INonNormieArtStore(nonNormieStore).payloadForCube(cubeId) returns (bytes memory p) {
+            return Base64.encode(p);
+        } catch {
+            return "";
+        }
+    }
+
     function _rawImageBytes(uint256 cubeId, CubeNFT.CubeData memory data)
         private
         view
@@ -271,6 +294,14 @@ contract CubeRendererV2 is ICubeRenderer {
         buf.cat(",");
         buf.cat(_trait("Source Contract", Strings.toHexString(uint160(data.sourceContract), 20)));
         buf.cat(",");
+        // Collection names read live from the source contracts' own ERC-721 name().
+        // Origin = the immutable genesis collection (permanent provenance); Current =
+        // what the cube shows now (they differ once a cube re-bases post-mint).
+        (address originContract,) = cubes.cubeOrigin(tokenId);
+        buf.cat(_trait("Origin Collection", _sourceArtLabel(originContract)));
+        buf.cat(",");
+        buf.cat(_trait("Current Collection", _sourceArtLabel(data.sourceContract)));
+        buf.cat(",");
         buf.cat(_trait("Source Token ID", data.sourceTokenId.toString()));
         buf.cat(",");
         buf.cat(_trait("Agentic", data.agentic ? "Y" : "N"));
@@ -289,6 +320,46 @@ contract CubeRendererV2 is ICubeRenderer {
         returns (string memory)
     {
         return string.concat('{"trait_type":"', traitType, '","value":"', value, '"}');
+    }
+
+    /// @dev The source collection's display name, read live from its ERC-721 name().
+    ///      Falls back gracefully so a source without name() (or address(0), e.g. a
+    ///      merged-street token) never breaks metadata. The token's art never depends
+    ///      on this — it's a cosmetic trait only.
+    function _sourceArtLabel(address sourceContract) private view returns (string memory) {
+        // Skip address(0) and codeless addresses: a name() call on a contract-less
+        // address returns empty data that fails string-decode outside the catch.
+        if (sourceContract == address(0) || sourceContract.code.length == 0) return "Unknown";
+        try ICollectionName(sourceContract).name() returns (string memory n) {
+            if (bytes(n).length > 0) return _jsonEscape(n);
+        } catch { }
+        return "Unknown";
+    }
+
+    /// @dev Minimal JSON string escaping for an untrusted external name(): escape " and
+    ///      \, replace control chars with a space, and cap the length (collection names
+    ///      are short) so a hostile source can't bloat or break the metadata JSON.
+    function _jsonEscape(string memory s) private pure returns (string memory) {
+        bytes memory b = bytes(s);
+        uint256 len = b.length > 64 ? 64 : b.length;
+        bytes memory out = new bytes(len * 2);
+        uint256 k;
+        for (uint256 i = 0; i < len; i++) {
+            bytes1 c = b[i];
+            if (c == '"' || c == "\\") {
+                out[k++] = "\\";
+                out[k++] = c;
+            } else if (uint8(c) < 0x20) {
+                out[k++] = " ";
+            } else {
+                out[k++] = c;
+            }
+        }
+        bytes memory res = new bytes(k);
+        for (uint256 i = 0; i < k; i++) {
+            res[i] = out[i];
+        }
+        return string(res);
     }
 
     function _chunkOrDefault(uint256 chunkId, string memory fallbackContent)
@@ -326,7 +397,7 @@ contract CubeRendererV2 is ICubeRenderer {
 
     function _defaultHTMLHead() private pure returns (string memory) {
         return
-        "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020203;color:#ff98d9;font:13px monospace}canvas{width:100vw;height:100vh;display:block}.h{position:fixed;left:14px;bottom:12px;padding:9px 11px;border:2px solid #ff3ab8;background:#070208cc;text-shadow:0 0 10px #ff3ab8}</style></head><body><canvas id=c></canvas><div class=h id=h>Blockcassone</div>";
+        "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><style>@font-face{font-family:'NormiesFont';src:url(data:font/woff2;base64,d09GMgABAAAAAAJcAAoAAAAACfgAAAISAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAABmAAPAqMfIocATYCJAMmCyQABCAFgkoHIBvBBwCeBXbLE2WILCc+GpqG29HsXqU0Hqp7fXt3KdrG6/gHi2AEAhiEkEbj0dK00sLzcM33r9KOI6lq1iCz6ZnPaBO5i20iXtJXLCTIHEl8S4h4CGmp7QANr0x1OoF7tVYtR/T+/19NZ9kFN5J2lebRa7jVPwb45rb8ZaiTJZ5YxgElEGLK2dQVWDoZW5D/TPQT1fqPImm2xeCv/xR0XvXNDfVmAdRZBZgBBSpMqQSmNDX0aYRi98pE55qZxzwdABgBC9hB4oWyBQENYEhnMmkMJoNDa5u1PO9HG6vIRTmf/dwfeJY5t7U+Onb2xnWfGGwn3e/4w7bCnwvZltgYex5/mJTbvtqcgjjReSZX0qP+fe5/IBaafxI21AORwEDOQLE+lnyBD8AezUszCXykD64t8Tj+bXZXhTwpRtKCBGo46z2d5PDF4dgvnDBabhAsBJh7VaNmef406p7qgCsMgRCKkUCD4qz6JJQCoUxd4lapRN/Qgs2SW9/T367bVkDzXSpOqaOYfg8goOL/3x9RqL4twV9wPv1XXn6ND5USSV/sNQ72G2LblArX+f+DcqTjPVDwq4EPnDQWwQp6IyJ5owhcGtWL3mhK30YX+b2XoXR6JrPHqlGp7UDtwIu9FVYZw2Q1aBQ2mslo5yhUDr3E6j9EWTZ5KUVv3dejRVOT2UAnxI8CFSisPmHzHGDU6Grfj9sAAA==) format('woff2');font-display:block}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020203;color:#ff98d9;font:13px monospace}canvas{width:100vw;height:100vh;display:block}.h{position:fixed;left:14px;bottom:12px;padding:9px 11px;border:2px solid #ff3ab8;background:#070208cc;text-shadow:0 0 10px #ff3ab8}</style></head><body><canvas id=c></canvas><div class=h id=h>Blockcassone</div>";
     }
 
     function _defaultHTMLScript() private pure returns (string memory) {

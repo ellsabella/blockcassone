@@ -85,7 +85,7 @@ abstract contract GenesisMinterBase is Ownable {
     // a full street ends up shared by ~3 wallets. Maintained in O(1) via a seed
     // cursor (phase A) + a frontier (phase B / wrap) + a per-wallet pointer.
     uint32 public constant PLOTS_PER_STREET = 8;
-    uint32 public constant MAX_PER_WALLET_PER_STREET = 3;
+    uint32 public constant MAX_PER_WALLET_PER_STREET = 5;
 
     uint32 public seedCursor; // lowest street that may still have zero mints (anchor phase)
     uint32 public frontierStreet; // lowest street not yet full (used once wrapped)
@@ -122,6 +122,7 @@ abstract contract GenesisMinterBase is Ownable {
     function finalizeSnapshot() external onlyOwner {
         if (finalized) revert SnapshotAlreadyFinalized();
         if (_publicNormies.length == 0) revert EmptySnapshot();
+        _beforeFinalize();
         finalized = true;
         emit SnapshotFinalized(_publicNormies.length, totalSlots, publicSeed);
     }
@@ -175,7 +176,7 @@ abstract contract GenesisMinterBase is Ownable {
             // the FULL quantity up front, so a partial fill (pool drained, or the
             // supply cap can't cover it) must revert rather than silently mint fewer
             // than paid for. Direct mintPublic keeps its best-effort drain behavior.
-            uint256 available = _publicNormies.length;
+            uint256 available = _publicAvailable();
             uint256 capRemaining = mintedCount < totalSlots ? totalSlots - mintedCount : 0;
             if (capRemaining < available) available = capRemaining;
             if (available < quantity) revert IncompletePublicFill(quantity, available);
@@ -251,7 +252,12 @@ abstract contract GenesisMinterBase is Ownable {
         return _publicNormies.length;
     }
 
-    function publicNormieAt(uint256 index) external view returns (uint256) {
+    /// @dev Snapshot-pool size, for subclasses (avoids an external self-call).
+    function _publicPoolLength() internal view returns (uint256) {
+        return _publicNormies.length;
+    }
+
+    function publicNormieAt(uint256 index) public view returns (uint256) {
         return _publicNormies[index];
     }
 
@@ -280,7 +286,7 @@ abstract contract GenesisMinterBase is Ownable {
         while (mintedNow < quantity && cursor < rows.length) {
             uint256 normieId = rows[cursor++];
             if (normieClaimed[normieId]) continue;
-            cubeIds[mintedNow++] = _consumeAndMint(minter, normieId, Phase.Allowlist);
+            cubeIds[mintedNow++] = _consumeAndMint(minter, normieId, 0, Phase.Allowlist);
         }
 
         walletCursor[minter] = cursor;
@@ -304,7 +310,7 @@ abstract contract GenesisMinterBase is Ownable {
         while (mintedNow < quantity && cursor < rows.length) {
             uint256 normieId = rows[cursor++];
             if (normieClaimed[normieId]) continue;
-            cubeIds[mintedNow++] = _consumeAndMint(minter, normieId, Phase.Allowlist);
+            cubeIds[mintedNow++] = _consumeAndMint(minter, normieId, 0, Phase.Allowlist);
         }
 
         selectionCursor[minter] = cursor;
@@ -318,14 +324,10 @@ abstract contract GenesisMinterBase is Ownable {
 
         cubeIds = new uint256[](quantity);
         uint256 mintedNow = 0;
-        while (mintedNow < quantity && _publicNormies.length > 0 && mintedCount < totalSlots) {
-            uint256 index = uint256(
-                keccak256(
-                    abi.encode(publicSeed, minter, mintedCount, mintedNow, _publicNormies.length)
-                )
-            ) % _publicNormies.length;
-            uint256 normieId = _publicNormies[index];
-            cubeIds[mintedNow++] = _consumeAndMint(minter, normieId, Phase.Public);
+        while (mintedNow < quantity && mintedCount < totalSlots) {
+            (uint256 sourceId, uint8 collectionId, bool ok) = _selectPublicSource(minter, mintedNow);
+            if (!ok) break;
+            cubeIds[mintedNow++] = _consumeAndMint(minter, sourceId, collectionId, Phase.Public);
         }
 
         if (mintedNow == 0) revert NoPublicNormies();
@@ -338,32 +340,71 @@ abstract contract GenesisMinterBase is Ownable {
         if (mintedCount >= totalSlots) revert MintClosed();
     }
 
-    function _consumeAndMint(address minter, uint256 normieId, Phase mintPhase)
+    function _consumeAndMint(address minter, uint256 normieId, uint8 collectionId, Phase mintPhase)
         private
         returns (uint256 cubeId)
     {
-        normieClaimed[normieId] = true;
-        _removeFromPublicPool(normieId);
+        // Collection 0 is the allowlist / base-pool collection (Normie): its ids live
+        // in `_publicNormies` and are claim-tracked here. Extra collections (the
+        // multi-source engine's CC0 pools) manage their own pools inside the
+        // `_selectPublicSource` override, so they skip the base-pool bookkeeping — that
+        // also keeps `normieClaimed` from colliding across id-spaces.
+        if (collectionId == 0) {
+            normieClaimed[normieId] = true;
+            _removeFromPublicPool(normieId);
+        }
+        _checkAndCountMint(collectionId, mintPhase);
 
         uint32 slot = _allocateSlot(minter);
         bytes32 seed = keccak256(abi.encode(publicSeed, minter, normieId, slot, mintPhase));
         mintedCount++;
         walletGenesisMinted[minter]++;
 
-        cubeId = _mintSourceCube(minter, normieId, slot, seed, normieAgentId[normieId]);
+        cubeId = _mintSourceCube(minter, collectionId, normieId, slot, seed, normieAgentId[normieId]);
         emit GenesisCubeMinted(cubeId, minter, normieId, slot, mintPhase);
     }
 
-    /// @dev Mint one genesis cube for `minter` from source token `sourceId` at
-    ///      `slot`/`seed`. Subclass supplies the collection: Normie art is on-chain
-    ///      (agentId carries the awakening), Brainrot records a tonal payload.
+    /// @dev Mint one genesis cube for `minter` from `collectionId`'s source token
+    ///      `sourceId` at `slot`/`seed`. Subclass supplies the collection: a Normie
+    ///      collection mints on-chain art (agentId carries the awakening); a stored
+    ///      collection reads + records its committed tonal payload.
     function _mintSourceCube(
         address minter,
+        uint8 collectionId,
         uint256 sourceId,
         uint32 slot,
         bytes32 seed,
         uint256 agentId
     ) internal virtual returns (uint256 cubeId);
+
+    /// @dev Hooks for the multi-source engine (no-ops in the single-collection base):
+    ///      per-collection cap accounting/enforcement, and a pre-finalize validation
+    ///      point. Default behaviour is unchanged for Normie/single-source minters.
+    function _checkAndCountMint(uint8 collectionId, Phase mintPhase) internal virtual { }
+
+    function _beforeFinalize() internal virtual { }
+
+    /// @dev One public-phase source pick. Default = the historical uniform pull from
+    ///      the Normie snapshot pool (`_publicNormies`); the multi-source engine
+    ///      overrides this to draw across several collections. Returns the source
+    ///      token, its collection id, and whether a source was available.
+    function _selectPublicSource(address minter, uint256 mintedNow)
+        internal
+        virtual
+        returns (uint256 sourceId, uint8 collectionId, bool ok)
+    {
+        uint256 len = _publicNormies.length;
+        if (len == 0) return (0, 0, false);
+        uint256 index =
+            uint256(keccak256(abi.encode(publicSeed, minter, mintedCount, mintedNow, len))) % len;
+        return (_publicNormies[index], 0, true);
+    }
+
+    /// @dev Total public-phase sources still mintable. Default = the Normie pool size;
+    ///      the multi-source engine sums each collection's remaining allocation.
+    function _publicAvailable() internal view virtual returns (uint256) {
+        return _publicNormies.length;
+    }
 
     error NoVacantPlot(address wallet);
 

@@ -4,8 +4,7 @@ pragma solidity ^0.8.26;
 import { Test } from "forge-std/Test.sol";
 import { ERC721 } from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
-import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
-import { BrainrotGenesisMinter } from "../src/BrainrotGenesisMinter.sol";
+import { MultiSourceGenesisMinter } from "../src/MultiSourceGenesisMinter.sol";
 import { GenesisMinterBase } from "../src/GenesisMinterBase.sol";
 import { NonNormieArtStore } from "../src/NonNormieArtStore.sol";
 import { NonNormieArt } from "../src/NonNormieArt.sol";
@@ -23,13 +22,15 @@ contract WiringMockNormies is ERC721 {
     function mint(address to, uint256 id) external { _mint(to, id); }
 }
 
-contract WiringMockBrainrot is ERC721 {
-    constructor() ERC721("BRAINROT", "BRAINROT") { }
-    function mint(address to, uint256 id) external { _mint(to, id); }
+// Minimal CC0 source stand-in: needs only code + name() (genesis external minting
+// takes the committed pool as authority; no source-ownership check).
+contract WiringMockCC0 {
+    string public name;
+    constructor(string memory name_) { name = name_; }
 }
 
-// Minimal stand-in for the OpenSea SeaDrop singleton (mirrors the one in
-// CubeSeaDrop.t.sol): validates payment + limits, then calls mintSeaDrop.
+// Minimal stand-in for the OpenSea SeaDrop singleton (mirrors CubeSeaDrop.t.sol):
+// validates payment + limits, then calls mintSeaDrop.
 contract WiringMockSeaDrop is ISeaDrop {
     mapping(address token => PublicDrop) public publicDrops;
 
@@ -57,35 +58,41 @@ contract WiringMockSeaDrop is ISeaDrop {
     }
 }
 
-/// @notice End-to-end proof that DeployLocalGenesis' wiring produces a live drop:
-///         the admin stays the token OWNER (never transfers to a minter), the Normie
-///         genesis is the active `genesisMinter`, SeaDrop drives mints through the
-///         token, and the Brainrot stack is a recorder-authorized minter that mints
-///         external cubes with art recorded the moment it's made the genesisMinter.
-///         Mirrors the exact wiring calls in DeployLocalGenesis._deploy /
-///         _mintAndFinalize / _finalizeBrainrot.
+/// @notice End-to-end proof that DeployLocalGenesis' wiring produces a live multi-source
+///         drop: the admin stays the token OWNER, the MultiSourceGenesisMinter is the
+///         active `genesisMinter` and an authorized art-store recorder, and SeaDrop
+///         drives a public mint that draws a MIX of collections — Normie cubes (live
+///         art) plus CC0 cubes with their tonal payload recorded. Mirrors the wiring in
+///         DeployLocalGenesis._deploy / _setupAndMint.
 contract DeployLocalGenesisWiringTest is Test {
     address private constant ADMIN = address(0xA11CE); // stays token owner
     address private constant ALICE = address(0xA11CA);
     address private constant BOB = address(0xB0B);
 
     WiringMockNormies private normies;
-    WiringMockBrainrot private brainrotSource;
+    WiringMockCC0 private runners; // collection 1
+    WiringMockCC0 private skulls; // collection 2
     CubeNFT private cubes;
     NonNormieArtStore private artStore;
-    NormieGenesisMinter private genesis;
-    BrainrotGenesisMinter private brainrot;
+    MultiSourceGenesisMinter private genesis;
     WiringMockSeaDrop private seaDrop;
 
+    // Allocation: Normie 3 / Runners 2 / Skulls 1 = 6 (one street, so ALICE + BOB can
+    // each take 3 and sell it out).
     function setUp() public {
         normies = new WiringMockNormies();
-        brainrotSource = new WiringMockBrainrot();
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 16, ADMIN);
-        artStore = new NonNormieArtStore(ADMIN);
-        genesis = new NormieGenesisMinter(cubes, bytes32("public-seed"), ADMIN);
-        brainrot = new BrainrotGenesisMinter(
-            cubes, bytes32("brainrot-seed"), ADMIN, address(brainrotSource), artStore
-        );
+        runners = new WiringMockCC0("Chain Runners");
+        skulls = new WiringMockCC0("1337 skulls");
+        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 6, ADMIN);
+        artStore = new NonNormieArtStore(address(cubes), ADMIN);
+
+        address[] memory cc = new address[](2);
+        cc[0] = address(runners);
+        cc[1] = address(skulls);
+        uint32[] memory caps = new uint32[](2);
+        caps[0] = 2;
+        caps[1] = 1;
+        genesis = new MultiSourceGenesisMinter(cubes, bytes32("public-seed"), ADMIN, artStore, 3, cc, caps);
         seaDrop = new WiringMockSeaDrop();
 
         vm.startPrank(ADMIN);
@@ -95,24 +102,26 @@ contract DeployLocalGenesisWiringTest is Test {
         address[] memory allowed = new address[](1);
         allowed[0] = address(seaDrop);
         cubes.updateAllowedSeaDrop(allowed);
-        artStore.setAuthorizedRecorder(address(brainrot), true);
+        artStore.setAuthorizedRecorder(address(genesis), true);
         genesis.setSeaDrop(address(cubes));
-        brainrot.setSeaDrop(address(cubes));
 
-        // ---- Normie snapshot / public phase ----------------------------------
-        genesis.addSnapshotNormies(ALICE, _ids(101, 102, 103));
+        // ---- Snapshot / pools / payloads / public phase ----------------------
+        genesis.addSnapshotNormies(ADMIN, _ids(101, 102, 103, 104, 105)); // >= Normie cap 3
+
+        uint256[] memory rp = new uint256[](2);
+        rp[0] = 201; rp[1] = 202;
+        genesis.addSourcePool(1, rp);
+        genesis.setSourcePayload(1, 201, _payload(0x11));
+        genesis.setSourcePayload(1, 202, _payload(0x22));
+
+        uint256[] memory sp = new uint256[](1);
+        sp[0] = 301;
+        genesis.addSourcePool(2, sp);
+        genesis.setSourcePayload(2, 301, _payload(0x33));
+
         genesis.finalizeSnapshot();
         genesis.setPhase(GenesisMinterBase.Phase.Public);
 
-        // ---- Brainrot snapshot: commit payloads, finalize --------------------
-        for (uint256 i = 0; i < 4; i++) {
-            brainrot.setBrainrotPayload(5001 + i, _payload(uint8(0x10 + i)));
-        }
-        brainrot.addSnapshotNormies(BOB, _ids(5001, 5002, 5003));
-        brainrot.finalizeSnapshot();
-        brainrot.setPhase(GenesisMinterBase.Phase.Public);
-
-        // ---- Configure the public drop on SeaDrop through the token ----------
         _configureDrop();
 
         vm.stopPrank();
@@ -137,39 +146,41 @@ contract DeployLocalGenesisWiringTest is Test {
         assertEq(cubes.owner(), ADMIN); // never transferred to a minter
         assertEq(cubes.genesisMinter(), address(genesis));
         assertTrue(cubes.allowedSeaDrop(address(seaDrop)));
-        assertTrue(artStore.authorizedRecorder(address(brainrot)));
+        assertTrue(artStore.authorizedRecorder(address(genesis)));
     }
 
-    function testNormieStackMintsEndToEndViaSeaDrop() public {
+    function testMultiSourceSelloutViaSeaDropHitsAllocationWithArt() public {
+        // Two wallets each take 3 (one street, 3-plot cap) → the whole 6-cube supply.
         vm.prank(ALICE);
-        seaDrop.mintPublic(address(cubes), ALICE, 2);
-
-        assertEq(cubes.balanceOf(ALICE), 2);
-        assertEq(genesis.mintedCount(), 2);
-        assertEq(cubes.cubeData(1).sourceKind, cubes.SOURCE_KIND_NORMIE());
-        // Ownership never moved to the minter to make this work.
-        assertEq(cubes.owner(), ADMIN);
-    }
-
-    function testBrainrotStackMintsEndToEndWhenActivated() public {
-        // Activate the Brainrot drop: admin flips the genesisMinter (no ownership
-        // change needed — that's the point of the decoupled wiring).
-        vm.prank(ADMIN);
-        cubes.setGenesisMinter(address(brainrot));
-
+        seaDrop.mintPublic(address(cubes), ALICE, 3);
         vm.prank(BOB);
-        seaDrop.mintPublic(address(cubes), BOB, 2);
+        seaDrop.mintPublic(address(cubes), BOB, 3);
 
-        assertEq(cubes.balanceOf(BOB), 2);
-        assertEq(brainrot.mintedCount(), 2);
+        assertEq(genesis.mintedCount(), 6);
+        // Sellout lands exactly on the allocation.
+        assertEq(genesis.collectionMinted(0), 3); // Normie
+        assertEq(genesis.collectionMinted(1), 2); // Runners
+        assertEq(genesis.collectionMinted(2), 1); // Skulls
 
-        // Both minted cubes are external Brainrot-sourced with art recorded.
-        for (uint256 id = 1; id <= 2; id++) {
-            CubeNFT.CubeData memory dta = cubes.cubeData(id);
-            assertEq(dta.sourceKind, cubes.SOURCE_KIND_EXTERNAL_ERC721());
-            assertEq(dta.sourceContract, address(brainrotSource));
-            assertEq(artStore.payloadForCube(id).length, 400); // never a placeholder
+        // Every CC0 cube carries its source + recorded 400-byte art (never a placeholder);
+        // every Normie cube is the live-art path (no recorded payload).
+        uint256 normieCubes;
+        uint256 ccCubes;
+        for (uint256 id = 1; id <= 6; id++) {
+            CubeNFT.CubeData memory d = cubes.cubeData(id);
+            if (d.sourceContract == address(normies)) {
+                normieCubes++;
+                assertEq(d.sourceKind, cubes.SOURCE_KIND_NORMIE());
+            } else {
+                ccCubes++;
+                assertEq(d.sourceKind, cubes.SOURCE_KIND_EXTERNAL_ERC721());
+                assertTrue(d.sourceContract == address(runners) || d.sourceContract == address(skulls));
+                assertEq(artStore.payloadForCube(id).length, 400);
+            }
         }
+        assertEq(normieCubes, 3);
+        assertEq(ccCubes, 3);
+        assertEq(cubes.owner(), ADMIN); // ownership never moved to make this work
     }
 
     function _payload(uint8 fill) private pure returns (bytes memory p) {
@@ -178,10 +189,12 @@ contract DeployLocalGenesisWiringTest is Test {
         p[399] = bytes1(fill);
     }
 
-    function _ids(uint256 a, uint256 b, uint256 c) private pure returns (uint256[] memory r) {
-        r = new uint256[](3);
-        r[0] = a;
-        r[1] = b;
-        r[2] = c;
+    function _ids(uint256 a, uint256 b, uint256 c, uint256 d, uint256 e)
+        private
+        pure
+        returns (uint256[] memory r)
+    {
+        r = new uint256[](5);
+        r[0] = a; r[1] = b; r[2] = c; r[3] = d; r[4] = e;
     }
 }

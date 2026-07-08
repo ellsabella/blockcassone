@@ -45,7 +45,7 @@ contract DeployCore is Script {
             totalSlots,
             address(this)
         );
-        deployment.artStore = new NonNormieArtStore(address(this));
+        deployment.artStore = new NonNormieArtStore(address(deployment.cubes), address(this));
         deployment.attestation = new FlatteningAttestation(address(this), attestationSigner);
         deployment.agentRegistry = new AgentStatusRegistry(initialOwner);
         deployment.controller =

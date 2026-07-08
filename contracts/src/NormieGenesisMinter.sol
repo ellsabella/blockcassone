@@ -15,6 +15,7 @@ contract NormieGenesisMinter is GenesisMinterBase {
 
     function _mintSourceCube(
         address minter,
+        uint8, /*collectionId*/
         uint256 sourceId,
         uint32 slot,
         bytes32 seed,
