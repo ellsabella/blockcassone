@@ -265,8 +265,8 @@ contract NormieGenesisMinterTest is Test {
     }
 
     function testSeaDropPublicFillsExactlyAvailable() public {
-        // 16 slots = 2 streets so one wallet can receive 5 plots (3 + 2); the shared
-        // 8-slot setUp is a single street and caps a wallet at 3.
+        // 16 slots = 2 streets; one wallet's 5-plot per-street cap lets it take all 5
+        // here (the shared 8-slot setUp is a single street, also 5-cap).
         NormieGenesisMinter g = _freshPublicMinter(16, _ids5(401, 402, 403, 404, 405));
 
         vm.prank(SEA_DROP);
@@ -466,19 +466,18 @@ contract NormieGenesisMinterTest is Test {
         }
     }
 
-    function testAllocationSingleWalletRunSpillsThreePerStreet() public {
+    function testAllocationSingleWalletRunSpillsFivePerStreet() public {
         (NormieGenesisMinter g, CubeNFT c) = _world(32);
         vm.prank(BOB);
         uint256[] memory ids = g.mintPublic(8);
 
-        uint32[8] memory expected = [uint32(0), 1, 2, 8, 9, 10, 16, 17]; // 3+3+2, contiguous run
+        uint32[8] memory expected = [uint32(0), 1, 2, 3, 4, 8, 9, 10]; // 5+3, contiguous run
         for (uint256 i = 0; i < 8; i++) {
             assertEq(_slot(c, ids[i]), expected[i]);
         }
-        assertEq(g.streetFill(0), 3);
+        assertEq(g.streetFill(0), 5);
         assertEq(g.streetFill(1), 3);
-        assertEq(g.streetFill(2), 2);
-        assertEq(g.walletStreetCount(BOB), 2);
+        assertEq(g.walletStreetCount(BOB), 3);
     }
 
     function testAllocationWrapsAfterAllStreetsSeeded() public {
@@ -497,7 +496,7 @@ contract NormieGenesisMinterTest is Test {
         assertEq(_slot(c, d), 1); // street 0, plot 1
     }
 
-    function testAllocationSharesStreetAcrossWalletsCappedAtThree() public {
+    function testAllocationSharesStreetAcrossWallets() public {
         (NormieGenesisMinter g, CubeNFT c) = _world(8); // 1 street
 
         vm.prank(address(0xD0));
@@ -519,7 +518,7 @@ contract NormieGenesisMinterTest is Test {
     function testAllocationRevertsWhenWalletCapsOnlyStreet() public {
         (NormieGenesisMinter g,) = _world(8); // 1 street
         vm.prank(BOB);
-        g.mintPublic(3); // BOB caps street 0 at its 3-plot limit
+        g.mintPublic(5); // BOB caps street 0 at its 5-plot per-wallet limit
 
         vm.prank(BOB);
         vm.expectRevert(abi.encodeWithSelector(GenesisMinterBase.NoVacantPlot.selector, BOB));

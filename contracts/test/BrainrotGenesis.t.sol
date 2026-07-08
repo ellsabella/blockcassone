@@ -34,7 +34,7 @@ contract BrainrotGenesisTest is Test {
         normies = new BrainrotMockNormies();
         brainrot = new BrainrotMock();
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 16, OWNER);
-        artStore = new NonNormieArtStore(address(this));
+        artStore = new NonNormieArtStore(address(cubes), address(this));
         genesis = new BrainrotGenesisMinter(
             cubes, bytes32("public-seed"), OWNER, address(brainrot), artStore
         );

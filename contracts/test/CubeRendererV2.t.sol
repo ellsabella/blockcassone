@@ -46,7 +46,7 @@ contract CubeRendererV2Test is Test {
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
-        store = new NonNormieArtStore(address(this)); // test acts as store owner
+        store = new NonNormieArtStore(address(cubes), address(this)); // test acts as store owner
         thumbnailRenderer = new CubeThumbnailRendererV1(
             cubes,
             address(normies),
@@ -80,6 +80,9 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(json, '"trait_type":"neighbourhood","value":"27"'));
         assertTrue(_contains(json, '"trait_type":"street","value":"216"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"Normie"'));
+        // Never re-based: Origin == Current == the source collection's name() ("Normies").
+        assertTrue(_contains(json, '"trait_type":"Origin Collection","value":"Normies"'));
+        assertTrue(_contains(json, '"trait_type":"Current Collection","value":"Normies"'));
         assertTrue(_contains(json, '"trait_type":"Source Token ID","value":"6722"'));
         assertTrue(_contains(json, '"trait_type":"Renderer Version","value":"2"'));
     }
@@ -288,6 +291,10 @@ contract CubeRendererV2Test is Test {
         string memory json = renderer.metadataJSON(cubeId);
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"External ERC-721"'));
         assertTrue(_contains(json, '"trait_type":"Source Token ID","value":"42"'));
+        // Provenance survives the re-base: Origin = the genesis Normie ("Normies"),
+        // Current = the re-based codeless source (falls back to "Unknown").
+        assertTrue(_contains(json, '"trait_type":"Origin Collection","value":"Normies"'));
+        assertTrue(_contains(json, '"trait_type":"Current Collection","value":"Unknown"'));
 
         // The 3D/animation raw is the store bitmap, not the Normie raw.
         string memory html = renderer.animationHTML(cubeId);

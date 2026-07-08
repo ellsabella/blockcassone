@@ -49,7 +49,7 @@ contract PostMintMechanicsVerificationTest is Test {
         attest = new FlatteningAttestation(ADMIN, signer);
         vm.stopPrank();
 
-        artStore = new NonNormieArtStore(address(this));
+        artStore = new NonNormieArtStore(address(cubes), address(this));
         controller = new CubeMintController(cubes, artStore, attest);
 
         vm.startPrank(ADMIN);
