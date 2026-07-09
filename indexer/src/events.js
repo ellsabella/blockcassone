@@ -25,10 +25,18 @@ export const TRANSFER = parseAbiItem(
   'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'
 );
 
-// On the NonNormieArtStore address: fires on mint-record + every re-base, so the
-// latest gives each external cube's current flattened-tonal payload hash.
+// On the NonNormieArtStore address:
+//   NonNormiePayloadRecorded  — PER-CUBE art (post-mint customize / re-base override)
+//   SourcePayloadRecorded     — SOURCE-KEYED art (genesis CC0 pool, committed once per
+//                               (contract, tokenId); every genesis cube from that source
+//                               resolves it — no per-cube event)
+// A cube's current art hash = its per-cube override if any, else the source-keyed hash
+// for its current (sourceContract, sourceTokenId). Mirrors the store's resolution.
 export const NON_NORMIE_PAYLOAD_RECORDED = parseAbiItem(
   'event NonNormiePayloadRecorded(uint256 indexed cubeId, uint8 indexed version, bytes32 indexed payloadHash)'
+);
+export const SOURCE_PAYLOAD_RECORDED = parseAbiItem(
+  'event SourcePayloadRecorded(address indexed sourceContract, uint256 indexed sourceTokenId, bytes32 payloadHash)'
 );
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';

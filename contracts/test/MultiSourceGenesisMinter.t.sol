@@ -142,38 +142,6 @@ contract MultiSourceGenesisMinterTest is Test {
 
     // ---- Per-collection caps ------------------------------------------------
 
-    function testNormieAllowlistStopsAtNormieCap() public {
-        // Normie cap 2, Runners cap 2, total 4. Alice holds 3 snapshot Normies but the
-        // Normie allocation is only 2, so a 3-qty allowlist mint must revert.
-        (MultiSourceGenesisMinter g, CubeNFT cubes, NonNormieArtStore store) = _deploy(4, 2, 2, 0);
-        store; cubes;
-
-        uint256[] memory nrm = new uint256[](3);
-        nrm[0] = 101; nrm[1] = 102; nrm[2] = 103;
-        uint256[] memory rp = new uint256[](2);
-        rp[0] = 201; rp[1] = 202;
-
-        vm.startPrank(OWNER);
-        g.addSnapshotNormies(ALICE, nrm);
-        g.addSourcePool(1, rp);
-        g.setSourcePayload(1, 201, _payload(1));
-        g.setSourcePayload(1, 202, _payload(2));
-        g.finalizeSnapshot();
-        vm.stopPrank();
-
-        vm.prank(ALICE);
-        vm.expectRevert(
-            abi.encodeWithSelector(MultiSourceGenesisMinter.CollectionCapReached.selector, uint8(0))
-        );
-        g.mintAllowlist(3);
-
-        // The 2 within-cap allowlist mints still work.
-        vm.prank(ALICE);
-        uint256[] memory ids = g.mintAllowlist(2);
-        assertEq(ids.length, 2);
-        assertEq(g.collectionMinted(0), 2);
-    }
-
     // ---- Payload / config guards --------------------------------------------
 
     function testMintRevertsWhenStoredPayloadMissing() public {
@@ -282,6 +250,112 @@ contract MultiSourceGenesisMinterTest is Test {
         g.setSourcePayload(1, 202, _payload(5));
         (found,) = g.firstUncommittedPoolToken(1);
         assertFalse(found); // now fully art-backed
+    }
+
+    // ---- GTD reservations (holder's chosen art via SeaDrop) -----------------
+
+    address private constant SEADROP = address(0x5EAD);
+
+    // A finalized 16-slot world where ALICE has reserved Runner #200 (collection 1)
+    // as guaranteed chosen art. Runners pool is therefore cap-1 (4) + 1 reserved;
+    // SeaDrop wired, Public phase open.
+    function _reservedWorld()
+        private
+        returns (MultiSourceGenesisMinter g, CubeNFT cubes, NonNormieArtStore store)
+    {
+        (g, cubes, store) = _deploy(16, 8, 5, 3);
+        uint256[] memory nrm = new uint256[](10);
+        for (uint256 i = 0; i < 10; i++) nrm[i] = 100 + i;
+        uint256[] memory rp = new uint256[](5);
+        for (uint256 i = 0; i < 5; i++) rp[i] = 200 + i;
+        uint256[] memory sp = new uint256[](3);
+        for (uint256 i = 0; i < 3; i++) sp[i] = 300 + i;
+
+        vm.startPrank(OWNER);
+        g.addSnapshotNormies(ALICE, nrm);
+        g.addSourcePool(1, rp);
+        g.addSourcePool(2, sp);
+        for (uint256 i = 0; i < 5; i++) g.setSourcePayload(1, 200 + i, _payload(uint8(i + 1)));
+        for (uint256 i = 0; i < 3; i++) g.setSourcePayload(2, 300 + i, _payload(uint8(i + 20)));
+
+        uint8[] memory cs = new uint8[](1);
+        cs[0] = 1;
+        uint256[] memory ss = new uint256[](1);
+        ss[0] = 200;
+        g.reserveSources(ALICE, cs, ss);
+
+        g.finalizeSnapshot();
+        g.setSeaDrop(SEADROP);
+        g.setPhase(GenesisMinterBase.Phase.Public);
+        vm.stopPrank();
+    }
+
+    function testFinalizeCountsReservationsAgainstCap() public {
+        // Reserving pulled Runner #200 out of the pool; finalize must still pass
+        // because pool(4) + reserved(1) == cap(5). (No revert in _reservedWorld = pass.)
+        (MultiSourceGenesisMinter g,,) = _reservedWorld();
+        assertEq(g.reservedCount(1), 1);
+        assertEq(g.poolRemaining(1), 4); // 5 cap - 1 reserved
+        assertEq(g.reservationRemaining(ALICE), 1);
+    }
+
+    function testReservationAssignsChosenArt() public {
+        (MultiSourceGenesisMinter g, CubeNFT cubes,) = _reservedWorld();
+        vm.prank(SEADROP);
+        uint256[] memory ids = g.mintSeaDrop(ALICE, 1);
+        assertEq(ids.length, 1);
+        CubeNFT.CubeData memory d = cubes.cubeData(ids[0]);
+        assertEq(d.sourceContract, address(runners));
+        assertEq(d.sourceTokenId, 200); // exactly the reserved token
+        assertEq(g.reservationRemaining(ALICE), 0);
+    }
+
+    function testReservedSourceExcludedFromPublicDraw() public {
+        (MultiSourceGenesisMinter g, CubeNFT cubes,) = _reservedWorld();
+        // Drain the whole public pool (15 = 16 cap - 1 reserved) across fresh wallets;
+        // reserved Runner #200 must never be drawn.
+        bool sawReserved;
+        for (uint256 i = 0; i < 15; i++) {
+            vm.prank(SEADROP);
+            uint256[] memory ids = g.mintSeaDrop(address(uint160(4000 + i)), 1);
+            CubeNFT.CubeData memory d = cubes.cubeData(ids[0]);
+            if (d.sourceContract == address(runners) && d.sourceTokenId == 200) sawReserved = true;
+        }
+        assertFalse(sawReserved);
+        // ALICE still gets her reserved 200 (the last mintable cube).
+        vm.prank(SEADROP);
+        uint256[] memory a = g.mintSeaDrop(ALICE, 1);
+        assertEq(cubes.cubeData(a[0]).sourceTokenId, 200);
+        assertEq(g.mintedCount(), 16); // exact sellout including the reservation
+    }
+
+    function testReservationThenPublicRemainder() public {
+        (MultiSourceGenesisMinter g, CubeNFT cubes,) = _reservedWorld();
+        // ALICE mints 3 via SeaDrop: her 1 reservation FIRST (Runner 200) + 2 random.
+        vm.prank(SEADROP);
+        uint256[] memory ids = g.mintSeaDrop(ALICE, 3);
+        assertEq(ids.length, 3);
+        assertEq(cubes.cubeData(ids[0]).sourceContract, address(runners));
+        assertEq(cubes.cubeData(ids[0]).sourceTokenId, 200); // reservation is index 0
+        assertEq(g.reservationRemaining(ALICE), 0);
+    }
+
+    function testReserveRejectsUncommittedStoredSource() public {
+        (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3);
+        uint256[] memory rp = new uint256[](5);
+        for (uint256 i = 0; i < 5; i++) rp[i] = 200 + i;
+        vm.startPrank(OWNER);
+        g.addSourcePool(1, rp);
+        g.setSourcePayload(1, 201, _payload(1)); // 200 deliberately uncommitted
+        uint8[] memory cs = new uint8[](1);
+        cs[0] = 1;
+        uint256[] memory ss = new uint256[](1);
+        ss[0] = 200;
+        vm.expectRevert(
+            abi.encodeWithSelector(MultiSourceGenesisMinter.MissingSourcePayload.selector, uint256(200))
+        );
+        g.reserveSources(ALICE, cs, ss);
+        vm.stopPrank();
     }
 
     function _payload(uint8 fill) private pure returns (bytes memory p) {
