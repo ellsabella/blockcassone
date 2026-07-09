@@ -4,7 +4,8 @@ pragma solidity ^0.8.26;
 import { Test } from "forge-std/Test.sol";
 import { ERC721 } from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import { CubeNFT } from "../src/CubeNFT.sol";
-import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
+import { MultiSourceGenesisMinter } from "../src/MultiSourceGenesisMinter.sol";
+import { NonNormieArtStore } from "../src/NonNormieArtStore.sol";
 import { GenesisMinterBase } from "../src/GenesisMinterBase.sol";
 import {
     INonFungibleSeaDropToken,
@@ -63,18 +64,24 @@ contract CubeSeaDropTest is Test {
 
     SeaDropMockERC721 private normies;
     CubeNFT private cubes;
-    NormieGenesisMinter private genesis;
+    MultiSourceGenesisMinter private genesis;
+    NonNormieArtStore private store;
     MockSeaDrop private seaDrop;
 
     function setUp() public {
         normies = new SeaDropMockERC721();
         cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 8, OWNER);
-        genesis = new NormieGenesisMinter(cubes, bytes32("public-seed"), OWNER);
+        store = new NonNormieArtStore(address(cubes), OWNER);
+        {
+            // Normie-only config: whole supply is the Normie collection, no CC0 pools.
+            address[] memory cc = new address[](0);
+            uint32[] memory caps = new uint32[](0);
+            genesis = new MultiSourceGenesisMinter(cubes, bytes32("public-seed"), OWNER, store, 8, cc, caps);
+        }
         seaDrop = new MockSeaDrop();
 
         vm.startPrank(OWNER);
         genesis.addSnapshotNormies(ALICE, _ids(101, 102, 103));
-        genesis.setSnapshotRoot(genesis.hashSnapshot(ALICE, _ids(101, 102, 103)));
         genesis.finalizeSnapshot();
         genesis.setPhase(GenesisMinterBase.Phase.Public);
 

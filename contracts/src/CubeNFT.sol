@@ -293,7 +293,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         cubeForNormieId[normieId] = cubeId;
     }
 
-    /// @notice Genesis mint of an external-source cube (e.g. a Brainrot). NO
+    /// @notice Genesis mint of an external-source cube (e.g. a CC0 source). NO
     ///         source-ownership check — the committed genesis pool is the authority,
     ///         exactly like snapshot Normies. Callable by the genesis minter (or
     ///         owner). The tonal art payload is recorded separately by the minter

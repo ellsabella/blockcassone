@@ -10,7 +10,8 @@ import { CubeHilbertGeometry } from "../src/render/CubeHilbertGeometry.sol";
 import { CubeFrameLayer } from "../src/render/CubeFrameLayer.sol";
 import { CubeWalkerLayer } from "../src/render/CubeWalkerLayer.sol";
 import { NormieAddresses } from "../src/NormieAddresses.sol";
-import { NormieGenesisMinter } from "../src/NormieGenesisMinter.sol";
+import { MultiSourceGenesisMinter } from "../src/MultiSourceGenesisMinter.sol";
+import { NonNormieArtStore } from "../src/NonNormieArtStore.sol";
 import { GenesisMinterBase } from "../src/GenesisMinterBase.sol";
 import { RendererAssetStore } from "../src/RendererAssetStore.sol";
 
@@ -36,7 +37,7 @@ contract DeployMainnetNormiePreview is Script {
         AgentStatusRegistry agentRegistry;
         CubeThumbnailRendererV1 thumbnailRenderer;
         CubeRendererV2 renderer;
-        NormieGenesisMinter genesis;
+        MultiSourceGenesisMinter genesis;
     }
 
     function run() external {
@@ -120,9 +121,21 @@ contract DeployMainnetNormiePreview is Script {
                 address(0)
             );
 
+        // Normie-only preview: whole supply is the Normie collection, no CC0 pools.
+        // The art store is only a constructor dependency here (no CC0 mints).
         vm.broadcast();
-        deployment.genesis =
-            new NormieGenesisMinter(deployment.cubes, config.publicSeed, config.initialOwner);
+        NonNormieArtStore previewStore =
+            new NonNormieArtStore(address(deployment.cubes), config.initialOwner);
+        vm.broadcast();
+        deployment.genesis = new MultiSourceGenesisMinter(
+            deployment.cubes,
+            config.publicSeed,
+            config.initialOwner,
+            previewStore,
+            deployment.cubes.totalSlots(),
+            new address[](0),
+            new uint32[](0)
+        );
 
         vm.broadcast();
         deployment.cubes.setRenderer(address(deployment.renderer));
@@ -178,7 +191,7 @@ contract DeployMainnetNormiePreview is Script {
         console2.log("RendererAssetStore", address(deployment.assetStore));
         console2.log("AgentStatusRegistry", address(deployment.agentRegistry));
         console2.log("CubeRendererV2", address(deployment.renderer));
-        console2.log("NormieGenesisMinter", address(deployment.genesis));
+        console2.log("MultiSourceGenesisMinter", address(deployment.genesis));
         console2.log("SeaDrop", config.seaDrop);
         console2.log("Preview recipient", config.previewRecipient);
         console2.log("Sample mints", config.sampleMints);

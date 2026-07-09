@@ -31,5 +31,9 @@ export function loadConfig() {
     // pre-deploy range (INDEXER_FROM_BLOCK=<deploy block>).
     fromBlock: process.env.INDEXER_FROM_BLOCK != null ? BigInt(process.env.INDEXER_FROM_BLOCK) : 0n,
     snapshotOut: resolve(REPO_ROOT, process.env.INDEXER_SNAPSHOT_OUT || 'data/world-snapshot.json'),
+    // Per-cube art/lifecycle history (mint origin + every re-base + moves), served as a
+    // separate lean file so the overview snapshot stays small; the UI fetches it for a
+    // cube's detail view.
+    historyOut: resolve(REPO_ROOT, process.env.INDEXER_HISTORY_OUT || 'data/cube-history.json'),
   };
 }

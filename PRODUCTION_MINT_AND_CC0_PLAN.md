@@ -1,14 +1,29 @@
 # Production Mint And Update Plan
 
+> **⚠️ STATUS 2026-07-07 — PARTIALLY SUPERSEDED.** The "Normie-only genesis, CC0
+> deferred to post-mint" premise below was **reversed by the user**: genesis is now a
+> **multi-source SeaDrop drop across 6 collections** (Normie + Chain Runners + 1337
+> skulls + Baby Pepes + Nouns + OnChainKevin) with a locked allocation
+> (1679/901/655/410/328/123 = 4096). Brainrot was moved OUT of genesis to the post-mint
+> Update-Cube flow. The mint engine (`MultiSourceGenesisMinter`), CC0 art store
+> (source-keyed, no per-mint duplication), and production deploy
+> (`contracts/script/DeployGenesis.s.sol`) are BUILT + tested. For the live launch steps
+> see **[LAUNCH_RUNBOOK.md](LAUNCH_RUNBOOK.md)**; for current architecture see the
+> `launch_mint_architecture` + `cc0_source_art_onchain` memories. The **allowlist /
+> public / snapshot / SeaDrop-compatibility / metadata / agent-registry / renderer**
+> sections below are still accurate; the "genesis is Normie-only" framing is not.
+
 ## Objective
 
 Blockcassone's genesis mint should be simple, scarce, and copyright-clean:
 
 - genesis supply is capped at `4096` cubes
-- every paid genesis cube is backed by a real Normie source
-- no arbitrary third-party NFT media is ingested at mint
-- no placeholder/environment-only cube is sold in the genesis mint
-- CC0 and owner-supplied art updates are deferred to a post-mint website flow
+- every paid genesis cube is backed by a real, fully-on-chain source (Normie live art, or
+  a committed CC0 tonal payload) — never a placeholder
+- allowlist is Normie-only (holder claim); the public phase draws a weighted mix across
+  all 6 collections
+- no arbitrary third-party NFT media is ingested at mint (the CC0 pools are curated +
+  committed on-chain before the drop)
 
 This keeps the primary mint compatible with OpenSea/SeaDrop-style quantity
 minting while preserving the fully-onchain requirement for each token after

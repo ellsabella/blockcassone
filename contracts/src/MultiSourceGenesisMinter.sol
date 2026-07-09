@@ -52,6 +52,7 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
     error CollectionCapReached(uint8 collectionId);
     error PoolSizeMismatch(uint8 collectionId, uint256 poolLength, uint32 cap);
     error MissingSourcePayload(uint256 tokenId);
+    error SourceNotInPool(uint8 collectionId, uint256 sourceId);
 
     event CollectionRegistered(uint8 indexed collectionId, uint8 model, address contractAddr, uint32 cap);
     event SourcePoolExtended(uint8 indexed collectionId, uint256 count);
@@ -122,6 +123,95 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
     ) external onlyOwner {
         _requireStored(collectionId);
         artStore.recordSourcePayloadBatch(_collections[collectionId].contractAddr, tokenIds, payloads);
+    }
+
+    // ---- GTD reservations (guaranteed allowlist: holder's chosen art) -------
+    // A guaranteed-allowlist holder picks specific source tokens on the pre-mint
+    // landing page (across any of the six collections). After the backend verifies
+    // the signed ownership attestation, the approved (wallet -> chosen sources) map
+    // is baked here, before finalize. When that wallet mints via SeaDrop, these are
+    // assigned FIRST, in order (see mintSeaDrop consumption — increment 2), instead
+    // of a random pool draw, so the holder gets exactly the artwork they chose.
+
+    struct Reservation {
+        uint8 collectionId;
+        uint256 sourceId;
+    }
+
+    mapping(address wallet => Reservation[]) private _reservations;
+    mapping(address wallet => uint256 cursor) public reservationCursor;
+    mapping(uint8 collectionId => uint32 count) public reservedCount;
+
+    event SourcesReserved(address indexed wallet, uint256 count);
+
+    /// @notice Bake a wallet's guaranteed chosen artworks (owner, before finalize).
+    ///         Each `(collectionId, sourceId)` must be a valid collection; STORED
+    ///         collections additionally require a committed payload (so no placeholder
+    ///         can be reserved). Appends to any existing reservations for the wallet.
+    function reserveSources(
+        address wallet,
+        uint8[] calldata collectionIds,
+        uint256[] calldata sourceIds
+    ) external onlyOwner {
+        if (finalized) revert SnapshotAlreadyFinalized();
+        if (collectionIds.length != sourceIds.length) revert CollectionListLengthMismatch();
+        for (uint256 i = 0; i < collectionIds.length; i++) {
+            uint8 c = collectionIds[i];
+            uint256 sid = sourceIds[i];
+            if (c >= _collections.length) revert NotStoredCollection(c);
+            if (_collections[c].model == MODEL_STORED) {
+                if (!artStore.hasSourcePayload(_collections[c].contractAddr, sid)) {
+                    revert MissingSourcePayload(sid);
+                }
+                _removeFromPool(c, sid); // pull out of the random draw so it can't collide
+            } else {
+                _removeNormieFromPool(sid); // collection 0 (Normie): exclude from the snapshot draw
+            }
+            _reservations[wallet].push(Reservation({ collectionId: c, sourceId: sid }));
+            reservedCount[c] += 1;
+        }
+        emit SourcesReserved(wallet, collectionIds.length);
+    }
+
+    /// @dev Remove a specific token from a STORED collection's draw pool (swap-pop).
+    function _removeFromPool(uint8 collectionId, uint256 sourceId) private {
+        uint256[] storage pool = _pool[collectionId];
+        for (uint256 i = 0; i < pool.length; i++) {
+            if (pool[i] == sourceId) {
+                uint256 last = pool.length - 1;
+                if (i != last) pool[i] = pool[last];
+                pool.pop();
+                return;
+            }
+        }
+        revert SourceNotInPool(collectionId, sourceId);
+    }
+
+    function _reservationsRemaining(address minter) internal view override returns (uint256) {
+        return _reservations[minter].length - reservationCursor[minter];
+    }
+
+    function _mintNextReservation(address minter) internal override returns (uint256 cubeId) {
+        Reservation storage r = _reservations[minter][reservationCursor[minter]];
+        reservationCursor[minter] += 1;
+        return _mintReservedSource(minter, r.collectionId, r.sourceId);
+    }
+
+    function reservationCount(address wallet) external view returns (uint256) {
+        return _reservations[wallet].length;
+    }
+
+    function reservationRemaining(address wallet) external view returns (uint256) {
+        return _reservations[wallet].length - reservationCursor[wallet];
+    }
+
+    function reservationAt(address wallet, uint256 index)
+        external
+        view
+        returns (uint8 collectionId, uint256 sourceId)
+    {
+        Reservation storage r = _reservations[wallet][index];
+        return (r.collectionId, r.sourceId);
     }
 
     // ---- Views --------------------------------------------------------------
@@ -234,7 +324,10 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
     function _beforeFinalize() internal view override {
         uint8 n = uint8(_collections.length);
         for (uint8 c = 0; c < n; c++) {
-            if (_collections[c].model == MODEL_STORED && _pool[c].length != _collections[c].cap) {
+            // Reserved tokens were pulled out of the pool at reserve time, so the pool
+            // plus the reserved count must still equal the collection's cap.
+            if (_collections[c].model == MODEL_STORED
+                    && _pool[c].length + reservedCount[c] != _collections[c].cap) {
                 revert PoolSizeMismatch(c, _pool[c].length, _collections[c].cap);
             }
         }
