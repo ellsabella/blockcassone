@@ -1,0 +1,251 @@
+// Shared allowlist API — used by the Vite dev/preview proxy (vite.config.js) AND the
+// standalone production server (server.mjs). Framework-agnostic: createApiHandler(env)
+// returns async (req,res) => handled:boolean. Secrets (Alchemy key, RPC, admin token)
+// come from `env` and never reach the browser.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { recoverTypedDataAddress } from 'viem';
+import { CONFIG, entitlementFor } from './src/config.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(HERE, '..');
+
+const MAX_BODY = 16 * 1024;           // 16 KB — a signed request is tiny
+const RL_WINDOW_MS = 60_000;          // per-IP rate-limit window (all limiters)
+const SUBMIT_MAX_PER_WINDOW = 8;      // signed submits / IP / min
+const ALCHEMY_MAX_PER_WINDOW = 60;    // holdings reads / IP / min (a full scan is a few calls)
+const RPC_MAX_PER_WINDOW = 200;       // wagmi/rainbowkit chatter + one delegate read / IP / min
+const RPC_BATCH_MAX = 20;             // reject oversized JSON-RPC batches
+
+// The proxies are otherwise open to our Alchemy key + RPC, so lock them down: Alchemy is limited
+// to the one endpoint the app needs, and the RPC proxy to read-only methods (no getLogs / filters /
+// writes / trace / debug — the expensive + abusable ones).
+const ALCHEMY_ALLOWED_PATH = '/getNFTsForOwner';
+const ALLOWED_RPC_METHODS = new Set([
+  'eth_chainId', 'eth_call', 'eth_getBalance', 'eth_blockNumber', 'eth_getBlockByNumber',
+  'eth_gasPrice', 'eth_maxPriorityFeePerGas', 'eth_feeHistory', 'eth_estimateGas',
+  'eth_getCode', 'eth_getStorageAt', 'eth_getTransactionCount', 'net_version', 'web3_clientVersion',
+]);
+
+const NFT_CACHE_TTL = 60_000;         // collapse repeat holdings scans of the same wallet
+const NFT_CACHE_MAX = 2000;
+
+const json = (res, code, obj) => { res.statusCode = code; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(obj)); };
+
+function clientIp(req) {
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xff || req.socket?.remoteAddress || 'unknown';
+}
+
+// Fixed-window per-IP limiter. Each limiter keeps its own bucket map.
+function makeLimiter(maxPerWindow, windowMs = RL_WINDOW_MS) {
+  const buckets = new Map(); // ip -> { count, resetAt }
+  return (ip) => {
+    const now = Date.now();
+    const e = buckets.get(ip);
+    if (!e || now > e.resetAt) { buckets.set(ip, { count: 1, resetAt: now + windowMs }); return false; }
+    e.count += 1;
+    return e.count > maxPerWindow;
+  };
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let b = '', size = 0;
+    req.on('data', c => { size += c.length; if (size > MAX_BODY) { reject(new Error('body too large')); req.destroy(); } else b += c; });
+    req.on('end', () => resolve(b));
+    req.on('error', reject);
+  });
+}
+
+export function createApiHandler(env) {
+  const rpc = env.ETH_RPC_URL || '';
+  const alchemyKey = env.ALCHEMY_KEY || (/(?:alchemy\.com\/v2\/)([^/\s?]+)/.exec(rpc) || [])[1] || '';
+  const adminToken = env.ALLOWLIST_ADMIN_TOKEN || '';
+  const FILE = env.SUBMISSIONS_FILE
+    ? path.resolve(env.SUBMISSIONS_FILE)
+    : path.join(REPO_ROOT, 'allowlist-submissions.jsonl');
+
+  const submitLimited = makeLimiter(SUBMIT_MAX_PER_WINDOW);
+  const alchemyLimited = makeLimiter(ALCHEMY_MAX_PER_WINDOW);
+  const rpcLimited = makeLimiter(RPC_MAX_PER_WINDOW);
+  const nftCache = new Map(); // rest-path -> { at, status, body }
+
+  function readAll() {
+    try {
+      return fs.readFileSync(FILE, 'utf8').split('\n').filter(l => l.trim())
+        .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } catch { return []; }
+  }
+  const isRegistered = w => { const lw = w.toLowerCase(); return readAll().some(r => String(r.wallet || '').toLowerCase() === lw); };
+
+  const isAdmin = req => {
+    const auth = String(req.headers.authorization || '');
+    const tok = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    return adminToken && tok && tok.length === adminToken.length && tok === adminToken;
+  };
+
+  // Reconstruct the exact signed message and recover the signer.
+  async function verifySignature(p) {
+    const message = {
+      wallet: p.wallet,
+      vaults: Array.isArray(p.vaults) ? p.vaults : [],
+      sources: (p.sources || []).map(s => ({ collectionId: Number(s.collectionId), tokenId: BigInt(s.tokenId), contractAddr: s.contractAddr })),
+      issuedAt: BigInt(p.issuedAt),
+      nonce: p.nonce,
+    };
+    const signer = await recoverTypedDataAddress({
+      domain: CONFIG.eip712Domain, types: CONFIG.eip712Types, primaryType: 'Attestation', message, signature: p.signature,
+    });
+    return signer.toLowerCase() === String(p.wallet).toLowerCase();
+  }
+
+  // Verify the lighter "register interest" attestation.
+  async function verifyInterest(p) {
+    const message = { wallet: p.wallet, handle: String(p.handle || ''), issuedAt: BigInt(p.issuedAt), nonce: p.nonce };
+    const signer = await recoverTypedDataAddress({
+      domain: CONFIG.eip712Domain, types: CONFIG.eip712InterestTypes, primaryType: 'Interest', message, signature: p.signature,
+    });
+    return signer.toLowerCase() === String(p.wallet).toLowerCase();
+  }
+
+  return async function handle(req, res) {
+    const url = new URL(req.url, 'http://x');
+    const p = url.pathname;
+    if (!p.startsWith('/api/')) return false;
+
+    // ---- key-injecting proxies (never expose the key; rate-limited + endpoint-locked) ----
+    if (p === '/api/alchemy-nft' || p.startsWith('/api/alchemy-nft/')) {
+      if (!alchemyKey) return json(res, 500, { error: 'Missing ALCHEMY_KEY / Alchemy ETH_RPC_URL' }), true;
+      if (alchemyLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
+      const rest = req.url.slice('/api/alchemy-nft'.length);
+      if (rest.split('?')[0] !== ALCHEMY_ALLOWED_PATH) return json(res, 403, { error: 'endpoint not allowed' }), true;
+      const now = Date.now();
+      const hit = nftCache.get(rest);
+      if (hit && now - hit.at < NFT_CACHE_TTL) {
+        res.statusCode = hit.status; res.setHeader('content-type', 'application/json'); res.end(hit.body); return true;
+      }
+      try {
+        const r = await fetch(`https://eth-mainnet.g.alchemy.com/nft/v3/${alchemyKey}${rest}`, { headers: { accept: 'application/json' } });
+        const body = await r.text();
+        if (r.status === 200) {
+          if (nftCache.size >= NFT_CACHE_MAX) nftCache.clear();
+          nftCache.set(rest, { at: now, status: r.status, body });
+        }
+        res.statusCode = r.status; res.setHeader('content-type', 'application/json'); res.end(body);
+      } catch (e) { json(res, 502, { error: 'Alchemy proxy failed', detail: String(e) }); }
+      return true;
+    }
+    if (p === '/api/mainnet-rpc') {
+      if (!rpc) return json(res, 500, { error: 'Missing ETH_RPC_URL' }), true;
+      if (rpcLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
+      let body;
+      try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad body' }), true; }
+      let parsed;
+      try { parsed = JSON.parse(body); } catch { return json(res, 400, { error: 'bad json' }), true; }
+      const calls = Array.isArray(parsed) ? parsed : [parsed];
+      if (calls.length > RPC_BATCH_MAX) return json(res, 413, { error: 'batch too large' }), true;
+      for (const c of calls) {
+        if (!c || !ALLOWED_RPC_METHODS.has(c.method)) return json(res, 403, { error: `method not allowed: ${c?.method}` }), true;
+      }
+      try {
+        const r = await fetch(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+        res.statusCode = r.status; res.setHeader('content-type', 'application/json'); res.end(await r.text());
+      } catch (e) { json(res, 502, { error: 'RPC proxy failed', detail: String(e) }); }
+      return true;
+    }
+
+    // ---- allowlist status (public) ----
+    if (p === '/api/allowlist-status') {
+      const w = url.searchParams.get('wallet') || '';
+      return json(res, 200, { registered: /^0x[0-9a-fA-F]{40}$/.test(w) ? isRegistered(w) : false }), true;
+    }
+
+    // ---- allowlist submit (public, signed) — GTD art request OR register-interest ----
+    if (p === '/api/allowlist-submit') {
+      if (req.method !== 'POST') return json(res, 405, { error: 'POST only' }), true;
+      if (submitLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
+      let payload;
+      try { payload = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'bad body' }), true; }
+      const wallet = String(payload.wallet || '');
+      if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) return json(res, 400, { error: 'bad wallet' }), true;
+      if (typeof payload.signature !== 'string' || !payload.signature.startsWith('0x'))
+        return json(res, 400, { error: 'missing signature' }), true;
+      const kind = payload.kind === 'interest' ? 'interest' : 'gtd';
+
+      let ok = false;
+      if (kind === 'interest') {
+        if (typeof payload.handle === 'string' && payload.handle.length > CONFIG.interestHandleMax)
+          return json(res, 400, { error: 'handle too long' }), true;
+        try { ok = await verifyInterest(payload); } catch { ok = false; }
+      } else {
+        if (!Array.isArray(payload.sources) || payload.sources.length < 1 || payload.sources.length > CONFIG.gtdCapPerWallet)
+          return json(res, 400, { error: 'bad sources' }), true;
+        try { ok = await verifySignature(payload); } catch { ok = false; }
+      }
+      if (!ok) return json(res, 401, { error: 'signature does not match wallet' }), true;
+      if (isRegistered(wallet)) return json(res, 409, { alreadyRegistered: true }), true;
+
+      const record = { ...payload, kind, wallet: wallet.toLowerCase(), receivedAt: new Date().toISOString(), ip: clientIp(req) };
+      try { fs.appendFileSync(FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); }
+      catch (e) { return json(res, 500, { error: 'persist failed', detail: String(e) }), true; }
+      return json(res, 200, { ok: true }), true;
+    }
+
+    // ---- admin (Bearer token) ----
+    if (p === '/api/allowlist-count' || p === '/api/allowlist-stats' || p === '/api/allowlist-export') {
+      if (!isAdmin(req)) return json(res, 403, { error: 'forbidden' }), true;
+      const rows = readAll();
+      if (p === '/api/allowlist-count') return json(res, 200, { count: rows.length }), true;
+      if (p === '/api/allowlist-export') {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'application/json');
+        res.setHeader('content-disposition', 'attachment; filename="allowlist-submissions.json"');
+        res.end(JSON.stringify(rows, null, 2));
+        return true;
+      }
+      // stats
+      const byCollection = {};
+      const byKind = { gtd: 0, interest: 0 };
+      let totalSpots = 0;
+      let interestHolders = 0; // interest registrants that DO hold a qualifying asset (FCFS-eligible)
+      for (const r of rows) {
+        const kind = r.kind === 'interest' ? 'interest' : 'gtd';
+        byKind[kind] += 1;
+        if (kind === 'interest') {
+          const held = Number(r.heldSummary?.normies || 0) + Number(r.heldSummary?.other || 0);
+          if (held > 0) interestHolders += 1;
+          continue;
+        }
+        totalSpots += Number(r.entitlement?.spots || (r.sources || []).length) || 0;
+        for (const s of r.sources || []) {
+          const name = CONFIG.collections[s.collectionId]?.name || `#${s.collectionId}`;
+          byCollection[name] = (byCollection[name] || 0) + 1;
+        }
+      }
+      return json(res, 200, {
+        registrations: rows.length,
+        byKind,
+        interestFcfsEligible: interestHolders,
+        totalSpotsRequested: totalSpots,
+        artworksRequested: rows.reduce((a, r) => a + (r.sources || []).length, 0),
+        byCollection,
+        first: rows[0]?.receivedAt || null,
+        last: rows[rows.length - 1]?.receivedAt || null,
+      }), true;
+    }
+
+    return json(res, 404, { error: 'not found' }), true;
+  };
+}
+
+// Direct file access for the admin CLI running ON the host.
+export function localStore(env) {
+  const FILE = env?.SUBMISSIONS_FILE ? path.resolve(env.SUBMISSIONS_FILE) : path.join(REPO_ROOT, 'allowlist-submissions.jsonl');
+  const rows = () => {
+    try { return fs.readFileSync(FILE, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l)); }
+    catch { return []; }
+  };
+  return { FILE, rows, entitlementFor };
+}
