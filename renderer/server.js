@@ -1,13 +1,26 @@
 // Dev server — Node stdlib only.
 // Serves the renderer/ directory and pushes shader hot-reload events via SSE.
 
-const http = require('http');
-const fs   = require('fs');
-const path = require('path');
+const http   = require('http');
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
 
 const ROOT      = __dirname;                        // renderer/
 const REPO_ROOT = path.resolve(__dirname, '..');    // blockcassone/
 const PORT      = parseInt(process.env.PORT || '3000', 10);
+
+// ---------- Share-on-X snapshots (Twitter/X card images) ----------
+// Client captures the cube view → POST /s → we store a WebP + an id→slot record; /s/<id> serves an
+// unfurl card page (twitter:image) and redirects humans to the cube; /s/<id>.webp serves the image.
+// Ephemeral by design: swept on a short TTL + a hard count cap so disk never accumulates.
+const SHARES_DIR      = path.join(REPO_ROOT, 'shares');
+const SHARES_INDEX    = path.join(SHARES_DIR, 'index.json');
+const SHARE_TTL_MS    = 3 * 60 * 60 * 1000; // delete images older than 3h (past X's crawl window)
+const SHARE_MAX       = 500;                // hard cap: keep only the newest N images
+const SHARE_MIN_AGE_MS = 60 * 60 * 1000;    // never count-evict anything younger than 1h
+const SHARE_ID_RE     = /^[A-Za-z0-9_-]{6,40}$/;
+fs.mkdirSync(SHARES_DIR, { recursive: true });
 
 function loadDotEnv(filePath, { override = false } = {}) {
   if (!fs.existsSync(filePath)) return;
@@ -297,6 +310,111 @@ async function proxyImage(req, res) {
   }
 }
 
+function readRequestBinary(req, maxBytes = 6_000_000) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let len = 0;
+    req.on('data', chunk => {
+      len += chunk.length;
+      if (len > maxBytes) { reject(new Error('Image too large')); req.destroy(); return; }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function readShareIndex() {
+  try { return JSON.parse(fs.readFileSync(SHARES_INDEX, 'utf8')) || {}; }
+  catch (_) { return {}; }
+}
+function writeShareIndex(index) {
+  try { fs.writeFileSync(SHARES_INDEX, JSON.stringify(index)); } catch (_) {}
+}
+function removeShareImage(id) {
+  try { fs.unlinkSync(path.join(SHARES_DIR, `${id}.webp`)); } catch (_) {}
+}
+
+// Delete images past the TTL, then enforce the count cap (evict oldest beyond SHARE_MAX, but never
+// anything younger than SHARE_MIN_AGE_MS). The id→slot record is dropped with its image — old links
+// then just redirect to the viewer home instead of the exact cube.
+function sweepShares() {
+  const index = readShareIndex();
+  const now = Date.now();
+  let changed = false;
+  for (const [id, rec] of Object.entries(index)) {
+    if (!rec || now - (rec.ts || 0) > SHARE_TTL_MS) { removeShareImage(id); delete index[id]; changed = true; }
+  }
+  const live = Object.entries(index).sort((a, b) => (b[1].ts || 0) - (a[1].ts || 0)); // newest first
+  for (let i = SHARE_MAX; i < live.length; i++) {
+    const [id, rec] = live[i];
+    if (now - (rec.ts || 0) < SHARE_MIN_AGE_MS) continue;
+    removeShareImage(id); delete index[id]; changed = true;
+  }
+  if (changed) writeShareIndex(index);
+}
+
+// POST /s?slot=<n> with a WebP body → { id }. Stores shares/<id>.webp + an id→slot record.
+async function handleShareUpload(req, res) {
+  try {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    const slot = parseInt(url.searchParams.get('slot') || '', 10);
+    if (!Number.isInteger(slot) || slot < 0 || slot >= 4096) { sendJson(res, 400, { error: 'bad slot' }); return; }
+    const buf = await readRequestBinary(req);
+    if (!buf || buf.length < 64) { sendJson(res, 400, { error: 'empty image' }); return; }
+    const id = crypto.randomBytes(9).toString('base64url'); // 12 url-safe chars
+    fs.writeFileSync(path.join(SHARES_DIR, `${id}.webp`), buf);
+    const index = readShareIndex();
+    index[id] = { slot, ts: Date.now() };
+    writeShareIndex(index);
+    sweepShares(); // opportunistic cleanup on every upload
+    sendJson(res, 200, { id, path: `/s/${id}` });
+  } catch (err) {
+    sendJson(res, 400, { error: 'share upload failed', detail: String(err?.message || err) });
+  }
+}
+
+function serveShareImage(res, id) {
+  fs.readFile(path.join(SHARES_DIR, `${id}.webp`), (err, data) => {
+    if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); return; }
+    res.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=86400' });
+    res.end(data);
+  });
+}
+
+// The unfurl card page: crawlers read the twitter:image/og:image meta; humans get JS-redirected to
+// the cube in the viewer (crawlers don't run JS, so they still parse the card).
+function serveShareCard(req, res, id) {
+  const rec = readShareIndex()[id];
+  const slot = rec ? rec.slot : null;
+  const slot4 = slot != null ? String(slot).padStart(4, '0') : '----';
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0] || 'http';
+  const host = req.headers.host || `localhost:${PORT}`;
+  const base = `${proto}://${host}`;
+  const imgUrl = `${base}/s/${id}.webp`;
+  const deep = slot != null ? `${base}/viewer/?cube=${slot}` : `${base}/viewer/`;
+  const title = `THE BLOCK — Cube #${slot4}`;
+  const desc = 'by @bright_lightart';
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${title}">
+<meta name="twitter:description" content="${desc}">
+<meta name="twitter:image" content="${imgUrl}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="${title}">
+<meta property="og:description" content="${desc}">
+<meta property="og:image" content="${imgUrl}">
+<meta property="og:url" content="${base}/s/${id}">
+<script>location.replace(${JSON.stringify(deep)});</script>
+</head><body style="background:#05060a;color:#cfe8ff;font-family:system-ui,sans-serif;padding:24px">
+Redirecting to <a href="${deep}" style="color:#90d0ff">THE BLOCK</a>…
+</body></html>`;
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(html);
+}
+
 // Ensure shaders/ exists so fs.watch can attach to it.
 const shadersDir = path.join(ROOT, 'shaders');
 if (!fs.existsSync(shadersDir)) {
@@ -368,6 +486,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Share-on-X: upload a snapshot, and serve its card page / image.
+  const sharePath = req.url.split('?')[0];
+  if (sharePath === '/s' && req.method === 'POST') { handleShareUpload(req, res); return; }
+  if (sharePath.startsWith('/s/')) {
+    const m = sharePath.match(/^\/s\/([A-Za-z0-9_-]{6,40})(\.webp)?$/);
+    if (m && SHARE_ID_RE.test(m[1])) {
+      if (m[2]) serveShareImage(res, m[1]);
+      else serveShareCard(req, res, m[1]);
+      return;
+    }
+  }
+
   if (req.url === '/shader-changes') {
     res.writeHead(200, {
       'Content-Type':   'text/event-stream',
@@ -390,8 +520,10 @@ const server = http.createServer((req, res) => {
 
   let rel = req.url.split('?')[0];
   try { rel = decodeURIComponent(rel); } catch (_) {}
+  // Site root → the hero landing page (self-contained flythrough with an Enter → /viewer/).
+  if (rel === '/') rel = '/landing.html';
   // Any URL ending with '/' → serve that directory's index.html.
-  if (rel.endsWith('/')) rel += 'index.html';
+  else if (rel.endsWith('/')) rel += 'index.html';
 
   // Pick root: repo root for /viewer/, /core/, /public/, /schema/, /renderer/; renderer/ for everything else.
   const useRepoRoot = REPO_PREFIXES.some(p => rel.startsWith(p));
@@ -427,7 +559,12 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// Sweep share snapshots on a timer (in addition to the opportunistic sweep on each upload).
+sweepShares();
+setInterval(sweepShares, 15 * 60 * 1000).unref();
+
 server.listen(PORT, () => {
   console.log(`[server] blockcassone dev → http://localhost:${PORT}`);
   console.log(`[server] watching ${path.relative(ROOT, shadersDir)}/ for *.glsl changes`);
+  console.log(`[server] share snapshots → ${path.relative(REPO_ROOT, SHARES_DIR)}/ (TTL ${SHARE_TTL_MS / 3600000}h, cap ${SHARE_MAX})`);
 });

@@ -5,6 +5,7 @@ import { createBox, createWireframeBox, createMeshGL }         from '../renderer
 import { loadMaterial }                                        from '../renderer/src/materials.js';
 import { faceOnCamera }                                        from './camera.js';
 import { createOrbitCamera }                                   from './orbit-camera.js';
+import { createCinematicFlight }                              from './cinematic-camera.js';
 import { createLights, MAX_POINT_LIGHTS }                      from './lights.js';
 import { buildEdgePointDebug }                                 from './materials/debug-edge-points.js';
 import { computeMirrorSlices }                                 from './internal-planes.js';
@@ -14,13 +15,18 @@ import {
 import { buildHilbertLines, buildFullHilbertPath, buildHilbertPathRange } from './hilbert-lines.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
 import { buildStoneWalker }   from './materials/stone-walker.js';
-import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner } from './non-normie-art-plane.js';
+import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner, buildNonNormieIdLabel, setNonNormieResolvers } from './non-normie-art-plane.js';
 import {
   getWalletState,
   isAgenticNonNormieCube,
   loadWalletNftsAcrossChains,
   setWalletDataReadyCallback,
+  getNonNormieGridForCube,
+  getWalletAssignmentForCube,
 } from './wallet-nfts.js';
+// non-normie-art-plane is now network-free (injected resolvers); the big-cube
+// viewer wires in the wallet grid/assignment accessors it used to import implicitly.
+setNonNormieResolvers({ getGrid: getNonNormieGridForCube, getAssignment: getWalletAssignmentForCube });
 import { serializeAllPlaced } from '/core/serialize.js';
 import { assignCubeEdgePoints, assignMotifEdgePoints, placeholderSeed } from '/core/cube-edge-points.js';
 import {
@@ -35,11 +41,14 @@ import {
   sourceNftForSlot,
 } from './mint-simulator.js';
 import { mintNormieCubeOnChain } from './preview-chain.js';
+import { mountConnectButton } from './wallet.js';
 import {
   applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor,
 } from './scene/styling.js';
 import { pushDetailMotifItems, pushDetailPlaneItems } from './detail-scene-builder.js';
 import { buildEmptySlotItems } from './crystal-biome.js';
+import { buildImpostorCloud } from './impostor-cloud.js';
+import { buildRainbowSpine, recolorSpineItems } from './rainbow-spine.js';
 import { environmentNameForStreet } from '/core/cube-env.js';
 import {
   ensureMotifCategory, visibleMotifs, visiblePlanes, categoryCounts,
@@ -386,10 +395,14 @@ function updateWorldMapLabel() {
 }
 
 function setMainViewScope(next) {
-  if (next !== 'region' && next !== 'neighbourhood' && next !== 'street') return;
+  if (next !== 'block' && next !== 'region' && next !== 'neighbourhood' && next !== 'street') return;
   mainViewScope = next;
   const anchor = selectedMotifIdx ?? currentAnchorMotif();
-  if (mainViewScope === 'region') {
+  if (mainViewScope === 'block') {
+    selectedRegionIdx = null;
+    selectedNeighbourhoodIdx = null;
+    selectedStreetIdx = null;
+  } else if (mainViewScope === 'region') {
     selectedRegionIdx = regionIndexForMotif(anchor);
     selectedNeighbourhoodIdx = null;
     selectedStreetIdx = null;
@@ -405,6 +418,20 @@ function setMainViewScope(next) {
   updateScopeButtons();
   recentreOrbit();
   rebuildScene();
+}
+
+// Move the FOCUS to a specific unit at a given level (region/neighbourhood/street) without
+// selecting a cube — used by the directional arrows and the minimap. Keeps the level, clears any
+// cube selection + detail panels (pick a cube by clicking), and recentres on the new unit.
+function focusScopeUnit(scope, index) {
+  mainViewScope = scope;
+  selectedRegionIdx = scope === 'region' ? index : null;
+  selectedNeighbourhoodIdx = scope === 'neighbourhood' ? index : null;
+  selectedStreetIdx = scope === 'street' ? index : null;
+  selectedMotifIdx = null;
+  updateScopeButtons();
+  closeCubeDetail(); // clears the cube + 2D panels; also rebuilds the scene
+  recentreOrbit();
 }
 
 if (btnScopeStreet) btnScopeStreet.addEventListener('click', () => setMainViewScope('street'));
@@ -440,17 +467,27 @@ function mintPlacementSlots() {
 }
 
 function currentAnchorMotif() {
-  return selectedMotifIdx ?? currentPlane()?.hierarchy?.motifIndex ?? 0;
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) return selectedMotifIdx;
+  // No specific cube selected (e.g. an EMPTY region navigated from the minimap): anchor on the
+  // selected scope itself so the rendered range matches the camera — activeOrbitAABB() keys off
+  // these same indices. Most-specific scope wins. Without this the scope falls back to
+  // currentPlane()'s motif (a cube in another region) and we'd render the wrong region off-centre.
+  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) return selectedStreetIdx * STREET_SIZE;
+  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) return selectedNeighbourhoodIdx * NEIGHBOURHOOD_SIZE;
+  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) return selectedRegionIdx * REGION_SIZE;
+  return currentPlane()?.hierarchy?.motifIndex ?? 0;
 }
 
 function mainScopeStart() {
   const anchor = currentAnchorMotif();
+  if (mainViewScope === 'block') return 0;
   if (mainViewScope === 'region') return regionIndexForMotif(anchor) * REGION_SIZE;
   if (mainViewScope === 'neighbourhood') return neighbourhoodIndexForMotif(anchor) * NEIGHBOURHOOD_SIZE;
   return streetIndexForMotif(anchor) * STREET_SIZE;
 }
 
 function mainScopeCount() {
+  if (mainViewScope === 'block') return WORLD_SIZE;
   if (mainViewScope === 'region') return REGION_SIZE;
   if (mainViewScope === 'neighbourhood') return NEIGHBOURHOOD_SIZE;
   return STREET_SIZE;
@@ -486,6 +523,7 @@ const walletStatusEl = document.getElementById('wallet-status');
 const mintMinusBtn = document.getElementById('mint-minus');
 const mintPlusBtn = document.getElementById('mint-plus');
 const mintCountInput = document.getElementById('mint-count');
+const mintWalletsInput = document.getElementById('mint-wallets');
 const mintPhaseInput = document.getElementById('mint-phase');
 const mintRunBtn = document.getElementById('mint-run');
 const mintResetBtn = document.getElementById('mint-reset');
@@ -503,6 +541,62 @@ const cubeDetailPrevBtn = document.getElementById('cube-detail-prev');
 const cubeDetailNextBtn = document.getElementById('cube-detail-next');
 const cubeDetailInfoEl = document.getElementById('cube-detail-info');
 const cubeDetailAxisEl = document.getElementById('cube-detail-axis');
+const svgThumbEl = document.getElementById('svg-thumb');
+const svgThumbImg = document.getElementById('svg-thumb-img');
+
+// Float the pre-rendered 2D SVG thumbnail under the cube-detail panel. Static files for
+// now (data/preview-slot-<slot>.svg); the indexer will drive these in production. Hidden
+// for empty slots or when no thumbnail exists.
+let _svgThumbSeq = 0;
+function updateSvgThumb(motifIdx) {
+  if (!svgThumbEl || !svgThumbImg) return;
+  const seq = ++_svgThumbSeq; // every call invalidates any still-in-flight load below
+  const hide = () => { svgThumbEl.classList.remove('open'); svgThumbEl.setAttribute('aria-hidden', 'true'); };
+  if (motifIdx === null || motifIdx === undefined || !isMintedSlot(motifIdx)) { hide(); return; }
+  // Real per-slot SVG if one was pre-rendered, else a TYPE-matched placeholder (Normie vs
+  // source/CC0). Only ~21 real files exist for now; the indexer renders these per cube in
+  // production, so the placeholder won't match the exact art yet.
+  const cube = getMintedCubeForSlot(motifIdx);
+  const isNormie = cube && cube.sourceKind === 'normie';
+  const real = `/data/preview-slot-${motifIdx}.svg`;
+  const fallback = isNormie
+    ? `/data/preview-slot-${motifIdx % 12}.svg`
+    : `/data/preview-nonnormie-${motifIdx % 6}.svg`;
+  // Probe candidates off-screen; only swap the VISIBLE <img> once a load is confirmed, and
+  // only if this is still the latest request (seq guard). This kills the abort-races that
+  // previously left the panel on a placeholder or a stale cube during fast navigation/flyby.
+  const stale = () => seq !== _svgThumbSeq;
+  const tryLoad = (src, next) => {
+    if (stale()) return;
+    const probe = new Image();
+    probe.onload = () => {
+      if (stale()) return;
+      svgThumbImg.src = src;
+      svgThumbEl.classList.add('open');
+      svgThumbEl.setAttribute('aria-hidden', 'false');
+    };
+    probe.onerror = () => { if (stale()) return; next ? tryLoad(next, null) : hide(); };
+    probe.src = src;
+  };
+  tryLoad(real, fallback !== real ? fallback : null);
+}
+// Resizable SVG thumbnail (drag the left edge, like the cube-detail panel).
+const svgThumbResizeEl = document.getElementById('svg-thumb-resize');
+function applySvgThumbWidth(width) {
+  if (!svgThumbEl) return;
+  const w = Math.max(180, Math.min(window.innerWidth * 0.6, width));
+  svgThumbEl.style.width = `${w}px`;
+}
+if (svgThumbResizeEl && svgThumbEl) {
+  svgThumbResizeEl.addEventListener('pointerdown', (e) => { e.preventDefault(); svgThumbResizeEl.setPointerCapture(e.pointerId); });
+  svgThumbResizeEl.addEventListener('pointermove', (e) => {
+    if (!svgThumbResizeEl.hasPointerCapture(e.pointerId)) return;
+    applySvgThumbWidth((window.innerWidth - 12) - e.clientX); // right:12px anchor
+  });
+  const release = (e) => { if (svgThumbResizeEl.hasPointerCapture(e.pointerId)) svgThumbResizeEl.releasePointerCapture(e.pointerId); };
+  svgThumbResizeEl.addEventListener('pointerup', release);
+  svgThumbResizeEl.addEventListener('pointercancel', release);
+}
 const streetStatsEl = document.getElementById('street-stats');
 const streetStatOccupiedEl = document.getElementById('street-stat-occupied');
 const streetStatTypeEl = document.getElementById('street-stat-type');
@@ -590,6 +684,7 @@ const _updateMintStatus   = () => updateMintStatus(mintStatusEl, uniqueMotifs);
 const _mintCountValue     = () => mintCountValue(mintCountInput);
 const _setMintCountValue  = (v) => setMintCountValue(mintCountInput, v);
 const _mintPhaseValue     = () => mintPhaseInput?.value === 'public' ? 'public' : 'allowlist';
+const _mintWalletsValue   = () => Math.max(1, Math.min(256, Math.floor(Number(mintWalletsInput?.value) || 1)));
 
 async function resetMintAndScene() {
   clearGeneratedMeshes();
@@ -726,9 +821,13 @@ function updateOwnerInventory(ownerLabel) {
   for (const cube of cubes) {
     const button = document.createElement('button');
     button.className = 'owner-inventory-item';
+    button.dataset.slot = String(cube.slot);
     if (cube.slot === selectedMotifIdx) button.classList.add('active');
     button.type = 'button';
-    const source = cube.sourceKind === 'normie' ? `Normie #${cube.nft?.normieId ?? cube.nft?.tokenId ?? '?'}` : `${cube.nft?.name || 'Source'} #${cube.nft?.tokenId ?? '?'}`;
+    const n = cube.nft || {};
+    const source = cube.sourceKind === 'normie'
+      ? `Normie #${n.normieId ?? n.tokenId ?? '?'}`
+      : `${n.cc0ProjectName || n.collection || 'Source'} #${n.tokenId ?? '?'}`;
     const slotEl = document.createElement('span');
     const sourceEl = document.createElement('span');
     slotEl.textContent = String(cube.slot);
@@ -747,6 +846,19 @@ function updateOwnerInventory(ownerLabel) {
   }
   ownerInventoryEl.classList.add('open');
   ownerInventoryEl.setAttribute('aria-hidden', 'false');
+}
+
+// Highlight the given slot's row in the owned-cubes list (and scroll it into view) without
+// rebuilding the list — so the list selection follows the focused/flyby cube.
+function highlightInventorySlot(slot) {
+  if (!ownerInventoryListEl) return;
+  let active = null;
+  for (const el of ownerInventoryListEl.children) {
+    const on = Number(el.dataset.slot) === slot;
+    el.classList.toggle('active', on);
+    if (on) active = el;
+  }
+  if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
 }
 
 function setOwnerFocusAddress(address) {
@@ -1084,7 +1196,10 @@ function openCubeDetail(motifIdx, { preserveStreet = false } = {}) {
   const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === motifIdx);
   if (idx >= 0) currentPlaneIdx = idx;
   selectedMotifIdx = motifIdx;
-  syncOwnerFocusToSlot(motifIdx);
+  // Opening a minted cube switches the "owned" list to THAT cube's owner (connected or not).
+  // Empty slots leave the current owner's list intact (we always show someone's holdings).
+  const _slotOwner = ownerAddressForSlot(motifIdx);
+  if (_slotOwner) activateOwnerFocusFor(_slotOwner);
   if (!preserveStreet) {
     selectedStreetIdx = null;
     selectedNeighbourhoodIdx = null;
@@ -1103,6 +1218,8 @@ function openCubeDetail(motifIdx, { preserveStreet = false } = {}) {
   recentreDetailOrbit();
   _updateNftLabel();
   updateCubeDetailInfo();
+  updateSvgThumb(motifIdx);
+  highlightInventorySlot(motifIdx);
   updateStreetStats();
   setOrbitTargetToSelection();
   rebuildScene();
@@ -1147,6 +1264,7 @@ function closeCubeDetail() {
     cubeDetailEl.classList.remove('open');
     cubeDetailEl.setAttribute('aria-hidden', 'true');
   }
+  updateSvgThumb(null);
   cubeDetailOpen = false;
   updateStreetStats();
   rebuildScene();
@@ -1155,6 +1273,113 @@ function closeCubeDetail() {
 if (mintSuccessCloseBtn) mintSuccessCloseBtn.addEventListener('click', closeMintSuccess);
 if (mintSuccessEl) mintSuccessEl.addEventListener('click', e => { if (e.target === mintSuccessEl) closeMintSuccess(); });
 if (cubeDetailCloseBtn) cubeDetailCloseBtn.addEventListener('click', closeCubeDetail);
+
+// ---- Share the focused cube on X (snapshot → server card image → one-click post) ------------
+// X can't attach an image from a link, so we upload the snapshot to our own server (POST /s),
+// which serves a card page (twitter:image). Posting to X with that URL makes X unfurl the image
+// inline. The panel also lets the user download the snapshot to their machine.
+const cubeDetailShareBtn = document.getElementById('cube-detail-share');
+
+function buildShareText(motifIdx) {
+  const num = String(motifIdx).padStart(4, '0');
+  return `THE BLOCK - CUBE #${num}\n\nby @bright_lightart`;
+}
+
+// Ask the render loop to snapshot the cube-detail viewport on its next frame → WebP Blob.
+let _captureRequest = null;
+function captureCubeDetailImage() {
+  return new Promise((resolve, reject) => {
+    if (!cubeDetailOpen || selectedMotifIdx === null || selectedMotifIdx === undefined) {
+      reject(new Error('no cube open')); return;
+    }
+    const req = { resolve, reject, done: false };
+    _captureRequest = req;
+    setTimeout(() => {
+      if (!req.done) { req.done = true; if (_captureRequest === req) _captureRequest = null; reject(new Error('snapshot timed out')); }
+    }, 1500);
+  });
+}
+
+// Upload the snapshot to our server; returns a public card URL (…/s/<id>) that X can unfurl.
+async function uploadShareImage(blob, slot) {
+  const res = await fetch(`/s?slot=${slot}`, { method: 'POST', headers: { 'Content-Type': 'image/webp' }, body: blob });
+  if (!res.ok) throw new Error(`upload ${res.status}`);
+  const data = await res.json();
+  if (!data || !data.id) throw new Error('no id in response');
+  return `${location.origin}/s/${data.id}`;
+}
+
+const sharePanelEl = document.getElementById('share-panel');
+const sharePanelImg = document.getElementById('share-panel-img');
+const sharePanelTextEl = document.getElementById('share-panel-text');
+const sharePanelHintEl = sharePanelEl ? sharePanelEl.querySelector('.share-hint') : null;
+const shareDownloadBtn = document.getElementById('share-download');
+const sharePostBtn = document.getElementById('share-post');
+const shareCloseBtn = document.getElementById('share-close');
+let _shareState = null; // { blob, url, fname, intent }
+
+function closeSharePanel() {
+  if (sharePanelEl) { sharePanelEl.classList.remove('open'); sharePanelEl.setAttribute('aria-hidden', 'true'); }
+  if (_shareState && _shareState.url) URL.revokeObjectURL(_shareState.url);
+  _shareState = null;
+}
+
+// Clicking Share captures the cube view + uploads it, then opens a panel with the image, the post
+// text, a Download button, and a Post-on-X button (opens X with text + the card URL → image unfurls).
+// On mobile it first tries the native share sheet (image + text → X app) for a true one-tap.
+async function shareCubeOnX() {
+  if (selectedMotifIdx === null || selectedMotifIdx === undefined) return;
+  const slot = selectedMotifIdx;
+  const text = buildShareText(slot);
+  const fname = `theblock-cube-${String(slot).padStart(4, '0')}.webp`;
+
+  let blob = null;
+  try { blob = await captureCubeDetailImage(); }
+  catch (err) { log(`cube snapshot failed: ${err.message}`); }
+
+  // MOBILE: native share sheet carries image + text straight to the X app.
+  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isMobile && blob && navigator.canShare) {
+    const file = new File([blob], fname, { type: 'image/webp' });
+    if (navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], text }); return; }
+      catch (err) { if (err && err.name === 'AbortError') return; /* else fall through to panel */ }
+    }
+  }
+
+  // DESKTOP: upload for the unfurl card, then present the panel (image + download + post).
+  let cardUrl = null;
+  if (blob) { try { cardUrl = await uploadShareImage(blob, slot); } catch (err) { log(`share upload failed: ${err.message}`); } }
+  const intent = cardUrl
+    ? `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(cardUrl)}`
+    : `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
+
+  if (_shareState && _shareState.url) URL.revokeObjectURL(_shareState.url);
+  const url = blob ? URL.createObjectURL(blob) : null;
+  _shareState = { blob, url, fname, intent };
+  if (sharePanelImg) { sharePanelImg.src = url || ''; sharePanelImg.style.display = url ? 'block' : 'none'; }
+  if (sharePanelTextEl) sharePanelTextEl.textContent = text;
+  if (sharePanelHintEl) {
+    sharePanelHintEl.textContent = cardUrl
+      ? 'Post on X opens the composer with your text and this cube attached as a preview card. You can also download the image.'
+      : 'Snapshot ready to download. (Card upload unavailable — on X the image won’t preview until this is running on the public site.)';
+  }
+  if (shareDownloadBtn) shareDownloadBtn.disabled = !blob;
+  if (sharePanelEl) { sharePanelEl.classList.add('open'); sharePanelEl.setAttribute('aria-hidden', 'false'); }
+}
+
+if (cubeDetailShareBtn) cubeDetailShareBtn.addEventListener('click', shareCubeOnX);
+if (shareDownloadBtn) shareDownloadBtn.addEventListener('click', () => {
+  if (!_shareState || !_shareState.url) return;
+  const a = document.createElement('a');
+  a.href = _shareState.url; a.download = _shareState.fname;
+  document.body.appendChild(a); a.click(); a.remove();
+});
+if (sharePostBtn) sharePostBtn.addEventListener('click', () => {
+  window.open((_shareState && _shareState.intent) || 'https://x.com/compose/tweet', '_blank', 'noopener,noreferrer');
+});
+if (shareCloseBtn) shareCloseBtn.addEventListener('click', closeSharePanel);
+if (sharePanelEl) sharePanelEl.addEventListener('click', e => { if (e.target === sharePanelEl) closeSharePanel(); });
 if (cubeDetailResizeEl && cubeDetailEl) {
   cubeDetailResizeEl.addEventListener('pointerdown', (e) => {
     if (window.innerWidth <= 860) return;
@@ -1190,7 +1415,7 @@ async function runMintSimulation() {
     }
     const mintSlots = mintPlacementSlots();
     const mintPhase = _mintPhaseValue();
-    const minted = await simulateMintBatch(_mintCountValue(), mintSlots, { phase: mintPhase });
+    const minted = await simulateMintBatch(_mintCountValue(), mintSlots, { phase: mintPhase, wallets: _mintWalletsValue() });
     clearGeneratedMeshes();
     if (minted.length > 0) {
       const first = minted[0].slot;
@@ -1206,7 +1431,7 @@ async function runMintSimulation() {
       activateOwnerFocusFor(loadedAddress);
       openCubeDetail(first);
       setOrbitTargetToSelection();
-      log(`minted ${minted.length} ${mintPhase} Normie ${minted.length === 1 ? 'cube' : 'cubes'} for ${shortAddress(loadedAddress)} across full curve: ${minted.map(c => `#${c.nft?.normieId}@slot${c.slot}`).join(', ')}`);
+      log(`minted ${minted.length} ${mintPhase} ${minted.length === 1 ? 'cube' : 'cubes'} for ${shortAddress(loadedAddress)}: ${minted.map(c => `${c.nft?.collection || 'Normie'} #${c.nft?.normieId ?? c.nft?.tokenId}@slot${c.slot}`).join(', ')}`);
       openMintSuccess(minted.length);
     } else {
       log(`mint simulation: no eligible ${mintPhase} Normies or no empty slots`);
@@ -1291,6 +1516,311 @@ async function loadWalletFromInput() {
 }
 
 if (walletLoadBtn) walletLoadBtn.addEventListener('click', loadWalletFromInput);
+
+// Wallet Connect (injected EIP-1193): connecting owner-focuses the connected address,
+// so the viewer filters to that wallet's cubes (its list panel + navigation light up).
+// The default fake "my wallet" for testing (owns cubes in the dev registry).
+const MY_WALLET = '0x15f89dc0088f13ffabbc75ff3f279c9570a69c33';
+let connectedAddress = null;
+let _cloudItems = []; // impostor-cloud draw items, faded per frame by camera distance
+
+// Owner-focus a cube's wallet, open its closeup, and centre on it. The left inventory
+// list then shows every cube that wallet owns.
+function focusCubeAndOwner(cube) {
+  if (!cube) return;
+  ownerFocusEnabled = true;
+  setOwnerFocusAddress(cube.wallet);
+  updateOwnerFocusButton();
+  // Frame the cube's NEIGHBOURHOOD (its populated cluster), not the whole world — so we
+  // start focused on a real cube in context, never aimlessly scrolling an open world.
+  mainViewScope = 'neighbourhood';
+  selectedStreetIdx = null;
+  selectedNeighbourhoodIdx = neighbourhoodIndexForMotif(cube.slot);
+  selectedRegionIdx = null;
+  updateScopeButtons();
+  openCubeDetail(cube.slot, { preserveStreet: true }); // keep the neighbourhood scope + selection
+  recentreOrbit(); // frame the neighbourhood cluster
+  rebuildScene();
+}
+
+function focusOwnerFirstCube(addr) {
+  const a = normalizeAddress(addr);
+  const owned = getMintedCubes().filter(c => normalizeAddress(c.wallet) === a).sort((x, y) => x.slot - y.slot);
+  if (owned.length) { focusCubeAndOwner(owned[0]); return true; }
+  return false;
+}
+
+// Addresses that hold at least one Normie → their Normie cubes (sorted by slot).
+function normieOwnersMap() {
+  const owners = new Map();
+  for (const c of getMintedCubes()) {
+    if (c.sourceKind !== 'normie') continue;
+    const a = normalizeAddress(c.wallet);
+    if (!owners.has(a)) owners.set(a, []);
+    owners.get(a).push(c);
+  }
+  for (const list of owners.values()) list.sort((x, y) => x.slot - y.slot);
+  return owners;
+}
+
+// The wallet whose cubes we DISPLAY: the CONNECTED wallet if it holds Normies, otherwise
+// any address that currently owns Normies (deterministic). Distinct from the wallet shown
+// in the top-right Connect button, which is your browser wallet (for connect/disconnect).
+function resolveDisplayOwner() {
+  const owners = normieOwnersMap();
+  const a = normalizeAddress(connectedAddress);
+  if (a && owners.has(a)) return a;
+  return [...owners.keys()].sort()[0] || null;
+}
+
+// Focus the resolved display owner's first Normie — opens the list + cube detail + thumbnail.
+// Never blanks: falls back to any minted cube only if no Normies exist at all.
+function focusDefaultOwner() {
+  const owner = resolveDisplayOwner();
+  if (owner) { focusCubeAndOwner(normieOwnersMap().get(owner)[0]); return; }
+  const cubes = getMintedCubes();
+  if (cubes.length) focusCubeAndOwner(cubes[0]);
+}
+function pickDefaultFocus() {
+  // Deep-link from a shared card: ?cube=<slot> focuses that cube on load.
+  const q = new URLSearchParams(location.search).get('cube');
+  if (q != null) {
+    const slot = parseInt(q, 10);
+    const cube = Number.isInteger(slot) ? getMintedCubeForSlot(slot) : null;
+    if (cube) { focusCubeAndOwner(cube); return; }
+  }
+  focusDefaultOwner();
+}
+
+mountConnectButton(document.getElementById('wallet-connect'), {
+  onChange: (addr) => {
+    connectedAddress = normalizeAddress(addr) || null;
+    // Re-resolve the displayed owner (connected wallet if it holds Normies, else keep a
+    // Normie-owner). Never blanks the view on a stray/already-connected wallet.
+    focusDefaultOwner();
+  },
+});
+
+// "MY CUBES" nav link → the connected wallet, or the default fake "my wallet" for testing.
+const myCubesLink = document.getElementById('nav-mycubes');
+if (myCubesLink) myCubesLink.addEventListener('click', (e) => { e.preventDefault(); focusOwnerFirstCube(connectedAddress || MY_WALLET); });
+
+// Flyby / Navigation mode toggle (Navigation default). Flyby hides the nav arrows and
+// flies the camera over the FOCUSED wallet's cubes, cube by cube, looping.
+const modeNavBtn = document.getElementById('mode-nav');
+const modeFlybyBtn = document.getElementById('mode-flyby');
+const navControlsEl = document.getElementById('nav-controls');
+const navBarEl = document.getElementById('nav-bar');
+const flybyControlsEl = document.getElementById('flyby-controls');
+const flybyPlayBtn = document.getElementById('flyby-playpause');
+const flybySpeedEl = document.getElementById('flyby-speed');
+
+// Bottom-bar bookends step the view LEVEL: minimize = tighter (block→region→neighbourhood
+// →street), maximize = wider (street→neighbourhood→region→block).
+const SCOPE_LEVELS = ['street', 'neighbourhood', 'region', 'block'];
+function stepScope(dir) {
+  const cur = SCOPE_LEVELS.indexOf(mainViewScope);
+  const i = cur < 0 ? SCOPE_LEVELS.indexOf('neighbourhood') : cur;
+  const next = Math.max(0, Math.min(SCOPE_LEVELS.length - 1, i + dir));
+  if (SCOPE_LEVELS[next] !== mainViewScope) setMainViewScope(SCOPE_LEVELS[next]);
+}
+const navMinBtn = document.getElementById('nav-minimize');
+const navMaxBtn = document.getElementById('nav-maximize');
+if (navMinBtn) navMinBtn.addEventListener('click', () => stepScope(-1));
+if (navMaxBtn) navMaxBtn.addEventListener('click', () => stepScope(+1));
+let viewerMode = 'navigation';
+let _flyby = null, _flybyKfCubes = [], _flybyKfScope = [], _flybySlot = -1, _flybyLastIdx = -1;
+// Controllable flyby clock: we advance it ourselves (by dt * speed, frozen when paused) and
+// feed it to _flyby.update() instead of performance.now() — so play/pause + speed are honoured
+// without touching createCinematicFlight's internal (wall-clock) pause.
+let _flybyPaused = false, _flybySpeed = 1, _flybyClock = 0, _flybyLastNow = 0;
+
+// The octree level at which two cube slots first diverge — the level we pull back TO
+// when travelling between them (same neighbourhood → nbhd; else same region → region; else block).
+function _boundaryScope(a, b) {
+  if (neighbourhoodIndexForMotif(a) === neighbourhoodIndexForMotif(b)) return 'neighbourhood';
+  if (regionIndexForMotif(a) === regionIndexForMotif(b)) return 'region';
+  return 'block';
+}
+function _scopeKf(slot, scope) {
+  if (scope === 'neighbourhood') return _kfView(aabbForMotifs(_motifRange(neighbourhoodIndexForMotif(slot) * NEIGHBOURHOOD_SIZE, NEIGHBOURHOOD_SIZE)), 1.85);
+  if (scope === 'region') return _kfView(aabbForMotifs(_motifRange(regionIndexForMotif(slot) * REGION_SIZE, REGION_SIZE)), 1.6);
+  return _kfView(aabbForMotifs(_motifRange(0, WORLD_SIZE)), 1.5); // block
+}
+
+function startFlyby() {
+  const sorted = ownerFocusedCubes().slice().sort((a, b) => a.slot - b.slot); // octree order
+  if (!sorted.length) { viewerMode = 'navigation'; return; }
+  // Begin the loop at the CURRENT cube (the selected one, or the nearest by slot) so re-entering
+  // flyby after manual navigation flows naturally forward from where the user already is.
+  let startIdx = 0;
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
+    const exact = sorted.findIndex(c => c.slot === selectedMotifIdx);
+    if (exact >= 0) startIdx = exact;
+    else { // nearest owned cube by slot distance
+      let best = Infinity;
+      for (let i = 0; i < sorted.length; i++) {
+        const d = Math.abs(sorted[i].slot - selectedMotifIdx);
+        if (d < best) { best = d; startIdx = i; }
+      }
+    }
+  }
+  const cubes = sorted.slice(startIdx).concat(sorted.slice(0, startIdx));
+  // Keyframes alternate: orbit a cube (close) → pull back toward the next cube at the level
+  // where they diverge → dive into the next. Never flies through empty space up close.
+  const kf = [], kfCubes = [], kfScope = [];
+  for (let i = 0; i < cubes.length; i++) {
+    const cur = cubes[i];
+    kf.push(_kfView(cubeAABBFor(cur.slot), 2.6)); kfCubes.push(cur); kfScope.push('neighbourhood');
+    const next = cubes[(i + 1) % cubes.length];
+    const scope = cubes.length === 1 ? 'neighbourhood' : _boundaryScope(cur.slot, next.slot);
+    kf.push(_scopeKf(cur.slot, scope)); kfCubes.push(cur); kfScope.push(scope);
+  }
+  _flybyKfCubes = kfCubes;
+  _flybyKfScope = kfScope;
+  _flyby = createCinematicFlight(orbit, kf, {
+    cycleMs: Math.max(16000, kf.length * 2400),
+    pitch: 0.26,
+    spin: 0.00032, // slightly faster, continuous orbit — always looking at the target centre
+  });
+  _flybySlot = -1; _flybyLastIdx = -1;
+  _flybyPaused = false; _flybyClock = 0; _flybyLastNow = 0;
+  syncFlybyControls();
+}
+function stopFlyby() { _flyby = null; _flybyKfCubes = []; _flybyKfScope = []; _flybySlot = -1; _flybyLastIdx = -1; }
+
+// On each keyframe transition: the scene scope follows the flight's zoom level (so pulled-back
+// frames aren't empty), and the cube-detail + thumbnail follow the cube being orbited.
+function driveFlyby(info) {
+  if (!info || !_flybyKfCubes.length) return;
+  const idx = Math.min(_flybyKfCubes.length - 1, info.level | 0);
+  if (idx === _flybyLastIdx) return;
+  _flybyLastIdx = idx;
+  const cube = _flybyKfCubes[idx];
+  const scope = _flybyKfScope[idx] || 'neighbourhood';
+  mainViewScope = scope;
+  selectedStreetIdx = null;
+  selectedNeighbourhoodIdx = (scope === 'neighbourhood') ? neighbourhoodIndexForMotif(cube.slot) : null;
+  selectedRegionIdx = (scope === 'region') ? regionIndexForMotif(cube.slot) : null;
+  if (cube && cube.slot !== _flybySlot) {
+    _flybySlot = cube.slot;
+    selectedMotifIdx = cube.slot;
+    cubeDetailOpen = true;
+    if (cubeDetailEl) { cubeDetailEl.classList.add('open'); cubeDetailEl.setAttribute('aria-hidden', 'false'); }
+    if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube ${cube.slot}`;
+    recentreDetailOrbit();
+    updateCubeDetailInfo();
+    updateSvgThumb(cube.slot);
+    highlightInventorySlot(cube.slot);
+  }
+  scheduleRebuild();
+}
+
+function applyViewerMode() {
+  if (modeNavBtn) modeNavBtn.classList.toggle('active', viewerMode === 'navigation');
+  if (modeFlybyBtn) modeFlybyBtn.classList.toggle('active', viewerMode === 'flyby');
+  if (viewerMode === 'flyby') startFlyby();
+  else if (_flyby) { stopFlyby(); recentreOrbit(); } // only when leaving an ACTIVE flyby (orbit exists by then)
+  syncFlybyControls(); // owns nav-bar + flyby-transport visibility for both modes
+}
+if (modeNavBtn) modeNavBtn.addEventListener('click', () => { viewerMode = 'navigation'; applyViewerMode(); });
+if (modeFlybyBtn) modeFlybyBtn.addEventListener('click', () => { viewerMode = 'flyby'; applyViewerMode(); });
+
+// Show / hide the floating info panels (owned list, cube detail, SVG thumbnail) — one class
+// on <body> that CSS uses to hide all three, so it composes with their own .open logic.
+const panelsToggleBtn = document.getElementById('panels-toggle-btn');
+let panelsHidden = false;
+if (panelsToggleBtn) panelsToggleBtn.addEventListener('click', () => {
+  panelsHidden = !panelsHidden;
+  document.body.classList.toggle('panels-hidden', panelsHidden);
+  panelsToggleBtn.textContent = panelsHidden ? 'Show Panels' : 'Hide Panels';
+});
+
+// Header view-label: names the scope we're currently looking at (e.g. "Neighbourhood 2",
+// "Region 3"), keyed off the current scope + selected cube. Updated every frame (cheap; only
+// touches the DOM when the text actually changes).
+const viewLabelEl = document.getElementById('view-label');
+let _lastViewLabel = '';
+function currentViewLabelText() {
+  if (mode !== 'BIG') return '';
+  const m = selectedMotifIdx;
+  if (mainViewScope === 'block') return 'The Block';
+  // Prefer the explicitly-selected scope index (covers minimap navigation with no cube selected),
+  // falling back to deriving it from the selected cube.
+  if (mainViewScope === 'region') {
+    const r = selectedRegionIdx ?? (m != null ? regionIndexForMotif(m) : null);
+    return r != null ? `Region ${r}` : 'The Block';
+  }
+  if (mainViewScope === 'neighbourhood') {
+    const n = selectedNeighbourhoodIdx ?? (m != null ? neighbourhoodIndexForMotif(m) : null);
+    return n != null ? `Neighbourhood ${n}` : '';
+  }
+  if (mainViewScope === 'street') {
+    const s = selectedStreetIdx ?? (m != null ? streetIndexForMotif(m) : null);
+    return s != null ? `Street ${s}` : '';
+  }
+  return '';
+}
+function updateViewLabel() {
+  if (!viewLabelEl) return;
+  const t = currentViewLabelText();
+  if (t !== _lastViewLabel) { _lastViewLabel = t; viewLabelEl.textContent = t; }
+}
+
+// The directional arrows step at the current focus level; at block level there's nothing to step
+// to, so dim + disable them. Cached so we only touch the DOM on change.
+let _lastNavDisabled = null;
+function updateNavArrowsEnabled() {
+  if (!navControlsEl) return;
+  const disabled = mode === 'BIG' && mainViewScope === 'block';
+  if (disabled !== _lastNavDisabled) {
+    _lastNavDisabled = disabled;
+    navControlsEl.classList.toggle('nav-disabled', disabled);
+  }
+}
+// A click/drag/zoom anywhere on the world pauses the flyby AND reveals the navigation controls
+// (syncFlybyControls shows the nav bar while paused), so the user drops straight into manual
+// driving. Re-enter flyby via the Flyby button to resume from the current cube.
+function pauseFlybyForInteraction() {
+  if (_flyby && !_flybyPaused) { _flybyPaused = true; syncFlybyControls(); }
+}
+if (canvas) {
+  canvas.addEventListener('mousedown', pauseFlybyForInteraction);
+  canvas.addEventListener('wheel', pauseFlybyForInteraction, { passive: true });
+}
+
+// Single source of truth for the bottom-bar UI across both modes. Nav controls show in
+// Navigation mode AND whenever a flyby is PAUSED (so a screen-click drops you into manual
+// driving). Flyby transport (play/pause + speed) shows the whole time you're in Flyby mode;
+// when paused, the nav bar is lifted above it so the two don't overlap.
+function syncFlybyControls() {
+  const flyMode = viewerMode === 'flyby' && !!_flyby;
+  const navVisible = viewerMode === 'navigation' || (flyMode && _flybyPaused);
+  if (navBarEl) {
+    navBarEl.classList.toggle('hidden', !navVisible);
+    navBarEl.classList.toggle('lifted', flyMode && _flybyPaused);
+  }
+  if (!flybyControlsEl) return;
+  flybyControlsEl.classList.toggle('open', flyMode);
+  flybyControlsEl.setAttribute('aria-hidden', flyMode ? 'false' : 'true');
+  if (flybyPlayBtn) {
+    flybyPlayBtn.classList.toggle('paused', _flybyPaused);
+    flybyPlayBtn.title = _flybyPaused ? 'Resume flyby' : 'Pause flyby';
+    flybyPlayBtn.setAttribute('aria-label', _flybyPaused ? 'Resume flyby' : 'Pause flyby');
+  }
+  if (flybySpeedEl) flybySpeedEl.value = String(_flybySpeed);
+}
+if (flybyPlayBtn) flybyPlayBtn.addEventListener('click', () => {
+  if (!_flyby) return;
+  _flybyPaused = !_flybyPaused;
+  syncFlybyControls();
+});
+if (flybySpeedEl) flybySpeedEl.addEventListener('input', () => {
+  const v = parseFloat(flybySpeedEl.value);
+  if (!Number.isNaN(v)) _flybySpeed = v;
+});
+applyViewerMode();
+
 fetch('/dev-config')
   .then(r => r.ok ? r.json() : null)
   .then(cfg => {
@@ -1413,18 +1943,6 @@ function sectionInDirection(currentSection, sectionSize, dir, rangeStart = 0, ra
   return bestCandidateInDirection(currentCenter, candidates, dir);
 }
 
-function motifInDirection(motifIdx, dir, candidatesInScope = uniqueMotifs) {
-  const currentCenter = motifCenterTicksByIdx.get(motifIdx);
-  if (!currentCenter) return null;
-  const candidates = [];
-  for (const candidate of candidatesInScope) {
-    if (candidate === motifIdx) continue;
-    const center = motifCenterTicksByIdx.get(candidate);
-    if (center) candidates.push({ id: candidate, center });
-  }
-  return bestCandidateInDirection(currentCenter, candidates, dir);
-}
-
 function sectionNavigationRange(sectionSize) {
   const scopeCount = mainScopeCount();
   if (scopeCount > sectionSize) {
@@ -1434,58 +1952,30 @@ function sectionNavigationRange(sectionSize) {
 }
 
 function navigateScreenDirection(direction) {
-  const motifIdx = selectedMotifIdx ?? currentAnchorMotif();
+  // Level-based navigation: the arrows step ONE UNIT at the current focus level (mainViewScope),
+  // keyed off the anchor (selected cube, or the current focus unit). Individual cube selection is
+  // done by clicking the world. At block level there are no siblings, so the arrows are inert.
+  if (mainViewScope === 'block') return;
   const dir = axisDirectionVector(direction);
+  const anchor = currentAnchorMotif();
 
-  if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
-    const navStreetIdx = selectedStreetIdx;
-    const range = sectionNavigationRange(STREET_SIZE);
-    const nextStreet = sectionInDirection(navStreetIdx, STREET_SIZE, dir, range.start, range.count);
-    if (nextStreet === null || nextStreet === undefined) {
-      log(`no street ${direction} from ${navStreetIdx}`);
-      return;
-    }
-    selectStreet(nextStreet * STREET_SIZE);
-    setOrbitTargetToSelection();
-    log(`${direction}: street ${navStreetIdx} -> ${nextStreet}`);
-    return;
+  let scope, sectionSize, cur;
+  if (mainViewScope === 'region') {
+    scope = 'region'; sectionSize = REGION_SIZE; cur = regionIndexForMotif(anchor);
+  } else if (mainViewScope === 'neighbourhood') {
+    scope = 'neighbourhood'; sectionSize = NEIGHBOURHOOD_SIZE; cur = neighbourhoodIndexForMotif(anchor);
+  } else {
+    scope = 'street'; sectionSize = STREET_SIZE; cur = streetIndexForMotif(anchor);
   }
 
-  if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
-    const navNeighbourhoodIdx = selectedNeighbourhoodIdx;
-    const range = sectionNavigationRange(NEIGHBOURHOOD_SIZE);
-    const nextNeighbourhood = sectionInDirection(navNeighbourhoodIdx, NEIGHBOURHOOD_SIZE, dir, range.start, range.count);
-    if (nextNeighbourhood === null || nextNeighbourhood === undefined) {
-      log(`no neighbourhood ${direction} from ${navNeighbourhoodIdx}`);
-      return;
-    }
-    selectNeighbourhood(nextNeighbourhood * NEIGHBOURHOOD_SIZE, { preserveView: mainViewScope === 'region' });
-    setOrbitTargetToSelection();
-    log(`${direction}: neighbourhood ${navNeighbourhoodIdx} -> ${nextNeighbourhood}`);
+  const range = sectionNavigationRange(sectionSize);
+  const next = sectionInDirection(cur, sectionSize, dir, range.start, range.count);
+  if (next === null || next === undefined) {
+    log(`no ${scope} ${direction} from ${cur}`);
     return;
   }
-
-  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
-    const navRegionIdx = selectedRegionIdx;
-    const nextRegion = sectionInDirection(navRegionIdx, REGION_SIZE, dir);
-    if (nextRegion === null || nextRegion === undefined) {
-      log(`no region ${direction} from ${navRegionIdx}`);
-      return;
-    }
-    selectRegion(nextRegion * REGION_SIZE);
-    setOrbitTargetToSelection();
-    log(`${direction}: region ${navRegionIdx} -> ${nextRegion}`);
-    return;
-  }
-
-  const nextMotif = motifInDirection(motifIdx, dir, mainScopeMotifs());
-  if (nextMotif === null || nextMotif === undefined) {
-    log(`no cube ${direction} from ${motifIdx}`);
-    return;
-  }
-  openCubeDetail(nextMotif);
-  setOrbitTargetToSelection();
-  log(`${direction}: cube ${motifIdx} -> ${nextMotif}`);
+  focusScopeUnit(scope, next);
+  log(`${direction}: ${scope} ${cur} -> ${next}`);
 }
 
 if (btnNavUp) btnNavUp.addEventListener('click', () => navigateScreenDirection('up'));
@@ -1517,6 +2007,22 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---------- Meshes ----------
+// Corner-bracket variant of a unit box (centred at origin, ±0.5): at each of the 8 corners,
+// three short inward legs (frac of a full edge). A LINES mesh, scaled to an AABB by
+// wireTransformForAABB just like selectionWireBox — reads as a focus reticle, not a full cage.
+function makeBracketBoxMesh(frac = 0.26) {
+  const h = 0.5, segs = [];
+  for (const ix of [-1, 1]) for (const iy of [-1, 1]) for (const iz of [-1, 1]) {
+    const px = ix * h, py = iy * h, pz = iz * h;
+    segs.push([px, py, pz, px - ix * frac, py, pz]); // leg along x
+    segs.push([px, py, pz, px, py - iy * frac, pz]); // leg along y
+    segs.push([px, py, pz, px, py, pz - iz * frac]); // leg along z
+  }
+  const pos = new Float32Array(segs.length * 6);
+  let k = 0;
+  for (const s of segs) for (let j = 0; j < 6; j++) pos[k++] = s[j];
+  return { positions: pos, mode: 'LINES', alphas: new Float32Array(pos.length / 3).fill(1) };
+}
 const meshes = {
   wireBox:  createMeshGL(gl, createWireframeBox(1, 1, 1)),
   solidBox: createMeshGL(gl, createBox(1, 1, 1)),
@@ -1525,6 +2031,7 @@ const meshes = {
   const wire = createWireframeBox(1, 1, 1);
   wire.alphas = new Float32Array(wire.positions.length / 3).fill(1);
   meshes.selectionWireBox = createMeshGL(gl, wire);
+  meshes.selectionBrackets = createMeshGL(gl, makeBracketBoxMesh(0.26));
   meshes.worldMapGrid = buildAABBGridMesh(gl, worldAABB(), [
     [2, 0.95], // region grid: order-4 octants
     [4, 0.36], // neighbourhood grid: order-3 blocks
@@ -1533,7 +2040,7 @@ const meshes = {
 
 function clearGeneratedMeshes() {
   for (const key of Object.keys(meshes)) {
-    if (key !== 'wireBox' && key !== 'solidBox' && key !== 'selectionWireBox' && key !== 'worldMapGrid') delete meshes[key];
+    if (key !== 'wireBox' && key !== 'solidBox' && key !== 'selectionWireBox' && key !== 'selectionBrackets' && key !== 'worldMapGrid') delete meshes[key];
   }
 }
 
@@ -1622,7 +2129,9 @@ function startDetailMaterialLoad() {
     .then(mats => {
       for (const mat of mats) materialsMap[mat.name] = mat;
       log(`detail materials loaded: ${mats.map(m => m.name).join(', ')}`);
-      detailedEmptyScopesEnabled = true;
+      // Biomes may now render. They show at CLOSE scopes (street/neighbourhood) as LOD;
+      // region/block stay cloud-only unless "everything bright" (detailedEmptyScopesEnabled).
+      detailMaterialsReady = true;
       rebuildScene();
     })
     .catch(err => log(`detail materials failed: ${String(err?.message || err)}`));
@@ -1777,6 +2286,7 @@ function motifRangeAABB(start, count) {
 
 function activeOrbitAABB() {
   if (mode === 'BIG') {
+    if (mainViewScope === 'block') return motifRangeAABB(0, WORLD_SIZE) || worldAABB();
     if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
       return motifRangeAABB(selectedRegionIdx * REGION_SIZE, REGION_SIZE) || worldAABB();
     }
@@ -1802,14 +2312,19 @@ function recentreOrbit() {
   const center = centerOfAABB(box);
   orbit.setTarget(center[0], center[1], center[2]);
   if (mode === 'BIG') {
-    const isBroadScope =
-      selectedRegionIdx !== null && selectedRegionIdx !== undefined ||
-      selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined ||
-      selectedStreetIdx !== null && selectedStreetIdx !== undefined ||
-      selectedMotifIdx === null || selectedMotifIdx === undefined;
-    const mult = isBroadScope
-      ? (mainViewScope === 'region' ? 1.55 : mainViewScope === 'neighbourhood' ? 1.9 : 2.7)
-      : 5.8;
+    let mult;
+    if (mainViewScope === 'block') {
+      mult = 1.6; // frame the whole Block
+    } else {
+      const isBroadScope =
+        selectedRegionIdx !== null && selectedRegionIdx !== undefined ||
+        selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined ||
+        selectedStreetIdx !== null && selectedStreetIdx !== undefined ||
+        selectedMotifIdx === null || selectedMotifIdx === undefined;
+      mult = isBroadScope
+        ? (mainViewScope === 'region' ? 1.55 : mainViewScope === 'neighbourhood' ? 1.9 : 2.7)
+        : 5.8;
+    }
     orbit.setDistance(sizeOfAABB(box) * mult);
   }
 }
@@ -1831,55 +2346,22 @@ function recentreDetailOrbit() {
 // ---------- BIG-mode cube pick (click, not drag) ----------
 {
   let downX = 0, downY = 0;
-  let lastClickT = 0;
-  let lastClickX = 0;
-  let lastClickY = 0;
-  let lastClickMotif = null;
-  let clickSequenceCount = 0;
 
-  function isRepeatClick(e, motifIdx) {
-    const now = performance.now();
-    const dx = e.clientX - lastClickX;
-    const dy = e.clientY - lastClickY;
-    return lastClickMotif === motifIdx && now - lastClickT < 360 && dx * dx + dy * dy < 36;
-  }
-
-  function rememberClick(e, motifIdx) {
-    clickSequenceCount = isRepeatClick(e, motifIdx) ? clickSequenceCount + 1 : 1;
-    lastClickT = performance.now();
-    lastClickX = e.clientX;
-    lastClickY = e.clientY;
-    lastClickMotif = motifIdx;
-  }
-
-  function forgetClick() {
-    lastClickT = 0;
-    lastClickMotif = null;
-    clickSequenceCount = 0;
-  }
-
-  function applyClickSequence(motifIdx) {
-    const clickedStreetIdx = streetIndexForMotif(motifIdx);
-    const promotingSelectedStreet = selectedStreetIdx === clickedStreetIdx;
-
-    if (clickSequenceCount >= 4) {
-      selectRegion(motifIdx);
-      forgetClick();
-      return true;
+  // Select-only model: a click picks the CUBE (opens its detail/2D/owner list + highlight) and
+  // NEVER changes the zoom level. We set the current level's focus unit to the one containing this
+  // cube (so the arrows keep stepping at mainViewScope from here); levelling is owned by the
+  // ▲/▼ bookends + arrows. No more multi-click scope escalation.
+  function selectCube(motifIdx) {
+    if (mainViewScope === 'region') {
+      selectedRegionIdx = regionIndexForMotif(motifIdx); selectedNeighbourhoodIdx = null; selectedStreetIdx = null;
+    } else if (mainViewScope === 'neighbourhood') {
+      selectedNeighbourhoodIdx = neighbourhoodIndexForMotif(motifIdx); selectedRegionIdx = null; selectedStreetIdx = null;
+    } else if (mainViewScope === 'street') {
+      selectedStreetIdx = streetIndexForMotif(motifIdx); selectedRegionIdx = null; selectedNeighbourhoodIdx = null;
+    } else { // block
+      selectedRegionIdx = null; selectedNeighbourhoodIdx = null; selectedStreetIdx = null;
     }
-    if (clickSequenceCount === 3) {
-      selectNeighbourhood(motifIdx, { preserveView: promotingSelectedStreet });
-      return true;
-    }
-    if (clickSequenceCount === 2) {
-      if (promotingSelectedStreet) {
-        selectNeighbourhood(motifIdx, { preserveView: true });
-      } else {
-        selectStreet(motifIdx);
-      }
-      return true;
-    }
-    openCubeDetail(motifIdx, { preserveStreet: promotingSelectedStreet });
+    openCubeDetail(motifIdx, { preserveStreet: true }); // preserve the focus-unit index set above
     return true;
   }
 
@@ -1915,14 +2397,9 @@ function recentreDetailOrbit() {
     // unconditionally in BIG mode.
     let bestT = Infinity, hitMotif = null;
     const pickable = new Set();
-    if (ownerFocusEnabled && ownerFocusAddress) {
-      for (const motifIdx of ownerFocusedMotifSet()) {
-        if (motifInMainScope(motifIdx)) pickable.add(motifIdx);
-      }
-    } else {
-      for (const motifIdx of _visibleMotifs().filter(motifInMainScope)) pickable.add(motifIdx);
-      for (const motifIdx of mainScopeMotifs()) if (!isMintedSlot(motifIdx)) pickable.add(motifIdx);
-    }
+    // ONLY minted cubes are clickable — clicking any owner's cube switches the "owned"
+    // list to them; empty biome slots are inert (no accidental biome selection).
+    for (const cube of getMintedCubes()) if (motifInMainScope(cube.slot)) pickable.add(cube.slot);
     for (const motifIdx of pickable) {
       const { mn, mx } = cubeAABBFor(motifIdx);
       const t = rayAABBIntersect(ro, rd, mn, mx);
@@ -1931,31 +2408,68 @@ function recentreDetailOrbit() {
     return hitMotif !== null && bestT < Infinity ? hitMotif : null;
   }
 
+  // Click on the minimap → raycast into it (its own camera VP) and pick the REGION under the
+  // cursor. Region-level is forgiving on a small panel; 8 big AABBs, very hard to miss.
+  function pickMiniMapRegion(e) {
+    if (!lastMapInvVP || !lastMapCamPos || !lastMapRect) return null;
+    const r = lastMapRect;
+    const nx = ((e.clientX - r.left) / r.width)  *  2 - 1;
+    const ny = ((e.clientY - r.top)  / r.height) * -2 + 1;
+    const M = lastMapInvVP;
+    const unproject = (nz) => {
+      const x = M[0]*nx + M[4]*ny + M[8]*nz  + M[12];
+      const y = M[1]*nx + M[5]*ny + M[9]*nz  + M[13];
+      const z = M[2]*nx + M[6]*ny + M[10]*nz + M[14];
+      const w = M[3]*nx + M[7]*ny + M[11]*nz + M[15];
+      return [x/w, y/w, z/w];
+    };
+    const near = unproject(-1), far = unproject(1);
+    const ro = lastMapCamPos;
+    const rr = [far[0]-near[0], far[1]-near[1], far[2]-near[2]];
+    const rl = Math.sqrt(rr[0]*rr[0] + rr[1]*rr[1] + rr[2]*rr[2]) || 1;
+    const rd = [rr[0]/rl, rr[1]/rl, rr[2]/rl];
+    let bestT = Infinity, hit = null;
+    for (let rg = 0; rg < 8; rg++) {
+      const box = motifRangeAABB(rg * REGION_SIZE, REGION_SIZE);
+      if (!box) continue;
+      const tt = rayAABBIntersect(ro, rd, box.mn, box.mx);
+      if (tt < bestT) { bestT = tt; hit = rg; }
+    }
+    return bestT < Infinity ? hit : null;
+  }
+
+  // Navigate the main view to a region picked on the minimap. Consistent with the arrows:
+  // navigation moves the FOCUS to that region (region level); pick a cube inside it by clicking.
+  function navigateMapRegion(rg) {
+    focusScopeUnit('region', rg);
+  }
+
   canvas.addEventListener('mousedown', (e) => { downX = e.clientX; downY = e.clientY; });
   canvas.addEventListener('mouseup', (e) => {
     if (mode !== 'BIG') return;
     const dx = e.clientX - downX, dy = e.clientY - downY;
     if (dx*dx + dy*dy > 25) return;  // was a drag, not a click
 
-    if (eventInCubeDetail(e)) {
-      if (lastClickMotif !== null && isRepeatClick(e, lastClickMotif)) {
-        rememberClick(e, lastClickMotif);
-        applyClickSequence(lastClickMotif);
-      }
+    // Clicks inside the cube-detail panel don't navigate (it has its own Prev/Next for cube stepping).
+    if (eventInCubeDetail(e)) return;
+
+    // A (non-drag) click on the minimap navigates the main view to that region.
+    if (eventInWorldMap(e)) {
+      const rg = pickMiniMapRegion(e);
+      if (rg !== null) navigateMapRegion(rg);
       return;
     }
 
     const hitMotif = pickBigMotifAt(e);
     if (hitMotif !== null) {
-      rememberClick(e, hitMotif);
-      applyClickSequence(hitMotif);
+      selectCube(hitMotif);
       return;
     } else {
-      forgetClick();
       selectedMotifIdx = null;
       selectedStreetIdx = null;
       selectedNeighbourhoodIdx = null;
       selectedRegionIdx = null;
+      closeCubeDetail(); // clicking empty space deselects → hide cube + 2D panels (don't leave them stale)
     }
     _updateLightsLabel();
     rebuildScene();
@@ -2068,9 +2582,13 @@ function setUniformByName(gl, loc, name, value) {
 let sceneItems = [];
 let detailSceneItems = [];
 let miniMapSceneItems = [];
-let detailedEmptyScopesEnabled = false;
+let detailedEmptyScopesEnabled = false; // "everything bright": biomes at ALL scopes incl. region (off)
+let detailMaterialsReady = false;       // crystal/glass shaders finished loading — biomes can render
 let lastInvVP  = null;
 let lastCamPos = null;
+let lastMapInvVP = null; // minimap (world-map) pick data, refreshed each frame it's drawn
+let lastMapCamPos = null;
+let lastMapRect = null;
 
 // applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor imported from scene/styling.js
 
@@ -2107,6 +2625,7 @@ function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
     buildNonNormieArtworkPlane,
     buildNonNormieWalker,
     buildNonNormieBanner,
+    buildNonNormieIdLabel,
     isAgenticNonNormieCube,
     categoryForMotif: ensureMotifCategory,
   });
@@ -2114,7 +2633,7 @@ function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
 
 function bigModeDimForMotif(motifIdx) {
   if (mode !== 'BIG') return 1.0;
-  if (ownerFocusEnabled && ownerFocusAddress && ownerFocusedMotifSet().has(motifIdx)) return 1.5;
+  if (ownerFocusEnabled && ownerFocusAddress && ownerFocusedMotifSet().has(motifIdx)) return 1.0; // no boost
   if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
     return regionIndexForMotif(motifIdx) === selectedRegionIdx ? 1.0 : 0.16;
   }
@@ -2130,43 +2649,19 @@ function bigModeDimForMotif(motifIdx) {
 }
 
 function buildSelectionOverlayItems() {
+  if (viewerMode === 'flyby') return []; // selection highlight is navigation-only (distracting in flyby)
   if (mode !== 'BIG' || selectedMotifIdx === null || selectedMotifIdx === undefined) return [];
-  let box;
-  let color;
-  let opacity;
-  if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
-    const start = selectedRegionIdx * REGION_SIZE;
-    const motifs = motifRange(start, REGION_SIZE);
-    if (!motifs.length) return [];
-    box = aabbForMotifs(motifs);
-    color = new Float32Array([1.0, 0.18, 0.72]);
-    opacity = 0.95;
-  } else if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
-    const start = selectedNeighbourhoodIdx * NEIGHBOURHOOD_SIZE;
-    const motifs = motifRange(start, NEIGHBOURHOOD_SIZE);
-    if (!motifs.length) return [];
-    box = aabbForMotifs(motifs);
-    color = new Float32Array([1.0, 0.18, 0.72]);
-    opacity = 0.95;
-  } else if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
-    const start = selectedStreetIdx * STREET_SIZE;
-    const motifs = motifRange(start, STREET_SIZE);
-    if (!motifs.length) return [];
-    box = aabbForMotifs(motifs);
-    color = new Float32Array([1.0, 0.44, 0.15]);
-    opacity = 0.95;
-  } else {
-    box = cubeAABBFor(selectedMotifIdx);
-    color = new Float32Array([1.0, 0.18, 0.72]);
-    opacity = 0.9;
-  }
-  return buildWireGlowItems(box, color, opacity, selectionWirePad());
+  // Just the selected CUBE, as corner brackets — no scope-block cage. The neighbourhood/region
+  // context is already conveyed by what's rendered + brightened around it.
+  const box = cubeAABBFor(selectedMotifIdx);
+  return buildBracketGlowItems(box, new Float32Array([1.0, 0.18, 0.72]), 0.9, selectionWirePad());
 }
 
-function buildWireGlowItems(box, color, opacity, pad) {
+// Layered-glow corner brackets around a single cube's AABB (three passes: soft/mid/core).
+function buildBracketGlowItems(box, color, opacity, pad) {
   return [
     {
-      mesh: 'selectionWireBox',
+      mesh: 'selectionBrackets',
       material: 'lines',
       transform: wireTransformForAABB(box, pad + 0.028),
       blend: 'additive',
@@ -2174,7 +2669,7 @@ function buildWireGlowItems(box, color, opacity, pad) {
       uniforms: { uBaseCol: color, uLineOpacity: opacity * 0.34 },
     },
     {
-      mesh: 'selectionWireBox',
+      mesh: 'selectionBrackets',
       material: 'lines',
       transform: wireTransformForAABB(box, pad + 0.012),
       blend: 'additive',
@@ -2182,7 +2677,7 @@ function buildWireGlowItems(box, color, opacity, pad) {
       uniforms: { uBaseCol: color, uLineOpacity: opacity * 0.58 },
     },
     {
-      mesh: 'selectionWireBox',
+      mesh: 'selectionBrackets',
       material: 'lines',
       transform: wireTransformForAABB(box, pad),
       blend: 'additive',
@@ -2193,20 +2688,10 @@ function buildWireGlowItems(box, color, opacity, pad) {
 }
 
 function buildOwnerFocusOverlayItems() {
-  if (mode !== 'BIG' || !ownerFocusEnabled || !ownerFocusAddress) return [];
-  const items = [];
-  const start = mainScopeStart();
-  const end = start + mainScopeCount();
-  for (const motifIdx of ownerFocusedMotifSet()) {
-    if (motifIdx < start || motifIdx >= end) continue;
-    items.push(...buildWireGlowItems(
-      cubeAABBFor(motifIdx),
-      new Float32Array([1.0, 0.18, 0.72]),
-      motifIdx === selectedMotifIdx ? 1.0 : 0.68,
-      0.18
-    ));
-  }
-  return items;
+  // Only the single FOCUS cube is highlighted (handled by buildSelectionOverlayItems). We no
+  // longer bracket every one of the owner's cubes — that read as clutter. Kept as a no-op so
+  // the call site + the "these are the owner's cubes" concept survive if we want it back.
+  return [];
 }
 
 function buildMiniMapOverlayItems() {
@@ -2264,7 +2749,10 @@ function motifSetForRange(start, count) {
 
 function detailedEmptyMotifSet() {
   if (mode !== 'BIG') return new Set();
-  if (!detailedEmptyScopesEnabled) return new Set();
+  if (!detailMaterialsReady) return new Set(); // biomes need the crystal/glass shaders loaded first
+  if (mainViewScope === 'block') return new Set(); // full-Block overview: cloud only, no 4096 detailed biomes
+  // Biomes ALWAYS show (street/neighbourhood/region). Selection just BRIGHTENS the focused
+  // ones (see emptyBiomeDimForMotif) — e.g. double-click a cube → its neighbourhood lights up.
   return motifSetForRange(mainScopeStart(), mainScopeCount());
 }
 
@@ -2294,18 +2782,11 @@ function emptyBiomeDimForMotif(motifIdx) {
 
 function fullArtworkMotifSet() {
   if (mode !== 'BIG') return new Set();
-  if (ownerFocusEnabled && ownerFocusAddress) {
-    const start = mainScopeStart();
-    const end = start + mainScopeCount();
-    return new Set([...ownerFocusedMotifSet()].filter(motifIdx => motifIdx >= start && motifIdx < end && isMintedSlot(motifIdx)));
-  }
-  if (mainViewScope === 'street' || mainViewScope === 'neighbourhood') {
-    return new Set(mainScopeMotifs().filter(isMintedSlot));
-  }
-  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined && isMintedSlot(selectedMotifIdx)) {
-    return new Set([selectedMotifIdx]);
-  }
-  return new Set();
+  // Every minted cube in the current scope renders full art — at ALL scope levels
+  // (street, neighbourhood, region). Mints are a sparse, indexer-bounded set, so even a
+  // whole region is only a handful of real cubes. Owner focus never hides other owners'
+  // cubes; it only drives the left-hand list + emphasis.
+  return new Set(mainScopeMotifs().filter(isMintedSlot));
 }
 
 // Coalesce rebuilds: data-ready callbacks (wallet / mint / normie pixels /
@@ -2416,14 +2897,34 @@ function rebuildScene() {
   // The full order-5 block lives in the minimap so this view never tries to
   // present the entire 4096-plot world at once.
   if (mode === 'BIG' && categoryFilter === null) {
-    const scaffoldItems = buildHilbertPathRange(hilbert, mainScopeStart(), mainScopeCount(), gl, meshes);
     const hasFocusedScope =
       selectedMotifIdx !== null && selectedMotifIdx !== undefined ||
       selectedStreetIdx !== null && selectedStreetIdx !== undefined ||
       selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined ||
       selectedRegionIdx !== null && selectedRegionIdx !== undefined;
-    applyDim(scaffoldItems, hasFocusedScope ? 0.24 : 0.62);
-    sceneItems.push(...scaffoldItems);
+    if (!new URLSearchParams(location.search).has('noherobase')) {
+      // Big Cube base = the hero look: an RGB Hilbert spine (banded by neighbourhood) over
+      // the current scope + a biome-tinted impostor cloud over the WHOLE Block, so every
+      // slot reads as inhabited. The spine is scoped (not full-world) so the interactive
+      // view stays fast; the cheap cloud carries the rest. Meshes are cached per range.
+      const spine = buildRainbowSpine(hilbert, mainScopeStart(), mainScopeCount(), gl, meshes);
+      recolorSpineItems(spine, 'rgb');
+      applyDim(spine, hasFocusedScope ? 0.40 : 0.70);
+      sceneItems.push(...spine);
+      // Impostor cloud over the SAME scope as the spine (no full-world block of stray dots),
+      // and NOT at occupied slots (a real cube renders there). Faded per frame by camera
+      // distance (see frame()) so the dots recede as you zoom into a cube.
+      const occ = new Set(getMintedCubes().map(c => c.slot));
+      _cloudItems = buildImpostorCloud(gl, hilbert, meshes, {
+        motifStart: mainScopeStart(), motifCount: mainScopeCount(),
+        occupiedSlots: occ, dotsForOccupied: false,
+      });
+      sceneItems.push(..._cloudItems);
+    } else {
+      const scaffoldItems = buildHilbertPathRange(hilbert, mainScopeStart(), mainScopeCount(), gl, meshes);
+      applyDim(scaffoldItems, hasFocusedScope ? 0.24 : 0.62);
+      sceneItems.push(...scaffoldItems);
+    }
   }
 
   // Empty mint-state scaffold: show the bare Hilbert structure before any
@@ -2566,11 +3067,7 @@ function applyMintedCubeSeeds() {
 loadMintSimulation()
   .then(cubes => {
     if (cubes.length > 0) {
-      const first = cubes[0].slot;
-      selectedMotifIdx = first;
-      const idx = serializedPlanes.findIndex(p => p.hierarchy.motifIndex === first);
-      if (idx >= 0) currentPlaneIdx = idx;
-      recentreOrbit();
+      pickDefaultFocus(); // owned Normie if a wallet is connected + owns cubes, else a random cube
       log(`loaded ${cubes.length} saved mints`);
     } else {
       selectedMotifIdx = uniqueMotifs[Math.floor(hash1(0x9eb6e202, uniqueMotifs.length, HILBERT_ORDER) * uniqueMotifs.length)] ?? null;
@@ -2760,10 +3257,73 @@ function updatePerfHud() {
   perfHudEl.textContent = 'BIG CUBE PERF  (P to hide)\n' + formatSnapshot();
 }
 
+// ---------- Cinematic flythrough (shared: Home hero auto-play + Big Cube "play") ----------
+// Drives the SAME orbit camera + the SAME scope/LOD as explore mode — no second render.
+const CINEMATIC = new URLSearchParams(location.search).has('cinematic');
+const WORLD_SIZE = 8 * REGION_SIZE;
+const SCOPE_FOR_LEVEL = ['street', 'street', 'neighbourhood', 'region', 'region']; // cube,street,nbhd,region,world
+let _flight = null, _flightFocus = 0, _flightLevel = -1;
+function _motifRange(start, count) { const a = []; for (let i = 0; i < count; i++) a.push(start + i); return a; }
+function _kfView(box, k) { const c = centerOfAABB(box); return { target: [c[0], c[1], c[2]], distance: sizeOfAABB(box) * k }; }
+function pickFlightFocus() {
+  for (let m = 0; m < WORLD_SIZE; m++) if (isMintedSlot(m)) return m; // dive into a real cube
+  return Math.floor(WORLD_SIZE / 2);
+}
+function setupCinematicFlight(focus) {
+  _flightFocus = focus;
+  const st = streetIndexForMotif(focus), nb = neighbourhoodIndexForMotif(focus), rg = regionIndexForMotif(focus);
+  const kf = [
+    _kfView(cubeAABBFor(focus), 2.4),
+    _kfView(aabbForMotifs(_motifRange(st * STREET_SIZE, STREET_SIZE)), 1.9),
+    _kfView(aabbForMotifs(_motifRange(nb * NEIGHBOURHOOD_SIZE, NEIGHBOURHOOD_SIZE)), 1.75),
+    _kfView(aabbForMotifs(_motifRange(rg * REGION_SIZE, REGION_SIZE)), 1.7),
+    _kfView(aabbForMotifs(_motifRange(0, WORLD_SIZE)), 1.55),
+  ];
+  _flight = createCinematicFlight(orbit, kf, { cycleMs: 27000, far: kf[4].distance * 3, pitch: 0.34 });
+  _flightLevel = -1;
+  canvas.addEventListener('mousedown', () => _flight && _flight.pause());
+  canvas.addEventListener('wheel', () => _flight && _flight.pause(), { passive: true });
+}
+function driveCinematicScope(level) {
+  if (level === _flightLevel) return;
+  _flightLevel = level;
+  const scope = SCOPE_FOR_LEVEL[level] || 'region';
+  mainViewScope = scope;
+  selectedMotifIdx = _flightFocus;
+  selectedStreetIdx = scope === 'street' ? streetIndexForMotif(_flightFocus) : null;
+  selectedNeighbourhoodIdx = scope === 'neighbourhood' ? neighbourhoodIndexForMotif(_flightFocus) : null;
+  selectedRegionIdx = scope === 'region' ? regionIndexForMotif(_flightFocus) : null;
+  scheduleRebuild(); // budgeted, no recentre — the flight owns the camera
+}
+if (CINEMATIC && typeof document !== 'undefined' && document.body) {
+  const style = document.createElement('style');
+  style.textContent = 'body.cinematic > *:not(#gl){display:none!important} body.cinematic{cursor:default}';
+  document.head.appendChild(style);
+  document.body.classList.add('cinematic');
+}
+
 function frame() {
   resize();
   noteFrame();
   const t = (performance.now() - startT) * 0.001;
+  if (CINEMATIC) {
+    if (!_flight && (mintSimulationLoaded() || (performance.now() - startT) > 2500)) setupCinematicFlight(pickFlightFocus());
+    if (_flight) { const info = _flight.update(performance.now()); if (info) driveCinematicScope(info.level); }
+  }
+  // Flyby Mode: fly the main camera over the focused wallet's cubes, cube by cube. While PAUSED
+  // we stop driving entirely (no update) so the user's manual orbit/navigation isn't overridden.
+  if (_flyby && !_flybyPaused) {
+    const now = performance.now();
+    const dt = _flybyLastNow ? Math.min(100, now - _flybyLastNow) : 16;
+    _flybyLastNow = now;
+    _flybyClock += dt * _flybySpeed;
+    const info = _flyby.update(_flybyClock);
+    if (info) driveFlyby(info);
+  } else if (_flyby) {
+    _flybyLastNow = 0; // reset dt baseline so resuming doesn't jump the clock
+  }
+  updateViewLabel();
+  updateNavArrowsEnabled();
   if (mode !== '2D' && showLightMarkers) {
     const activeMotif = (mode === 'BIG') ? selectedMotifIdx : currentPlane().hierarchy.motifIndex;
     if (activeMotif !== null && activeMotif !== undefined && [3, 4].includes(ensureMotifCategory(activeMotif))) {
@@ -2796,10 +3356,20 @@ function frame() {
   updateStreetStats();
   updateAxisGizmo(mainAxisEl, mainCam, 28);
 
+  // Fade the impostor cloud by camera distance: dots recede to nothing as you zoom into a
+  // cube (so they don't clutter or over-brighten the close view) and return when pulled back.
+  if (_cloudItems.length && mode !== '2D') {
+    const d = orbit.state.distance;
+    const u = Math.min(1, Math.max(0, (d - 12) / 28)); // 0 at dist≤12 (close) → 1 at ≥40 (wide)
+    const fade = u * u * (3 - 2 * u);
+    for (const it of _cloudItems) it.uniforms.uOpacity = (it._baseOpacity ?? 0.42) * fade;
+  }
+
   drawScene(sceneItems, mainCam, t);
 
   let mapVP = null;
   let mapRectScreen = null;
+  lastMapRect = null; // cleared each frame; set only when the minimap actually draws (below)
   if (worldMapEl && miniMapSceneItems.length > 0) {
     const rect = worldMapEl.getBoundingClientRect();
     const canvasRect = canvas.getBoundingClientRect();
@@ -2813,6 +3383,9 @@ function frame() {
       const mapCam = miniMapOrbit.camera(w / Math.max(1, h));
       mapVP = mat4(); multiply(mapVP, mapCam.proj, mapCam.view);
       mapRectScreen = rect;
+      lastMapInvVP = mat4(); invert(lastMapInvVP, mapVP); // for click→navigate raycasting
+      lastMapCamPos = mapCam.pos;
+      lastMapRect = rect;
       gl.enable(gl.SCISSOR_TEST);
       gl.viewport(x, y, w, h);
       gl.scissor(x, y, w, h);
@@ -2842,6 +3415,25 @@ function frame() {
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       const detailCam = detailOrbit.camera(w / Math.max(1, h));
       drawScene(detailSceneItems, detailCam, t);
+      // Snapshot the cube view for the "Share on X" flow: read this viewport straight from the
+      // framebuffer (robust vs toDataURL), flip GL's bottom-up rows, and hand back a WebP blob.
+      if (_captureRequest && !_captureRequest.done) {
+        const req = _captureRequest; req.done = true; _captureRequest = null;
+        try {
+          const px = new Uint8Array(w * h * 4);
+          gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          const ctx = c.getContext('2d');
+          const img = ctx.createImageData(w, h);
+          const rowBytes = w * 4;
+          for (let row = 0; row < h; row++) {
+            const src = (h - 1 - row) * rowBytes;
+            img.data.set(px.subarray(src, src + rowBytes), row * rowBytes);
+          }
+          ctx.putImageData(img, 0, 0);
+          c.toBlob(b => b ? req.resolve(b) : req.reject(new Error('toBlob failed')), 'image/webp', 0.92);
+        } catch (err) { req.reject(err); }
+      }
       updateAxisGizmo(cubeDetailAxisEl, detailCam, 24);
       gl.disable(gl.SCISSOR_TEST);
     }

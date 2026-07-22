@@ -48,11 +48,11 @@
       left: 0;
       right: 0;
       z-index: 4;
-      display: grid;
-      grid-template-columns: minmax(260px, 1fr) auto minmax(272px, auto);
-      gap: 8px;
+      display: flex;
+      justify-content: space-between;
       align-items: center;
-      padding: 6px 10px;
+      gap: 12px;
+      padding: 8px 18px;
       background: linear-gradient(180deg, rgba(5, 5, 8, 0.94), rgba(5, 5, 8, 0.48));
       border-bottom: 2px solid rgba(255, 58, 184, 0.22);
       backdrop-filter: blur(10px);
@@ -60,6 +60,55 @@
       max-height: 62px;
       overflow: hidden;
     }
+    .legacy-hidden { display: none !important; }
+    /* Current-view label, centred in the header — Normie font, vivid-green neon glow (landing-page look). */
+    #view-label {
+      position: absolute;
+      left: 50%; top: 50%; transform: translate(-50%, -50%);
+      font-family: 'NormiesFont', 'Courier New', monospace;
+      font-size: 22px; letter-spacing: 0.04em; white-space: nowrap;
+      color: rgb(0, 255, 0);
+      text-shadow: 0 0 6px rgba(0, 255, 0, 0.9), 0 0 15px rgba(0, 255, 0, 0.6), 0 0 30px rgba(0, 255, 0, 0.4);
+      pointer-events: none;
+    }
+    #site-nav { display: flex; gap: 24px; align-items: center; }
+    #site-nav .nav-link {
+      color: #cfd6e6; text-decoration: none; font-size: 14px; font-weight: 800;
+      letter-spacing: .07em; text-transform: uppercase; padding: 4px 2px;
+      border-bottom: 2px solid transparent; cursor: pointer;
+    }
+    #site-nav .nav-link:hover { color: #fff; border-bottom-color: rgba(255, 58, 184, 0.7); }
+    #wallet-controls { justify-content: flex-end; }
+    #wallet-connect {
+      font-weight: 800; letter-spacing: .04em; padding: 8px 16px; cursor: pointer;
+      border: 1px solid rgba(120, 200, 140, 0.55); background: rgba(8, 14, 10, 0.5); color: #cfeecb;
+    }
+    #wallet-connect.connected { border-color: rgba(120, 255, 160, 0.85); color: #b6ffcf; }
+    #mode-controls {
+      position: fixed; top: 72px; left: 50%; transform: translateX(-50%); z-index: 5;
+      display: flex; gap: 8px; pointer-events: auto;
+    }
+    #mode-controls button {
+      font-weight: 800; letter-spacing: .05em; padding: 9px 20px; cursor: pointer;
+      border: 1px solid rgba(255, 58, 184, 0.35); background: rgba(10, 8, 12, 0.66); color: #d9d2e0;
+    }
+    #mode-controls button.active {
+      border-color: rgba(255, 58, 184, 0.9); background: rgba(255, 58, 184, 0.18); color: #fff;
+      box-shadow: 0 0 16px rgba(255, 58, 184, 0.35);
+    }
+    /* Show / hide the floating info panels (second row, under the mode buttons). */
+    #panels-toggle {
+      position: fixed; top: 116px; left: 50%; transform: translateX(-50%); z-index: 5;
+      display: flex; pointer-events: auto;
+    }
+    #panels-toggle button {
+      font-weight: 700; letter-spacing: .05em; padding: 6px 16px; font-size: 12px; cursor: pointer;
+      border: 1px solid rgba(255, 58, 184, 0.28); background: rgba(10, 8, 12, 0.6); color: #cabcd4;
+    }
+    #panels-toggle button:hover { color: #fff; border-color: rgba(255, 58, 184, 0.6); }
+    body.panels-hidden #owner-inventory,
+    body.panels-hidden #cube-detail,
+    body.panels-hidden #svg-thumb { display: none !important; }
     #wallet-controls, #mint-controls, #controls, #nav-controls, #category-controls, #cube-type-controls {
       display: flex;
       gap: 5px;
@@ -81,7 +130,8 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    #mint-count { width: 46px; text-align: center; }
+    #mint-count, #mint-wallets { width: 46px; text-align: center; }
+    #mint-wallets { opacity: .85; }
     #mint-slot { width: 54px; text-align: center; }
     #mint-price {
       color: #f0f0f4;
@@ -90,22 +140,106 @@
       white-space: nowrap;
     }
     #category-controls, #cube-type-controls, #log { display: none; }
-    #nav-controls {
-      gap: 4px;
-      display: grid;
-      grid-template-columns: repeat(5, 32px);
-      grid-template-rows: repeat(2, 32px);
+    #nav-bar {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      display: flex;
       align-items: center;
-      justify-content: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 2px solid rgba(255, 58, 184, 0.90);
+      background: rgba(8, 6, 10, 0.58);
+      backdrop-filter: blur(6px);
+    }
+    #nav-bar.hidden { display: none; }
+    /* When a flyby is paused, the nav bar sits ABOVE the flyby transport bar (both at bottom). */
+    #nav-bar.lifted { bottom: 84px; }
+    #nav-controls {
+      display: grid;
+      grid-template-columns: repeat(3, 34px);
+      grid-auto-rows: 34px;
+      gap: 4px;
     }
     #nav-controls button {
-      min-width: 32px;
-      width: 32px;
-      height: 32px;
+      min-width: 34px;
+      width: 34px;
+      height: 34px;
       padding: 0;
       line-height: 1;
-      font-size: 15px;
+      font-size: 17px;
     }
+    /* At full-Block level the arrows have no sibling to step to — dim + disable them. */
+    #nav-controls.nav-disabled { opacity: 0.32; pointer-events: none; }
+    #nav-minimize, #nav-maximize {
+      width: 42px;
+      height: 42px;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #e6d6ee;
+    }
+    #nav-minimize svg, #nav-maximize svg { width: 100%; height: 100%; display: block; }
+    #nav-minimize:hover, #nav-maximize:hover { color: #fff; }
+    /* Flyby transport (play/pause + speed) — bottom centre, shown only in Flyby mode. */
+    #flyby-controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px;
+      border: 1px solid rgba(255, 58, 184, 0.28);
+      background: rgba(8, 6, 10, 0.58);
+      backdrop-filter: blur(6px);
+    }
+    #flyby-controls.open { display: flex; }
+    #flyby-playpause {
+      width: 40px;
+      height: 40px;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #e6d6ee;
+      cursor: pointer;
+    }
+    #flyby-playpause svg { width: 100%; height: 100%; display: block; }
+    #flyby-playpause:hover { color: #fff; }
+    #flyby-playpause .icon-play { display: none; }
+    #flyby-playpause.paused .icon-pause { display: none; }
+    #flyby-playpause.paused .icon-play { display: block; }
+    #flyby-speed { width: 130px; accent-color: #ff3ab8; cursor: pointer; }
+    #flyby-speed-label {
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: #b79ac4;
+    }
+    /* Share-on-X panel: shows the captured cube image + copy/download/open-X actions. */
+    #share-panel .modal-panel { width: min(460px, calc(100vw - 28px)); }
+    #share-panel-img {
+      display: block; width: 100%; max-height: 46vh; object-fit: contain;
+      background: #05070a; border: 1px solid rgba(120, 200, 255, 0.35); margin-bottom: 10px;
+    }
+    #share-panel-text {
+      white-space: pre-wrap; font: 700 13px/1.4 'Courier New', monospace; color: #dfe8f5;
+      background: rgba(6, 10, 16, 0.7); border: 1px solid rgba(120, 200, 255, 0.28);
+      padding: 9px 11px; margin-bottom: 8px;
+    }
+    #share-panel .share-hint { color: #9fb2c8; font-size: 11.5px; line-height: 1.5; }
+    #share-panel .share-hint b { color: #cfe8ff; }
+    #share-post {
+      border-color: rgba(120, 200, 255, 0.9); color: #fff;
+      background: rgba(29, 60, 90, 0.8); font-weight: 800;
+    }
+    #share-post:hover { background: rgba(40, 82, 120, 0.9); }
+    #selection-link { display: none !important; } /* connecting lines off (distracting) */
     #controls {
       min-width: 272px;
       min-height: 43px;
@@ -118,12 +252,6 @@
       background: rgba(8, 6, 10, 0.34);
       box-shadow: inset 0 0 16px rgba(255, 58, 184, 0.08);
     }
-    #nav-up { grid-column: 2; grid-row: 1; }
-    #nav-left { grid-column: 1; grid-row: 2; }
-    #nav-down { grid-column: 2; grid-row: 2; }
-    #nav-right { grid-column: 3; grid-row: 2; }
-    #nav-z-neg { grid-column: 4; grid-row: 2; }
-    #nav-z-pos { grid-column: 5; grid-row: 2; }
     #nft-label {
       position: fixed;
       right: 12px;
@@ -168,9 +296,9 @@
       position: fixed;
       top: 62px;
       right: 12px;
-      width: min(520px, 42vw);
+      width: min(480px, 40vw);
       aspect-ratio: 1 / 1;
-      max-height: calc(100vh - 82px);
+      max-height: 54vh; /* leave the lower-right for the 2D thumbnail panel */
       z-index: 2;
       display: none;
       pointer-events: none;
@@ -216,6 +344,11 @@
     }
     #cube-detail-title { color: #fff; font-size: 13px; font-weight: 800; padding: 0 7px; text-shadow: 0 0 10px rgba(255, 58, 184, 0.45); }
     #cube-detail-close, #mint-success-close { min-width: 34px; }
+    #cube-detail-share {
+      font-size: 11px; font-weight: 800; letter-spacing: .03em; padding: 4px 9px;
+      border: 1px solid rgba(120, 200, 255, 0.55); color: #cfe8ff; background: rgba(10, 18, 28, 0.72);
+    }
+    #cube-detail-share:hover { color: #fff; border-color: rgba(120, 200, 255, 0.95); }
     #cube-detail-info {
       position: absolute;
       left: 10px;
@@ -280,6 +413,55 @@
       height: 76px;
       z-index: 1;
     }
+    /* 2D SVG thumbnail — floats under the cube-detail panel on the right. */
+    #svg-thumb {
+      position: fixed;
+      right: 12px;
+      top: calc(78px + min(480px, 40vw, 54vh)); /* directly under the cube-detail panel */
+      width: min(480px, 40vw);
+      max-height: calc(100vh - 148px - min(480px, 40vw, 54vh)); /* extra bottom clearance for the stats text box */
+      z-index: 3;
+      display: none;
+      overflow: hidden;
+      border: 3px solid rgba(255, 58, 184, 0.90);
+      background: rgba(4, 3, 8, 0.72);
+      box-shadow: 0 0 22px rgba(255, 58, 184, 0.24);
+      pointer-events: auto;
+    }
+    #svg-thumb.open { display: block; }
+    #svg-thumb-bar {
+      font: 700 12px monospace;
+      letter-spacing: 0.06em;
+      color: #ffd0ed;
+      padding: 7px 10px;
+      border-bottom: 1px solid rgba(255, 58, 184, 0.42);
+    }
+    #svg-thumb-img {
+      display: block;
+      width: 100%;
+      max-height: calc(100vh - 184px - min(480px, 40vw, 54vh));
+      object-fit: contain;
+      background: #05070a;
+    }
+    #svg-thumb-resize {
+      position: absolute;
+      top: 0;
+      left: -7px;
+      bottom: 0;
+      width: 14px;
+      cursor: ew-resize;
+      pointer-events: auto;
+      z-index: 1;
+    }
+    #svg-thumb-resize::after {
+      content: "";
+      position: absolute;
+      top: 14px;
+      bottom: 14px;
+      left: 6px;
+      width: 1px;
+      background: rgba(180, 180, 200, 0.18);
+    }
     #world-map {
       position: fixed;
       left: 12px;
@@ -287,13 +469,13 @@
       width: min(320px, 32vw);
       aspect-ratio: 1 / 1;
       z-index: 2;
-      pointer-events: none;
-      border: 3px solid rgba(255, 132, 45, 0.90);
+      pointer-events: none; /* events reach the canvas by coords (drag-rotate + click-navigate) */
+      border: 3px solid rgba(255, 58, 184, 0.90);
       background: rgba(2, 4, 3, 0.18);
       box-shadow:
-        inset 0 0 0 1px rgba(255, 132, 45, 0.28),
-        inset 0 0 30px rgba(255, 132, 45, 0.09),
-        0 0 24px rgba(255, 132, 45, 0.28),
+        inset 0 0 0 1px rgba(255, 58, 184, 0.28),
+        inset 0 0 30px rgba(255, 58, 184, 0.09),
+        0 0 24px rgba(255, 58, 184, 0.28),
         0 18px 60px rgba(0, 0, 0, 0.24);
     }
     #world-map-bar {
@@ -306,23 +488,23 @@
       align-items: flex-start;
       justify-content: space-between;
       gap: 8px;
-      color: #ff9b47;
+      color: #ffd0ed;
       font-size: 12px;
       font-weight: 800;
       line-height: 1.15;
-      text-shadow: 0 0 8px rgba(255, 120, 30, 0.42);
+      text-shadow: 0 0 8px rgba(255, 58, 184, 0.42);
       pointer-events: none;
     }
     #world-map-label {
       max-width: 100%;
-      color: rgba(255, 183, 96, 0.96);
+      color: rgba(255, 200, 232, 0.96);
     }
     #owner-inventory {
       position: fixed;
-      left: 12px;
-      bottom: min(calc(32vw + 28px), 360px);
-      width: min(320px, 32vw);
-      max-height: min(270px, calc(100vh - 190px));
+      left: 14px;
+      top: 192px; /* clear the XYZ axis gizmo (top:96, ~88px tall) above */
+      bottom: calc(min(320px, 32vw) + 26px); /* sit clear of the world-map minimap below */
+      width: min(320px, 30vw);
       z-index: 3;
       display: none;
       overflow: auto;
@@ -500,17 +682,23 @@
     <path id="map-link-path"></path>
   </svg>
   <div id="main-axis" class="axis-gizmo" aria-hidden="true"></div>
-  <div id="owner-focus-label">All Cubes</div>
   <div id="nft-label">NFT: none</div>
   <div id="hud">
+    <nav id="site-nav">
+      <a href="/" class="nav-link">HOME</a>
+      <a href="/viewer/about.html" class="nav-link">ABOUT</a>
+      <a href="#" class="nav-link" id="nav-mycubes">MY CUBES</a>
+    </nav>
+    <div id="view-label" aria-live="polite"></div>
     <div id="wallet-controls">
-      <a href="/viewer/update.html" style="text-decoration:none"><button title="Re-base a cube's artwork">Update Cube ▸</button></a>
-      <a href="/viewer/streets.html" style="text-decoration:none"><button title="Merge streets">Streets ▸</button></a>
-      <input id="wallet-address" spellcheck="false" value="0x15F89dC0088F13FFABBC75FF3F279c9570a69c33" aria-label="Wallet address">
-      <button id="wallet-load">Load</button>
-      <span id="wallet-status">wallet: not loaded</span>
+      <a href="/viewer/update.html" class="legacy-hidden" style="text-decoration:none"><button title="Re-base a cube's artwork">Update Cube ▸</button></a>
+      <a href="/viewer/streets.html" class="legacy-hidden" style="text-decoration:none"><button title="Merge streets">Streets ▸</button></a>
+      <input id="wallet-address" class="legacy-hidden" spellcheck="false" value="0x15F89dC0088F13FFABBC75FF3F279c9570a69c33" aria-label="Wallet address">
+      <button id="wallet-load" class="legacy-hidden">Load</button>
+      <button id="wallet-connect">Connect Wallet</button>
+      <span id="wallet-status" class="legacy-hidden">wallet: not loaded</span>
     </div>
-    <div id="mint-controls">
+    <div id="mint-controls" style="display:none">
       <span id="mint-price">0.03 ETH</span>
       <select id="mint-phase" aria-label="Mint phase">
         <option value="allowlist">Allowlist</option>
@@ -519,25 +707,18 @@
       <button id="mint-minus" aria-label="Decrease mint count">-</button>
       <input id="mint-count" value="1" inputmode="numeric" aria-label="Mint count">
       <button id="mint-plus" aria-label="Increase mint count">+</button>
+      <input id="mint-wallets" value="1" inputmode="numeric" aria-label="Simulated wallets" title="Public phase: spread this mint across N wallets to preview the world-spread + street-sharing (allowlist ignores this)">
       <button id="mint-run">Mint</button>
       <button id="mint-reset">Reset</button>
       <input id="mint-slot" inputmode="numeric" placeholder="slot" title="dev: on-chain mint a cube at this slot (colour = f(slot))">
       <button id="mint-at-slot" title="dev: mint a real on-chain cube at the given slot">Mint @ slot</button>
       <span id="mint-status">minted: 0 | empty slots: 64</span>
     </div>
-    <div id="controls">
+    <div id="controls" style="display:none">
       <button id="scope-street">Street</button>
       <button id="scope-neighbourhood">Neighbourhood</button>
       <button id="scope-region" class="active">Region</button>
       <button id="owner-focus-toggle" aria-pressed="false">Owned</button>
-      <div id="nav-controls" aria-label="Directional cube navigation">
-        <button id="nav-up" aria-label="Move up">↑</button>
-        <button id="nav-left" aria-label="Move left">←</button>
-        <button id="nav-down" aria-label="Move down">↓</button>
-        <button id="nav-right" aria-label="Move right">→</button>
-        <button id="nav-z-neg" aria-label="Move backward on Z">Z-</button>
-        <button id="nav-z-pos" aria-label="Move forward on Z">Z+</button>
-      </div>
     </div>
     <div id="category-controls">
       <button class="active" data-category="all">All</button>
@@ -554,16 +735,53 @@
     </div>
     <div id="log"></div>
   </div>
+  <div id="mode-controls">
+    <button id="mode-nav" class="active" type="button">Navigation Mode</button>
+    <button id="mode-flyby" type="button">Flyby Mode</button>
+  </div>
+  <div id="panels-toggle">
+    <button id="panels-toggle-btn" type="button" title="Show or hide the info panels (owned list, cube detail, thumbnail)">Hide Panels</button>
+  </div>
+  <div id="nav-bar">
+    <button id="nav-minimize" type="button" title="Zoom in a level (block → region → neighbourhood → street)" aria-label="Zoom in a level">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5v5H5"/><path d="M4 4l6 6"/><path d="M14 5v5h5"/><path d="M20 4l-6 6"/><path d="M10 19v-5H5"/><path d="M4 20l6-6"/><path d="M14 19v-5h5"/><path d="M20 20l-6-6"/></svg>
+    </button>
+    <div id="nav-controls" aria-label="Directional cube navigation">
+      <button id="nav-z-neg" aria-label="Back (Z-)" title="Back (Z-)">↖</button>
+      <button id="nav-up" aria-label="Move up">↑</button>
+      <button id="nav-z-pos" aria-label="Forward (Z+)" title="Forward (Z+)">↗</button>
+      <button id="nav-left" aria-label="Move left">←</button>
+      <button id="nav-down" aria-label="Move down">↓</button>
+      <button id="nav-right" aria-label="Move right">→</button>
+    </div>
+    <button id="nav-maximize" type="button" title="Zoom out a level (street → neighbourhood → region → block)" aria-label="Zoom out a level">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5"/><path d="M4 4l6 6"/><path d="M20 9V4h-5"/><path d="M20 4l-6 6"/><path d="M4 15v5h5"/><path d="M4 20l6-6"/><path d="M20 15v5h-5"/><path d="M20 20l-6-6"/></svg>
+    </button>
+  </div>
+  <div id="flyby-controls" aria-hidden="true">
+    <button id="flyby-playpause" type="button" title="Pause flyby" aria-label="Pause flyby">
+      <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+      <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5l13 7.5-13 7.5z"/></svg>
+    </button>
+    <input id="flyby-speed" type="range" min="0.15" max="1" step="0.05" value="1" aria-label="Flyby speed" title="Flyby speed (right = fastest)">
+    <span id="flyby-speed-label">SPEED</span>
+  </div>
   <div id="cube-detail" aria-hidden="true">
     <div id="cube-detail-resize" aria-hidden="true"></div>
     <div id="cube-detail-bar">
       <button id="cube-detail-prev" aria-label="Previous cube">Prev</button>
       <span id="cube-detail-title">Cube</span>
+      <button id="cube-detail-share" title="Share this cube on X" aria-label="Share on X">Share 𝕏</button>
       <button id="cube-detail-next" aria-label="Next cube">Next</button>
       <button id="cube-detail-close" aria-label="Close cube detail">X</button>
     </div>
     <div id="cube-detail-info" aria-hidden="true"></div>
     <div id="cube-detail-axis" class="axis-gizmo" aria-hidden="true"></div>
+  </div>
+  <div id="svg-thumb" aria-hidden="true">
+    <div id="svg-thumb-resize" aria-hidden="true"></div>
+    <div id="svg-thumb-bar">2D Thumbnail</div>
+    <img id="svg-thumb-img" alt="cube 2D thumbnail">
   </div>
   <div id="world-map" aria-hidden="true">
     <div id="world-map-bar">
@@ -587,6 +805,19 @@
       <p id="mint-success-text">You have minted 0 cubes.</p>
       <div class="panel-row" style="margin-top:14px;justify-content:flex-end;">
         <button id="mint-success-close">Close</button>
+      </div>
+    </div>
+  </div>
+  <div id="share-panel" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-panel">
+      <h2>Share on X</h2>
+      <img id="share-panel-img" alt="cube snapshot">
+      <pre id="share-panel-text"></pre>
+      <p class="share-hint">Post on X opens the composer with your text and this cube attached as a preview card. You can also download the image.</p>
+      <div class="panel-row" style="margin-top:12px;justify-content:flex-end;">
+        <button id="share-download">Download image</button>
+        <button id="share-post">Post on X ↗</button>
+        <button id="share-close">Close</button>
       </div>
     </div>
   </div>

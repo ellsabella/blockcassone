@@ -10,3 +10,9 @@ data/world-snapshot.json
 data/normie-art-cache.json
 data/nonnormie-art-cache.json
 data/nonnormie-art-cache.json
+
+# collected allowlist submissions (PII-ish: wallets + signatures)
+allowlist-submissions.jsonl
+
+# ephemeral Share-on-X snapshot images (regenerated per share, swept on a TTL)
+shares/

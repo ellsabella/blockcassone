@@ -64,6 +64,37 @@ Implement shader hot-reload via **Server-Sent Events**:
 
 Start with: `node server.js` → `http://localhost:3000`
 
+### Share-on-X snapshots (`/s`)
+
+The Big Cube viewer's **Share 𝕏** button (cube-detail bar) posts a cube to X with the image
+attached. X's web-intent can't attach an image, so we serve a **Twitter/OpenGraph card**: the
+client snapshots the cube-detail viewport (`gl.readPixels` → WebP), uploads it, and posts a URL
+that X unfurls into a `summary_large_image` card. The panel also offers **Download image**.
+
+Endpoints (all in `renderer/server.js`):
+
+| Route | Purpose |
+|---|---|
+| `POST /s?slot=<n>` (WebP body) | Store `shares/<id>.webp` + an `id→slot` record; returns `{ id }` |
+| `GET /s/<id>` | Card page — `twitter:image`/`og:image` meta; JS-redirects humans to `/viewer/?cube=<slot>` |
+| `GET /s/<id>.webp` | The stored image |
+
+Storage is **ephemeral by design**: `shares/` (gitignored) holds the WebPs + `index.json`; a sweep
+runs on every upload and every 15 min, deleting images past a **3 h TTL** and enforcing a
+**keep-last-500** cap (never evicting anything younger than 1 h). Disk is permanently bounded
+(~75 MB ceiling). Old links still redirect to the viewer after their image is swept.
+
+**Deploy (VPS + reverse proxy) — required for the card to render:**
+- X can only unfurl a **public** URL — the card will **not** preview on `localhost`. Test a live
+  `/s/<id>` with the [X Card Validator](https://cards-dev.twitter.com/validator) or an ngrok tunnel.
+- The reverse proxy **must** pass the real `Host` and set **`X-Forwarded-Proto: https`** — the card
+  page builds the absolute `twitter:image` URL from those (e.g. nginx: `proxy_set_header Host $host;`
+  `proxy_set_header X-Forwarded-Proto $scheme;`). Without them the meta image URL is wrong and X
+  shows no image.
+- The Node process needs a **writable `shares/`** dir under the repo root.
+- Post text is `THE BLOCK - CUBE #<slot4>\n\nby @bright_lightart`; mobile uses the native share
+  sheet (image+text → X app) first.
+
 ---
 
 ## Render pass order
