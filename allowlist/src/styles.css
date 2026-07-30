@@ -1,3 +1,8 @@
+@font-face {
+  font-family: 'NormiesFont';
+  src: url('/NormiesFont.otf') format('opentype');
+  font-display: swap;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
   --bg: #030304; --ink: #c8c8cc; --pink: #ff3ab8; --pink-soft: #ff7dcc;
@@ -28,6 +33,7 @@ body { background: var(--bg); color: var(--ink); font-family: 'Courier New', mon
   padding: 40px 20px; text-align: center;
 }
 .blockword {
+  font-family: 'NormiesFont', 'Courier New', monospace;
   font-size: clamp(52px, 13vw, 150px); font-weight: 800; letter-spacing: clamp(4px, 1.4vw, 16px);
   color: #fff; line-height: 0.92;
   text-shadow: 0 0 28px rgba(255, 58, 184, 0.65), 0 0 70px rgba(255, 58, 184, 0.35);
