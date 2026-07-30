@@ -49,6 +49,11 @@ contract CubeNFTTest is Test {
         normies.mint(OTHER, 202);
         externalNft.mint(MINTER, 1);
         externalNft.mint(OTHER, 2);
+
+        // Merges are OFF by default; enable them for the merge-mechanic tests. The gate itself
+        // is covered by testMergeStreetRevertsWhenDisabled (moves stay off — separate switch).
+        vm.prank(OWNER);
+        cubes.setMergesEnabled(true);
     }
 
     function testMintNormieCubeStoresImmutableFacts() public {
@@ -563,5 +568,49 @@ contract CubeNFTTest is Test {
         vm.prank(OTHER);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, OTHER));
         cubes.setMovesEnabled(true);
+    }
+
+    // ---- Merge off-switch (independent of moves) --------------------------------
+    function testMergeStreetRevertsWhenDisabled() public {
+        _mintCubeAt(301, 0, MINTER);
+        vm.prank(OWNER);
+        cubes.setMergesEnabled(false);
+
+        vm.prank(MINTER);
+        vm.expectRevert(CubeNFT.MergesDisabled.selector);
+        cubes.mergeStreet(0);
+    }
+
+    function testMergeStreetWithLeaderRevertsWhenDisabled() public {
+        uint256 c0 = _mintCubeAt(301, 0, MINTER);
+        vm.prank(OWNER);
+        cubes.setMergesEnabled(false);
+
+        vm.prank(MINTER);
+        vm.expectRevert(CubeNFT.MergesDisabled.selector);
+        cubes.mergeStreet(0, c0); // the leader-picking overload is gated too
+    }
+
+    function testSetMergesEnabledOnlyOwner() public {
+        vm.prank(OTHER);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, OTHER));
+        cubes.setMergesEnabled(true);
+    }
+
+    function testMovesAndMergesAreIndependent() public {
+        // Toggling one must never affect the other (two separate switches).
+        vm.startPrank(OWNER);
+        cubes.setMovesEnabled(true);
+        cubes.setMergesEnabled(false);
+        vm.stopPrank();
+        assertTrue(cubes.movesEnabled());
+        assertFalse(cubes.mergesEnabled());
+
+        vm.startPrank(OWNER);
+        cubes.setMovesEnabled(false);
+        cubes.setMergesEnabled(true);
+        vm.stopPrank();
+        assertFalse(cubes.movesEnabled());
+        assertTrue(cubes.mergesEnabled());
     }
 }

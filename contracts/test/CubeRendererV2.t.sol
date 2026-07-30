@@ -63,8 +63,10 @@ contract CubeRendererV2Test is Test {
         raw[199] = hex"01";
         normies.mint(MINTER, 6722, raw);
 
-        vm.prank(OWNER);
+        vm.startPrank(OWNER);
         cubes.setRenderer(address(renderer));
+        cubes.setMergesEnabled(true); // merge tests below need the gate open
+        vm.stopPrank();
     }
 
     function testMetadataUsesRendererV2DataUrisAndTraits() public {

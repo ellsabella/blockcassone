@@ -129,6 +129,10 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     // flips it on once the mint is done.
     bool public movesEnabled;
 
+    // Post-mint merge game. Independent of moves — off at deploy, flipped on by the
+    // owner when merging opens (kept separate so move and merge reveal on their own).
+    bool public mergesEnabled;
+
     // Authorized to re-base a cube's displayed source (post-mint customization).
     // Set to the customization controller, which verifies cube ownership and a
     // flattening attestation before calling.
@@ -466,6 +470,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     error NotStreetOwner(uint32 street, uint256 cubeId);
     error StreetAlreadyMerged(uint32 street);
     error InvalidLeader(uint32 street, uint256 cubeId);
+    error MergesDisabled();
 
     event StreetMerged(
         uint256 indexed streetTokenId,
@@ -473,6 +478,13 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         uint32 indexed street,
         uint8 occupiedCount
     );
+    event MergesEnabledUpdated(bool enabled);
+
+    /// @notice Owner switch that opens the merge game (off at deploy). Independent of moves.
+    function setMergesEnabled(bool enabled) external onlyOwner {
+        mergesEnabled = enabled;
+        emit MergesEnabledUpdated(enabled);
+    }
 
     /// @notice Merge every occupied plot of `street` (all owned by the caller)
     ///         into one street token. The occupied plot cubes are burned and all
@@ -498,6 +510,8 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         internal
         returns (uint256 streetTokenId)
     {
+        if (!mergesEnabled) revert MergesDisabled();
+
         uint256 base = uint256(street) * 8;
         if (base + 8 > totalSlots) revert InvalidSlot(uint32(base));
 
