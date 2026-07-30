@@ -522,6 +522,8 @@ const server = http.createServer((req, res) => {
   try { rel = decodeURIComponent(rel); } catch (_) {}
   // Site root → the hero landing page (self-contained flythrough with an Enter → /viewer/).
   if (rel === '/') rel = '/landing.html';
+  // Pretty /about route → the static About page.
+  else if (rel === '/about') rel = '/about.html';
   // Any URL ending with '/' → serve that directory's index.html.
   else if (rel.endsWith('/')) rel += 'index.html';
 

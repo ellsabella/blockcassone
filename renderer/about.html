@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>THE BLOCK — About</title>
+<style>
+  @font-face { font-family: 'NormiesFont'; src: url('/NormiesFont.otf') format('opentype'); font-display: swap; }
+  :root {
+    --bg: #020203; --green: #a9ffc6; --green-dim: #7CFFB2; --green-hi: #5bff9e;
+    --line: rgba(0, 255, 120, 0.5); --line-hi: rgba(0, 255, 140, 0.85); --white: #eafff2;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body { background: var(--bg); color: var(--green); font-family: 'Courier New', monospace; line-height: 1.8; overflow-x: hidden; }
+
+  /* Zoomed-in Normie cube (WebGL) as a live background — same asset as the allowlist page. */
+  .cube-bg { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; transform: scale(1.5); transform-origin: center; pointer-events: none; z-index: 0; }
+  .scrim {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    background:
+      radial-gradient(circle at 50% 38%, rgba(2, 2, 3, 0.42), rgba(2, 2, 3, 0.82) 60%, rgba(2, 2, 3, 0.96) 100%),
+      linear-gradient(0deg, rgba(2, 2, 3, 0.62), rgba(2, 2, 3, 0.34));
+  }
+
+  .wrap { position: relative; z-index: 2; min-height: 100vh; display: flex; justify-content: center; padding: 6vh 20px 9vh; }
+  .box {
+    width: min(780px, 100%);
+    background: rgba(2, 6, 4, 0.82);
+    border: 2px solid var(--line-hi);
+    box-shadow: 0 0 26px rgba(0, 255, 120, 0.22), inset 0 0 30px rgba(0, 255, 120, 0.05);
+    padding: clamp(26px, 5vw, 60px);
+    backdrop-filter: blur(2px);
+    font-size: 15.5px;
+  }
+
+  .title {
+    font-family: 'NormiesFont', 'Courier New', monospace; text-align: center; color: var(--white);
+    font-size: clamp(40px, 9vw, 80px); letter-spacing: 0.05em; line-height: 0.95;
+    text-shadow: 0 0 6px rgba(0, 255, 130, 0.9), 0 0 26px rgba(0, 255, 120, 0.6), 0 0 60px rgba(0, 255, 120, 0.35);
+  }
+  .tagline { text-align: center; color: var(--green-dim); letter-spacing: 0.14em; text-transform: uppercase; font-size: 13px; margin: 30px 0 38px; }
+
+  .box h2 { color: var(--green-hi); font-size: 16px; letter-spacing: 0.06em; text-transform: uppercase; margin: 42px 0 16px; text-shadow: 0 0 10px rgba(0, 255, 120, 0.4); }
+  .box p { margin: 0 0 22px; }
+  .box strong { color: var(--white); }
+  .box em { color: var(--green-dim); font-style: italic; }
+  .box a { color: var(--green-hi); text-decoration: underline; }
+  .box a:hover { color: #fff; }
+
+  .box ul { list-style: none; margin: 0 0 22px; padding: 0; }
+  .box ul li { margin: 0 0 14px; padding-left: 18px; position: relative; }
+  .box ul li::before { content: "›"; position: absolute; left: 0; color: var(--green-hi); }
+  .box ol { margin: 0 0 22px; padding-left: 26px; }
+  .box ol li { margin: 0 0 16px; }
+
+  /* Aligned monospace "ladder" — whitespace preserved so the columns line up. */
+  .ladder {
+    font-family: 'Courier New', monospace; font-weight: bold; color: var(--green-hi);
+    white-space: pre; overflow-x: auto; margin: 4px 0 24px;
+    font-size: clamp(11px, 2.7vw, 14.5px); line-height: 1.9;
+    text-shadow: 0 0 8px rgba(0, 255, 120, 0.35);
+  }
+
+  .back { display: inline-block; margin-top: 34px; color: var(--green-dim); letter-spacing: 0.1em; text-decoration: none; border: 1px solid var(--line); padding: 10px 20px; }
+  .back:hover { color: #fff; border-color: var(--line-hi); }
+</style>
+</head>
+<body>
+  <iframe class="cube-bg" src="/cube-bg.html" title="" scrolling="no" tabindex="-1" aria-hidden="true"></iframe>
+  <div class="scrim"></div>
+
+  <div class="wrap">
+    <article class="box">
+      <h1 class="title">THE BLOCK</h1>
+      <p class="tagline">4,096 cubes. One block. 100% on-chain.</p>
+
+      <p>THE BLOCK is a generative art project that turns flat, one-dimensional on-chain data into a single, living 3-dimensional structure.</p>
+      <p>Every cube is derived from an existing source NFT — and once minted, it takes its place as one plot in a 4,096-cube world that renders and evolves entirely on Ethereum.</p>
+
+      <h2>1-D &rarr; 2-D &rarr; 3-D</h2>
+      <p>The data starts flat. An NFT on-chain is one-dimensional, a string of bytes held in a contract. THE BLOCK reads that data and lifts it up a dimension at a time: to a 2-D image (an on-chain SVG), then to a 3-D object (the cube).</p>
+      <p>The mapping is a Hilbert curve; a space-filling curve that threads one continuous line through every cell of a 3-D grid, folding recursively until it fills the volume.</p>
+      <p>Tokens next to each other on the line end up next to each other in space.</p>
+      <pre class="ladder"> 1 x 8 = 8      --> 8 cubes make one street
+ 8 x 8 = 64     --> 8 streets make one neighbourhood
+ 64 x 8 = 512   --> 8 neighbourhoods make one region
+ 512 x 8 = 4096 --> 8 regions make the block</pre>
+      <p>Zoom out and the block is one object; zoom in and it's a city of them.</p>
+
+      <h2>Fully on-chain — no servers, no dependencies</h2>
+      <p>There is no image file sitting on a server somewhere. Each cube's art — its 2-D thumbnail and its live WebGL view — is rendered from code and data stored <strong>on the chain itself</strong>.</p>
+      <p>Nothing points outward; nothing can rot or disappear.</p>
+      <p>The renderer is the contract.</p>
+      <p>As long as Ethereum exists, so does every cube.</p>
+
+      <h2>CC0 &amp; Provenance</h2>
+      <p>The source art is drawn from six source collections. All are CC0. All are integral to the history of onchain art on Ethereum.</p>
+      <ul>
+        <li><strong>Normies</strong> — art read live, on-chain, at mint.</li>
+        <li><strong>Chain Runners · 1337 Skulls · Baby Pepes · Nouns · OnChainKevin</strong> — CC0 art, flattened and stored on-chain so each cube carries its source within it.</li>
+      </ul>
+
+      <h2>How a cube gets its look</h2>
+      <p>A cube's appearance isn't random, it's derived from where it lands. Its slot in the block decides its colour.</p>
+      <p>Each of the three axes is a primary — red, green, blue. Underneath, every cube carries a permanent seed: an unchangeable identity that survives everything that happens to it afterwards.</p>
+
+      <h2>Roadmap</h2>
+      <p>A city is a living thing. The block comes alive in stages, each switched on after the one before:</p>
+      <ol>
+        <li><strong>Mint</strong> — the genesis drop across the six source collections.</li>
+        <li><strong>Customise</strong> — owners can update the art on an individual cube.</li>
+        <li><strong>Move, merge &amp; burn</strong> — cubes move to new plots, taking on the colour and character of the new position. Whole streets can merge into a single piece, and the collection contracts as excess cubes burn at a ratio of 8 to 1.</li>
+      </ol>
+
+      <h2>Who made it?</h2>
+      <p>THE BLOCK is by <strong><a href="https://x.com/bright_lightart" target="_blank" rel="noreferrer">@bright_lightart</a></strong> — a generative artist working at the intersection of on-chain permanence and questionable sanity. There is no team.</p>
+
+      <h2>…and why?</h2>
+      <p>The reference is the stacked city, a population housed in one dense structure instead of spread out flat. We are pioneers at the beginning of the new age of digital identity. Do we speedrun towards pyramid megastructures, vertical canyons of glass and steel, flying cars in lanes above, the ground lost somewhere far below?</p>
+      <p>LA 2019. Trantor. Mega City One. NEOM. None are yet real, but is that where we're going?</p>
+
+      <a class="back" href="/">&larr; BACK TO THE BLOCK</a>
+    </article>
+  </div>
+</body>
+</html>
