@@ -126,7 +126,7 @@ Caddy fetches a Let's Encrypt cert automatically. Site is now live on `https://a
 
 ## 6. Admin tools (check count / download)
 
-On the VPS (reads the file directly):
+On the VPS (reads `$SUBMISSIONS_FILE` — auto-loaded from the repo-root `.env`, same as the server):
 
 ```bash
 cd ~/blockcassone/allowlist

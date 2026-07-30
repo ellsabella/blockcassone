@@ -12,9 +12,22 @@
 //   ALLOWLIST_URL=https://al.example ALLOWLIST_ADMIN_TOKEN=xxxxx node admin.mjs count
 // Local (on the host):   no URL → reads SUBMISSIONS_FILE (or ../allowlist-submissions.jsonl)
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { localStore } from './api.mjs';
 import { CONFIG } from './src/config.js';
 import { recoverTypedDataAddress } from 'viem';
+
+// Load the repo-root .env (mirrors server.mjs) so `node admin.mjs …` on the box resolves
+// SUBMISSIONS_FILE / ALLOWLIST_ADMIN_TOKEN without an inline prefix. Real env wins.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+try {
+  const txt = fs.readFileSync(path.resolve(HERE, '..', '.env'), 'utf8');
+  for (const line of txt.split('\n')) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+  }
+} catch { /* rely on process env */ }
 
 const args = process.argv.slice(2);
 const cmd = args[0] || 'count';
@@ -46,8 +59,15 @@ async function main() {
   if (cmd === 'stats') {
     if (URL_) { console.log(JSON.stringify(await (await remote('/api/allowlist-stats')).json(), null, 2)); return; }
     const rs = localStore(process.env).rows();
-    const byCollection = {}; let spots = 0, artworks = 0;
+    const byCollection = {}; const byKind = { gtd: 0, interest: 0 };
+    let spots = 0, artworks = 0, interestFcfsEligible = 0;
     for (const r of rs) {
+      const kind = r.kind === 'interest' ? 'interest' : 'gtd';
+      byKind[kind] += 1;
+      if (kind === 'interest') {
+        if (Number(r.heldSummary?.normies || 0) + Number(r.heldSummary?.other || 0) > 0) interestFcfsEligible += 1;
+        continue;
+      }
       spots += Number(r.entitlement?.spots || (r.sources || []).length) || 0;
       artworks += (r.sources || []).length;
       for (const s of r.sources || []) {
@@ -56,7 +76,8 @@ async function main() {
       }
     }
     console.log(JSON.stringify({
-      registrations: rs.length, totalSpotsRequested: spots, artworksRequested: artworks, byCollection,
+      registrations: rs.length, byKind, interestFcfsEligible,
+      totalSpotsRequested: spots, artworksRequested: artworks, byCollection,
       first: rs[0]?.receivedAt || null, last: rs[rs.length - 1]?.receivedAt || null,
     }, null, 2));
     return;
