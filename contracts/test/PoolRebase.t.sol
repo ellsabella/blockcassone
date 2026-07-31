@@ -109,6 +109,14 @@ contract PoolRebaseTest is Test {
         cubes.rebaseToPoolSource(cubeA, address(runner), 500);
     }
 
+    function testRebaseEmitsMetadataUpdate() public {
+        // ERC-4906: a source-art change must signal marketplaces to re-fetch.
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.MetadataUpdate(cubeA);
+        vm.prank(ALICE);
+        cubes.rebaseToPoolSource(cubeA, address(runner), 500);
+    }
+
     function testUniquenessAndRecycle() public {
         // ALICE claims Runner #500.
         vm.prank(ALICE);

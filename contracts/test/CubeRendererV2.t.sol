@@ -67,6 +67,7 @@ contract CubeRendererV2Test is Test {
         cubes.setRenderer(address(renderer));
         cubes.setMergesEnabled(true);      // merge tests below need the gate open
         cubes.setCustomizesEnabled(true);  // customize tests below need the gate open
+        cubes.setBaseFee(0);               // fee-free merges here (fee math: CubeFeesTest)
         vm.stopPrank();
     }
 

@@ -110,8 +110,13 @@ merged street. Built in `CubeRendererV2._attributesJSON`.
 
 ## 4. Merge (8 → 1)
 
-`CubeNFT.mergeStreet(uint32 street)` — a wallet that **solely owns every occupied
-plot** of a street merges it into one **street token**.
+`CubeNFT.mergeStreet(uint32 street) payable` — a wallet that **solely owns every
+occupied plot** of a street merges it into one **street token**.
+
+**Fee:** free when you own the whole street (8/8); otherwise `baseFee` per vacant
+plot locked up (`quoteMerge` returns it). In a sold-out world nearly every merge
+is the free case — the cost of a contested street lives in the displacement fees
+paid to assemble it. Underpayment reverts `InsufficientFee`; overpay is refunded.
 
 **Behaviour:**
 - Reverts unless the caller owns *every* occupied plot (`NotStreetOwner`), the
@@ -147,25 +152,37 @@ plot** of a street merges it into one **street token**.
 
 ---
 
-## 5. Move
+## 5. Move (+ displacement)
 
-`CubeNFT.moveCube(uint256 cubeId, uint32 newSlot)` — relocate a cube you own to
-any vacant in-range slot.
+`CubeNFT.moveCube(uint256 cubeId, uint32 newSlot) payable` — relocate a cube you
+own to a vacant slot, **or** force-swap into an occupied slot in a street you
+dominate. Keeps `seed`; colour/geometry/street/environment follow the new slot.
 
-- **Owner-only** (`NotCubeOwner`); cube must exist (`NonexistentCube`).
-- Keeps `seed`; sets `CubeData.slot = newSlot`, clears `cubeForSlot[oldSlot]`,
-  sets `cubeForSlot[newSlot]`. Colour/geometry/street/environment follow the new
-  slot automatically (all derived from `slot`).
-- **Merged-street tokens are anchored** and cannot move (`CannotMoveStreet`).
-- Target must be vacant (`SlotOccupied`) and in range (`InvalidSlot`). Frees the
-  old slot for reuse — the mechanism a holder uses to consolidate a street before
-  a merge.
-- **Gate:** `movesEnabled` (default `false`, owner-flipped via
-  `setMovesEnabled`). Off during the genesis mint, on once the post-mint game
-  opens. While off, all moves revert `MovesDisabled`.
+- **Owner-only** (`NotCubeOwner`); cube must exist (`NonexistentCube`);
+  merged-street tokens are anchored and can neither move nor be displaced
+  (`CannotMoveStreet` / `CannotDisplaceStreet`); target in range (`InvalidSlot`).
+- **Vacant target:** plain move, flat `baseFee` to the house.
+- **Occupied target = displacement:** allowed only if the mover owns
+  `STREET_MOVE_MAJORITY` (5) of the target slot's 8-plot street
+  (`NotStreetMajority`). The occupant is force-swapped into the mover's old slot.
+  One-directional (only the majority owner can act) so there is no cascade.
+  - **Fee** = `baseFee + D × premiumPerPoint`, where `D` = the rarity points the
+    victim loses = `biomeWeight[targetStreet] − biomeWeight[oldStreet]` (0 if the
+    victim isn't downgraded). The victim is paid directly (push, with a pull
+    fallback to `owed[]` + `withdrawOwed()` if the transfer fails). When the mover
+    grabs a higher tier (`D > 0`) the house takes `displaceHouseCutBps` (~1/3);
+    otherwise the whole fee goes to the victim.
+  - **Cooldown:** a victim address can't be displaced twice within
+    `displaceCooldown` (15 min) — `DisplaceCooldownActive`.
+- **Self-swap** (you own the occupant): free, no fee/compensation/cooldown.
+- Underpayment reverts `InsufficientFee`; overpayment is refunded. `quoteMove`
+  returns the live fee + split. **Gate:** `movesEnabled` (default `false`) — off
+  during the mint, else `MovesDisabled`. See `FEES_AND_DISPLACEMENT_SPEC.md`.
 
-`event CubeMoved(cubeId, fromSlot, toSlot, owner)`,
-`event MovesEnabledUpdated(bool enabled)`.
+`event CubeMoved(cubeId, fromSlot, toSlot, owner)` (twice on a swap),
+`event MoveFeePaid`, `event DisplacementPaid`, `event MovesEnabledUpdated`, plus
+**ERC-4906** `MetadataUpdate(cubeId)` for each cube whose slot changed (marketplace
+refresh — also emitted by merge and re-base; `supportsInterface(0x49064906)` = true).
 
 ---
 
@@ -255,8 +272,11 @@ the store (`CubeThumbnailRendererV1` 3rd arg, `CubeRendererV2` 5th arg).
 ## Errors
 
 `CubeNFT`: `EmptyStreet`, `NotStreetOwner`, `StreetAlreadyMerged`,
-`MovesDisabled`, `NotCubeOwner`, `CannotMoveStreet`, `OnlyCustomizer`,
-`CannotCustomizeStreet`, `SlotOccupied`, `InvalidSlot`, `NonexistentCube`.
+`MovesDisabled`, `MergesDisabled`, `CustomizesDisabled`, `NotCubeOwner`,
+`CannotMoveStreet`, `CannotDisplaceStreet`, `NotStreetMajority`,
+`DisplaceCooldownActive`, `InsufficientFee`, `NothingOwed`, `BadBiomeId`,
+`CutTooHigh`, `WithdrawFailed`, `OnlyCustomizer`, `CannotCustomizeStreet`,
+`SlotOccupied`, `InvalidSlot`, `NonexistentCube`.
 `CubeMintController`: `CubeOwnerMismatch`, `AttestationMinterMismatch`,
 `AttestationSourceMismatch`, `AttestationPayloadVersionMismatch`,
 `PayloadHashMismatch`.

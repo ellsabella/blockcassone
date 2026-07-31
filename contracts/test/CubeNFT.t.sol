@@ -52,8 +52,12 @@ contract CubeNFTTest is Test {
 
         // Merges are OFF by default; enable them for the merge-mechanic tests. The gate itself
         // is covered by testMergeStreetRevertsWhenDisabled (moves stay off — separate switch).
-        vm.prank(OWNER);
+        // Fees are zeroed here so these behaviour tests need no ETH; fee math lives in CubeFeesTest.
+        vm.startPrank(OWNER);
         cubes.setMergesEnabled(true);
+        cubes.setBaseFee(0);
+        cubes.setPremiumPerPoint(0);
+        vm.stopPrank();
     }
 
     function testMintNormieCubeStoresImmutableFacts() public {
@@ -515,15 +519,16 @@ contract CubeNFTTest is Test {
     }
 
     function testMoveCubeRevertsForOccupiedTargetWithoutMajority() public {
-        // MINTER owns only 2 of street 0's 8 plots (slots 5, 6) — short of the 5/8
-        // majority — so moving onto an occupied slot in that street is refused.
+        // MINTER owns only 1 of street 0's 8 plots (slot 5) — short of the 5/8 majority — so
+        // displacing OTHER's cube at slot 6 is refused. (Occupant must be someone else's: a
+        // self-owned occupant would be a free swap, not a displacement.)
         uint256 a = _mintCubeAt(401, 5, MINTER);
-        _mintCubeAt(402, 6, MINTER);
+        _mintCubeAt(402, 6, OTHER);
         vm.prank(OWNER);
         cubes.setMovesEnabled(true);
 
         vm.prank(MINTER);
-        vm.expectRevert(abi.encodeWithSelector(CubeNFT.NotStreetMajority.selector, uint32(6), uint256(2)));
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.NotStreetMajority.selector, uint32(6), uint256(1)));
         cubes.moveCube(a, 6);
     }
 
@@ -734,5 +739,29 @@ contract CubeNFTTest is Test {
         assertFalse(cubes.movesEnabled());
         assertTrue(cubes.mergesEnabled());
         assertTrue(cubes.customizesEnabled()); // untouched by the move/merge flips
+    }
+
+    // ---- ERC-4906 (marketplace metadata refresh) --------------------------------
+    function testSupportsERC4906() public view {
+        assertTrue(cubes.supportsInterface(0x49064906));
+    }
+
+    function testMoveEmitsMetadataUpdate() public {
+        uint256 cubeId = _mintCubeAt(401, 5, MINTER);
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.MetadataUpdate(cubeId);
+        vm.prank(MINTER);
+        cubes.moveCube(cubeId, 40);
+    }
+
+    function testMergeEmitsMetadataUpdate() public {
+        uint256 c = _mintCubeAt(301, 0, MINTER); // first cube => id 1
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.MetadataUpdate(c + 1); // street token is the next id
+        vm.prank(MINTER);
+        uint256 streetId = cubes.mergeStreet(0);
+        assertEq(streetId, c + 1);
     }
 }

@@ -28,9 +28,12 @@ Important current direction:
 - Placement is **mutable world state**: slots are assigned at mint by the
   allocator in `NormieGenesisMinter` (anchor-then-wrap, ≤3/wallet/street), and
   holders can relocate (`moveCube`) or merge whole streets (`mergeStreet`)
-  post-mint. Plot, street, neighbourhood, region, and environment are all derived
-  from the slot. See [`WORLD_MECHANICS.md`](../../WORLD_MECHANICS.md) for the full
-  functional reference.
+  post-mint. `moveCube` also **displaces** — into an occupied slot in a street the
+  mover owns ≥5/8 of, force-swapping the occupant and paying them a biome-rarity
+  fee. All three actions are `payable` (owner-tunable fees, biome weights from
+  `lib/CubeEnv.sol`); see [`FEES_AND_DISPLACEMENT_SPEC.md`](../../FEES_AND_DISPLACEMENT_SPEC.md).
+  Plot, street, neighbourhood, region, and environment are all derived from the
+  slot. See [`WORLD_MECHANICS.md`](../../WORLD_MECHANICS.md) for the full reference.
 - Production source policy has shifted to a Normie-only genesis mint. Allowlist
   wallets mint their snapshot Normies, then the public phase mints unclaimed
   snapshot Normie sources until the `4096` cube supply cap is reached.

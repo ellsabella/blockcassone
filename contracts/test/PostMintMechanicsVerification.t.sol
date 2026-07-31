@@ -57,6 +57,8 @@ contract PostMintMechanicsVerificationTest is Test {
         cubes.setMovesEnabled(true);
         cubes.setMergesEnabled(true);
         cubes.setCustomizesEnabled(true);
+        cubes.setBaseFee(0); // fee-free so these mechanic tests need no ETH (fees: CubeFeesTest)
+        cubes.setPremiumPerPoint(0);
         attest.setAuthorizedConsumer(address(controller));
         vm.stopPrank();
 
