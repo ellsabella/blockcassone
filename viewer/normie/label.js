@@ -50,14 +50,19 @@ export function getNormieIdLabelCells(motifIdx) {
 }
 
 export function buildNormieIdLabel(plane, gl, meshes) {
-  const motifIdx = plane.hierarchy?.motifIndex;
-  const id = normieIdForCube(motifIdx);
+  return buildIdLabelFor(plane, gl, meshes, normieIdForCube(plane.hierarchy?.motifIndex), 'normie-id');
+}
+
+// Reusable "#NNNN" label for an explicit id (Normie or non-Normie source token),
+// so non-Normie cubes can carry a source-id label too. Takes an explicit id +
+// mesh-key prefix — NO status.js dependency, so it's safe in the network-free bundle.
+export function buildIdLabelFor(plane, gl, meshes, id, prefix) {
   if (id === null || id === undefined) return [];
 
   const text    = '#' + String(id).padStart(4, '0');
-  const lineKey = `normie-id-line-${plane.id}`;
-  const glowKey = `normie-id-glow-${plane.id}`;
-  const whiteKey = `normie-id-white-${plane.id}`;
+  const lineKey = `${prefix}-line-${plane.id}`;
+  const glowKey = `${prefix}-glow-${plane.id}`;
+  const whiteKey = `${prefix}-white-${plane.id}`;
 
   if (meshes[lineKey] === undefined) {
     const charW = 3, charH = 5, spacing = 1;

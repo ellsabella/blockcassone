@@ -7,15 +7,23 @@ import {
   buildNonNormieArtworkPlane,
   buildNonNormieWalker,
   buildNonNormieBanner,
+  buildNonNormieIdLabel,
 } from '../viewer/non-normie-art-plane.js';
-import { prepareNonNormieGridForNft } from '../viewer/wallet-nfts.js';
+import {
+  prepareNonNormieGridForNft,
+  getNonNormieGridForCube,
+  getWalletAssignmentForCube,
+} from '../viewer/wallet-nfts.js';
 
 main({
   nonNormie: {
     buildArtworkPlane: buildNonNormieArtworkPlane,
     buildWalker: buildNonNormieWalker,
     buildBanner: buildNonNormieBanner,
+    buildIdLabel: buildNonNormieIdLabel,
     prepareGrid: prepareNonNormieGridForNft,
+    getGrid: getNonNormieGridForCube,
+    getAssignment: getWalletAssignmentForCube,
   },
 }).catch(err => {
   const label = document.getElementById('h');

@@ -645,54 +645,93 @@ function downsampleGrayscale(src, srcSize, dstSize) {
   return dst;
 }
 
-// A subject on a flat, dominant background (solid-colour character art — e.g.
-// BRAINROT) can't be separated by luminance Otsu: the subject holds both bright
-// (bandages) and dark (outlines) parts, so Otsu keeps only the darkest sliver and
-// the cube reads as sparse noise. Instead, key off the background — foreground =
-// cells whose colour differs from the detected border colour. Returns 40×40 tonal
-// bands (0 = background, 1..2 by darkness) or NULL when there is no clean flat
-// background (caller falls back to Otsu, e.g. photos / full-bleed art).
-const BG_KEY_DIST2 = 0.02;      // squared RGBA colour distance to call a cell "not background"
-const BG_EDGE_FRACTION = 0.6;   // >=60% of border cells must match the bg to key off it
+// Subject/background separation. A subject on a background (solid-colour character
+// art, pixel art with a sky + floor, BRAINROT, etc.) can't be separated by global
+// luminance Otsu — the subject holds both bright and dark parts. Instead we detect
+// the background from the border/corners (MULTI-region: up to 3 dominant colours,
+// so a bright sky AND a floor both count as background), then band the SUBJECT's
+// luminance into 3 tonal levels (using all four payload states, 0 = background).
+const BG_KEY_DIST2 = 0.03;      // squared RGB distance to call a pixel "background"
 const BG_KEY_MIN_LIT = 12;      // ignore near-empty results
-const BG_KEY_MAX_FILL = 0.9;    // ignore results that fill almost everything (bad bg guess)
+const BG_KEY_MAX_FILL = 0.94;   // ignore results that fill almost everything (bad bg guess)
 
-export function bandsFromBackgroundKey(colors, rawSize) {
+// Background seeds = the dominant border/corner colours (up to 3 covering ~85% of
+// the border). Corners weighted x2; transparent handled by the caller's alpha test.
+function bgSeeds(colors, size) {
+  const counts = new Map();
+  const push = c => {
+    if (!c || c.a < 0.15) return;
+    const k = `${Math.round(c.r * 7)},${Math.round(c.g * 7)},${Math.round(c.b * 7)}`;
+    const e = counts.get(k) || { n: 0, r: 0, g: 0, b: 0 };
+    e.n++; e.r += c.r; e.g += c.g; e.b += c.b; counts.set(k, e);
+  };
+  for (let i = 0; i < size; i++) { push(colors[i]); push(colors[(size - 1) * size + i]); push(colors[i * size]); push(colors[i * size + size - 1]); }
+  for (const idx of [0, size - 1, (size - 1) * size, size * size - 1]) push(colors[idx]);
+  let total = 0; for (const e of counts.values()) total += e.n;
+  const sorted = [...counts.values()].sort((a, b) => b.n - a.n);
+  const seeds = []; let cum = 0;
+  for (const e of sorted) { seeds.push({ r: e.r / e.n, g: e.g / e.n, b: e.b / e.n }); cum += e.n; if (cum / Math.max(1, total) >= 0.85 || seeds.length >= 3) break; }
+  return seeds;
+}
+
+// THE single canonical subject-separation — used by the pixel + smooth paths in
+// imageUrlToBinaryGrid AND the dev/cc0-proof flattener (which imports it), so every
+// non-Normie import shares one implementation. Down-samples any rawSize to the 40
+// grid; returns 40x40 bands 0..3, or null when there's no usable subject/bg split.
+// `outSize` = the band-map resolution (default GRID_SIZE=40). The source `rawSize` grid
+// is coverage-mapped into outSize×outSize. Pass outSize == rawSize for a NATIVE-resolution
+// band map (no scaling — used to pad small pixel art into 40 without ×1.25 distortion).
+export function bandsFromBackgroundKey(colors, rawSize, outSize = GRID_SIZE) {
   if (!colors || colors.length < rawSize * rawSize) return null;
-  const bg = backgroundColor(colors, rawSize, rawSize);
-  // Is the border actually dominated by one flat colour?
-  let edge = 0, edgeBg = 0;
-  for (let row = 0; row < rawSize; row++) {
-    for (let col = 0; col < rawSize; col++) {
-      if (row !== 0 && col !== 0 && row !== rawSize - 1 && col !== rawSize - 1) continue;
-      edge++;
-      if (colorDistance2(colors[row * rawSize + col], bg) < BG_KEY_DIST2) edgeBg++;
-    }
-  }
-  if (edge === 0 || edgeBg / edge < BG_EDGE_FRACTION) return null;
-
-  // Down-sample foreground coverage + subject luminance from rawSize -> 40.
-  const factor = rawSize / GRID_SIZE;
-  const bands = new Uint8Array(GRID_SIZE * GRID_SIZE);
+  const seeds = bgSeeds(colors, rawSize);
+  const isBg = c => {
+    if (!c || c.a < 0.4) return true;
+    for (const s of seeds) if (colorDistance2(c, s) < BG_KEY_DIST2) return true;
+    return false;
+  };
+  const lumOf = c => 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+  const factor = rawSize / outSize;
+  const isFg = new Uint8Array(outSize * outSize);
+  const fgLum = new Float32Array(outSize * outSize);
   let lit = 0;
-  for (let row = 0; row < GRID_SIZE; row++) {
+  for (let row = 0; row < outSize; row++) {
     const r0 = Math.floor(row * factor), r1 = Math.min(rawSize, Math.ceil((row + 1) * factor));
-    for (let col = 0; col < GRID_SIZE; col++) {
+    for (let col = 0; col < outSize; col++) {
       const c0 = Math.floor(col * factor), c1 = Math.min(rawSize, Math.ceil((col + 1) * factor));
       let fg = 0, n = 0, lsum = 0;
-      for (let r = r0; r < r1; r++) {
-        for (let c = c0; c < c1; c++) {
-          const px = colors[r * rawSize + c]; n++;
-          if (colorDistance2(px, bg) >= BG_KEY_DIST2) { fg++; lsum += grayFor(px); }
-        }
-      }
-      if (n > 0 && fg / n >= 0.5) {                                 // cell is majority foreground
-        bands[row * GRID_SIZE + col] = (lsum / fg) < 0.45 ? 2 : 1;  // darker subject -> higher band
-        lit++;
-      }
+      for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) { const px = colors[r * rawSize + c]; n++; if (!isBg(px)) { fg++; lsum += lumOf(px); } }
+      if (n > 0 && fg / n >= 0.5) { const i = row * outSize + col; isFg[i] = 1; fgLum[i] = lsum / fg; lit++; }
     }
   }
-  if (lit < BG_KEY_MIN_LIT || lit > GRID_SIZE * GRID_SIZE * BG_KEY_MAX_FILL) return null;
+  // Despeckle: drop isolated foreground specks — a background texture (e.g. a
+  // polka-dot backdrop) that leaked through separation shows up as single lit
+  // cells. A foreground cell with < 2 foreground 8-neighbours becomes background,
+  // so only coherent subject regions survive (matches the tonal/cube/SVG cleanly).
+  {
+    const keep = new Uint8Array(isFg.length);
+    let kept = 0;
+    for (let row = 0; row < outSize; row++) {
+      for (let col = 0; col < outSize; col++) {
+        const i = row * outSize + col;
+        if (!isFg[i]) continue;
+        let nb = 0;
+        for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const r = row + dr, c = col + dc;
+          if (r >= 0 && r < outSize && c >= 0 && c < outSize && isFg[r * outSize + c]) nb++;
+        }
+        if (nb >= 2) { keep[i] = 1; kept++; }
+      }
+    }
+    isFg.set(keep);
+    lit = kept;
+  }
+  if (lit < BG_KEY_MIN_LIT || lit > outSize * outSize * BG_KEY_MAX_FILL) return null;
+  const lums = new Float32Array(lit); let k = 0;
+  for (let i = 0; i < isFg.length; i++) if (isFg[i]) lums[k++] = fgLum[i];
+  const th = otsuMultiLevelThresholds(lums, 2); // [t1 < t2] within the subject
+  const bands = new Uint8Array(outSize * outSize);
+  for (let i = 0; i < isFg.length; i++) { if (!isFg[i]) continue; const g = fgLum[i]; bands[i] = g < th[0] ? 3 : g < th[1] ? 2 : 1; }
   return bands;
 }
 
@@ -718,32 +757,30 @@ export function gridToBands40(grid) {
 // Pack the 40×40 bands into the on-chain 400-byte 2-bit tonal payload (row-major,
 // 2 bits/cell; band 0 = background -> "off" in the on-chain renderer). Feeds
 // CubeThumbnailRendererV1.previewThumbnailSVG and, on commit, customizeCube.
-export function gridToTonalPayload(grid) {
+// Pack 40x40 tonal bands (0..3) into the on-chain 400-byte 2-bit payload (row-major,
+// 2 bits/cell; band 0 -> "off"). The single packing routine — used by every path.
+export function packTonalPayload(bands) {
   const payload = new Uint8Array(400);
-  // Background-keyed silhouette already has the subject as foreground (band>0):
-  // pack directly, NO flip (the flip below is only for the Otsu light/dark ambiguity).
-  if (grid && grid.bgBands40) {
-    const bands = grid.bgBands40;
-    for (let i = 0; i < bands.length; i++) {
-      if (bands[i]) payload[i >> 2] |= (bands[i] & 3) << ((i & 3) << 1);
-    }
-    return payload;
-  }
+  for (let i = 0; i < 1600; i++) if (bands[i]) payload[i >> 2] |= (bands[i] & 3) << ((i & 3) << 1);
+  return payload;
+}
+
+export function gridToTonalPayload(grid) {
+  // Background-keyed subject already has the subject as foreground (band>0): pack
+  // directly (the flip below is only for the Otsu light/dark ambiguity).
+  if (grid && grid.bgBands40) return packTonalPayload(grid.bgBands40);
   const bands = gridToBands40(grid);
-  if (!bands) return payload;
+  if (!bands) return new Uint8Array(400);
   // The on-chain art + glass land on band>0 (the "foreground"). Otsu makes the
-  // lit region band>0, but for a light-background image that's the background —
-  // so glass blankets it and looks poor. Keep the foreground the SPARSER half
-  // (usually the subject): if the lit region is the majority, make the dark
-  // region the foreground instead.
+  // lit region band>0, but for a light-background image that's the background — so
+  // glass blankets it and looks poor. Keep the foreground the SPARSER half (usually
+  // the subject): if the lit region is the majority, flip.
   let lit = 0;
   for (let i = 0; i < bands.length; i++) if (bands[i] > 0) lit++;
   const flip = lit > bands.length - lit;
-  for (let i = 0; i < bands.length; i++) {
-    const b = flip ? (bands[i] > 0 ? 0 : 2) : bands[i];
-    if (b) payload[i >> 2] |= (b & 3) << ((i & 3) << 1);
-  }
-  return payload;
+  const out = new Uint8Array(bands.length);
+  for (let i = 0; i < bands.length; i++) out[i] = flip ? (bands[i] > 0 ? 0 : 2) : bands[i];
+  return packTonalPayload(out);
 }
 
 export function otsuRecursiveBands(grayscale, numBands, numBins = OTSU_BINS) {
@@ -902,7 +939,10 @@ function normalizeCellGrid(colors, gridW, gridH) {
   }
   const thresholds = otsuMultiLevelThresholds(grayscale);
   const bands = bandsFromGrayscale(grayscale, thresholds);
-  return { bits, bands, thresholds, grayscale, bitString: Array.from(bits).join(''), ones, backgroundGray: grayFor(bg) };
+  // Pixel art now gets subject separation too (previously only the smooth path did),
+  // so gridToTonalPayload prefers the keyed subject over raw Otsu.
+  const bgBands40 = bandsFromBackgroundKey(outColors, GRID_SIZE);
+  return { bits, bands, thresholds, grayscale, bitString: Array.from(bits).join(''), ones, backgroundGray: grayFor(bg), bgBands40 };
 }
 
 function inferPixelGrid(sample) {

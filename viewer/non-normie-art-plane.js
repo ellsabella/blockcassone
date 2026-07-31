@@ -1,13 +1,40 @@
 import { createMeshGL } from '../renderer/src/geometry.js';
 import { mat4, identity } from '../renderer/src/math.js';
 import { hash1, V } from './tree-walker.js';
-import { getNonNormieGridForCube, getWalletAssignmentForCube } from './wallet-nfts.js';
 import { makePlanePixelFn, buildVoxelMesh, ensureBannerFont, renderBannerTexture } from './normies-manager.js';
 import { otsuRecursiveBands, otsuMultiLevelThresholds } from './nft-art-grid.js';
 import { buildWalkGlowMeshWS, buildWalkCoreMeshWS } from './materials/stone-walker.js';
 import { planeBasis, uvToWorld } from './materials/plane-2d.js';
+import { buildIdLabelFor } from './normie/label.js';
 
 const { add: vadd, sub: vsub, scale: vscale, dot: vdot, cross: vcross, len: vlen, norm: vnorm } = V;
+
+// Grid + assignment come from INJECTED resolvers (setNonNormieResolvers) rather than
+// importing the wallet/fetch module, so this file carries no network code and can
+// live in the on-chain production bundle. The dev viewer injects the wallet-nfts
+// accessors; the production animation injects tonal-derived ones.
+let _getGrid = () => null;
+let _getAssignment = () => null;
+export function setNonNormieResolvers(r) {
+  if (r && r.getGrid) _getGrid = r.getGrid;
+  if (r && r.getAssignment) _getAssignment = r.getAssignment;
+}
+const getNonNormieGridForCube = (idx) => _getGrid(idx);
+const getWalletAssignmentForCube = (idx) => _getAssignment(idx);
+
+// Network-free grid straight from the embedded 2-bit tonal payload (400 bytes,
+// base64) — the production path (no fetch, no flatten). Carries exact bands so the
+// contours match the on-chain thumbnail.
+export function gridFromTonal(b64) {
+  const s = atob(String(b64 || ''));
+  if (s.length !== 400) return null;
+  const bands = new Uint8Array(1600), bits = new Uint8Array(1600), grayscale = new Float32Array(1600);
+  for (let i = 0; i < 1600; i++) {
+    const b = (s.charCodeAt(i >> 2) >> ((i & 3) * 2)) & 3;
+    bands[i] = b; bits[i] = b > 0 ? 1 : 0; grayscale[i] = b / 3;
+  }
+  return { gridSize: 40, depthLayers: 40, kind: 'pixel', discarded: false, bits, grayscale, bands };
+}
 
 const RED = new Float32Array([1.0, 0.02, 0.02]);
 const VOXEL_RED = new Float32Array([1.0, 0.08, 0.04]);
@@ -113,6 +140,12 @@ const OUTLINE_SIZE = 40;
 // draw edges between any adjacent cells in different bands. Falls back to 1-level silhouette
 // if the 3-band pass produces nothing (e.g. very uniform images).
 function getOutlineSegs(grid) {
+  // Exact stored tonal bands (the on-chain 2-bit payload) take priority over
+  // re-Otsu-ing the grayscale, so the cube contours match the thumbnail exactly.
+  if (grid.bands && (grid.gridSize || OUTLINE_SIZE) === OUTLINE_SIZE) {
+    const segs = findBandContourEdges(grid.bands, OUTLINE_SIZE);
+    if (segs.length > 0) return segs;
+  }
   const grayscale = grid.grayscale;
   if (!grayscale) return [];
   const rawSize = grid.gridSize || OUTLINE_SIZE;
@@ -688,10 +721,22 @@ export function buildNonNormieArtworkPlane(plane, allPlanes, gl, meshes) {
   return items;
 }
 
-export function buildNonNormieBanner(plane, allPlanes, gl, meshes) {
+// Source-token "#NNNN" label for non-Normie cubes (matches the thumbnail's label),
+// drawn alongside the contract banner in the plane's axis colour.
+export function buildNonNormieIdLabel(plane, allPlanes, gl, meshes) {
   const motifIdx = plane.hierarchy?.motifIndex;
   const nft = getWalletAssignmentForCube(motifIdx);
   if (!nft || nft.isNormie) return [];
+  return buildIdLabelFor(plane, gl, meshes, Number(nft.tokenId) || 0, 'nonnormie-id');
+}
+
+// Source-contract banner — the cube's source collection address as a hex strip.
+// Used for EVERY cube (Normie shows the Normies contract, non-Normie its source),
+// so the banner is consistent across all artwork.
+export function buildNonNormieBanner(plane, allPlanes, gl, meshes) {
+  const motifIdx = plane.hierarchy?.motifIndex;
+  const nft = getWalletAssignmentForCube(motifIdx);
+  if (!nft || !nft.contract) return [];
   if (!ensureBannerFont()) return [];
 
   const raw = String(nft.contract || '');

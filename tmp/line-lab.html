@@ -40,6 +40,8 @@
   </span>
   <span>shape:</span>
   <select id="shape"><option value="0">blocks</option><option value="1">ring</option><option value="2">glyph</option></select>
+  <span>lines:</span>
+  <select id="contour"><option value="sil">silhouette (on/off)</option><option value="tonal">tonal contours (bands)</option></select>
   <button id="resetView">reset view</button>
   <button id="reset">reset params</button>
   <span class="sub">scroll = zoom-to-cursor · drag = pan · dbl-click = reset view. zoom <span id="zoomread">1.0×</span></span>
@@ -89,6 +91,7 @@
   </div>
 </main>
 
+<script src="cc0-samples.js"></script>
 <script>
 // ---------- shared geometry ----------
 function buildGrid(shape){
@@ -116,6 +119,34 @@ function svgPath(g){
     if(!at(r-1,c)) d+=`M${c} ${r}h1`; if(!at(r+1,c)) d+=`M${c} ${r+1}h1`; }
   return d;
 }
+// --- tonal band-boundary contours (the render fix under test): draw a line
+// wherever adjacent cells differ in BAND, not just on/off, so internal features
+// (sockets, teeth, folds) become line-work. internal=false = silhouette only.
+function bandSegs(t, internal){
+  const at=(r,c)=> (r<0||r>39||c<0||c>39)?0:t[r*40+c];
+  const diff = internal ? (a,b)=>a!==b : (a,b)=>((a>0)!==(b>0));
+  const segs=[];
+  for(let r=0;r<40;r++)for(let c=0;c<40;c++){ const b=at(r,c);
+    if(diff(b,at(r,c+1))){ const u=(c+1)/40; segs.push([u,r/40,u,(r+1)/40]); }
+    if(diff(b,at(r+1,c))){ const v=(r+1)/40; segs.push([c/40,v,(c+1)/40,v]); }
+    if(c===0 && diff(b,0)) segs.push([0,r/40,0,(r+1)/40]);
+    if(r===0 && diff(b,0)) segs.push([c/40,0,(c+1)/40,0]); }
+  return segs;
+}
+function bandPath(t, internal){
+  const at=(r,c)=> (r<0||r>39||c<0||c>39)?0:t[r*40+c];
+  const diff = internal ? (a,b)=>a!==b : (a,b)=>((a>0)!==(b>0));
+  let d='';
+  for(let r=0;r<40;r++)for(let c=0;c<40;c++){ const b=at(r,c);
+    if(diff(b,at(r,c+1))) d+=`M${c+1} ${r}v1`;
+    if(diff(b,at(r+1,c))) d+=`M${c} ${r+1}h1`;
+    if(c===0 && diff(b,0)) d+=`M0 ${r}v1`;
+    if(r===0 && diff(b,0)) d+=`M${c} 0h1`; }
+  return d;
+}
+function unpackPayload(hex){ const h=String(hex).replace(/^0x/,''); const t=new Uint8Array(1600);
+  for(let i=0;i<1600;i++){ const byte=parseInt(h.substr((i>>2)*2,2),16)||0; t[i]=(byte>>((i&3)*2))&3; } return t; }
+function tonalToBits(t){ const g=new Uint8Array(1600); for(let i=0;i<1600;i++) g[i]=t[i]>0?1:0; return g; }
 // frame = the plane's 3 border sides (top, left, right; bottom open). grid 0..40.
 // ---- glass voxels: selection + RGB light field (ports _glassLayer/_lightColor) ----
 function h32(x){ x=Math.imul(x^(x>>>16),0x45d9f3b); x=Math.imul(x^(x>>>16),0x45d9f3b); return (x^(x>>>16))>>>0; }
@@ -209,6 +240,10 @@ const ORBS = [[0,0],[40,0],[40,40],[0,40],
 const ORBS_UV = ORBS.map(([x,y])=>[x/40,y/40]);
 
 let AXIS=0, SHAPE=0, GRID=buildGrid(0);
+let TONAL=GRID.slice(); let CONTOUR='sil';
+// figure line source: 1-bit silhouette or tonal band-boundaries (the fix under test)
+function figureSegs(){ return CONTOUR==='tonal' ? bandSegs(TONAL,true) : edges(GRID); }
+function figurePath(){ return CONTOUR==='tonal' ? bandPath(TONAL,true) : svgPath(GRID); }
 let glassBlend='screen'; // additive compositing is what makes glass read bright over black
 let view={z:1,cx:0.5,cy:0.5};
 const PAD_N=0.14, VS_N=1+2*PAD_N; // blank margin around the grid so edge lines/orbs aren't clipped
@@ -286,7 +321,7 @@ function glMesh(segs,width){
 const orbSegs=ORBS_UV.map(([x,y])=>[x,y,x+1e-3,y]);
 let M=null;
 function rebuildGL(){
-  const s=edges(GRID);
+  const s=figureSegs();
   M={ glow:glMesh(s,GLOW_W), white:glMesh(s,WHITE_W), core:glMesh(s,CORE_W),
       fglow:glMesh(FRAME_SEGS,FGLOW_W), fwhite:glMesh(FRAME_SEGS,FWHITE_W), fcore:glMesh(FRAME_SEGS,FCORE_W),
       orb:glMesh(orbSegs,ORB_W), orbcore:glMesh(orbSegs,ORB_CORE_W),
@@ -657,7 +692,7 @@ function buildSVG(){
   const svg=
    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBoxStr()}">`+
      `<rect x="-2000" y="-2000" width="6000" height="6000" fill="#050507"/>`+
-     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}${walk.defs}${forest.defs}<path id="o" d="${svgPath(GRID)}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
+     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}${walk.defs}${forest.defs}<path id="o" d="${figurePath()}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
      `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${forest.body}${fig.body}${walk.body}${glass.body}${frm.body}${orb.body}</g>`+
    `</svg>`;
   document.getElementById('svgwrap').innerHTML=svg;
@@ -716,7 +751,15 @@ document.getElementById('tabs').addEventListener('click',e=>{ const t=e.target.d
 document.getElementById('glassBlend').addEventListener('change',e=>{ glassBlend=e.target.value; buildSVG(); });
 document.getElementById('axis').addEventListener('click',e=>{ const a=e.target.dataset.axis; if(a==null)return;
   AXIS=+a; [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.axis===a)); drawGL(); buildSVG(); });
-document.getElementById('shape').addEventListener('change',e=>{ SHAPE=+e.target.value; GRID=buildGrid(SHAPE); rebuildGL(); buildSVG(); });
+document.getElementById('shape').addEventListener('change',e=>{ const val=e.target.value;
+  if(val.slice(0,4)==='cc0:'){ const s=CC0_SAMPLES[+val.slice(4)]; TONAL=unpackPayload(s.payload); GRID=tonalToBits(TONAL); }
+  else { SHAPE=+val; GRID=buildGrid(SHAPE); TONAL=GRID.slice(); }
+  rebuildGL(); buildSVG(); });
+document.getElementById('contour').addEventListener('change',e=>{ CONTOUR=e.target.value; rebuildGL(); buildSVG(); });
+if(window.CC0_SAMPLES&&CC0_SAMPLES.length){ const sel=document.getElementById('shape');
+  const og=document.createElement('optgroup'); og.label='— real flattened art —';
+  CC0_SAMPLES.forEach((s,i)=>{ const o=document.createElement('option'); o.value='cc0:'+i; o.textContent=s.name; og.appendChild(o); });
+  sel.appendChild(og); }
 document.getElementById('reset').addEventListener('click',()=>{
   for(const g of ['normie','frame','points','glass','walkers','forest']){ G[g].state={...G[g].def};
     G[g].schema.forEach(([k])=>{ const el=document.querySelector(`[data-grp="${g}"][data-k="${k}"]`); if(el){el.value=G[g].state[k]; document.getElementById(`v_${g}_${k}`).textContent=G[g].state[k];} }); }

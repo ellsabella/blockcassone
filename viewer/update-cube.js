@@ -188,7 +188,7 @@ async function renderPreviews() {
 }
 
 function showCubeFrame(nft, seed, slot) {
-  const q = new URLSearchParams({ art: nft.imageUrl, slot: String(slot), seed, src: String(nft.tokenId) });
+  const q = new URLSearchParams({ art: nft.imageUrl, slot: String(slot), seed, src: String(nft.tokenId), ca: nft.contract || '' });
   els.cubeEmpty.style.display = 'none';
   els.cubeFrame.style.display = 'block';
   els.cubeFrame.src = '/viewer/cube-preview.html?' + q.toString();

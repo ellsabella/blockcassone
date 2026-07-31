@@ -34,6 +34,10 @@ export function updateMintStatus(el, uniqueMotifs) {
   if (!el) return;
   const summary = mintSimulationSummary();
   const empty   = Math.max(0, uniqueMotifs.length - summary.slots);
-  const legacy = (summary.cc0 || 0) + (summary.external || 0);
-  el.textContent = `${mintedStateSource()}: minted ${summary.total} | normie ${summary.normies}${legacy ? ` | legacy ${legacy}` : ''} | empty slots: ${empty}`;
+  // Show the genesis multi-source mix (Normie + CC0 pools) by collection.
+  const mix = (summary.byCollection || [])
+    .map(row => `${row.name} ${row.count}`)
+    .join(' · ');
+  const other = summary.other ? ` | other ${summary.other}` : '';
+  el.textContent = `${mintedStateSource()}: minted ${summary.total}${mix ? ` | ${mix}` : ''}${other} | empty slots: ${empty}`;
 }

@@ -84,28 +84,33 @@ contract PreviewThumbnail is Script {
             address(new CubeWalkerLayer())
         );
 
-        for (uint256 s = 0; s < count; s++) {
-            uint256 id = ids[s];
+        // Optional: render OUR exact snapshot slots + their Normie ids (SLOTS/IDS env), so
+        // the viewer's per-slot thumbnails match each cube. Falls back to the 0..COUNT path.
+        uint256[] memory slots = vm.envOr("SLOTS", ",", new uint256[](0));
+        uint256[] memory slotIds = vm.envOr("IDS", ",", new uint256[](0));
+        bool useSlots = slots.length > 0;
+        uint256 iters = useSlots ? slots.length : count;
+
+        for (uint256 s = 0; s < iters; s++) {
+            uint256 slot = useSlots ? slots[s] : s;
+            uint256 id = useSlots ? slotIds[s % slotIds.length] : ids[s];
             (bytes memory raw, string memory artSrc) = _bitmapFor(id, forked);
 
-            // Normie path: mint a cube on the mock holding this (real) art and render.
-            normies.mint(dev, id, raw);
-            bytes32 seed = keccak256(abi.encode("preview", s));
+            // Mint a UNIQUE mock Normie per slot (snapshot reuses ids), holding this art.
+            uint256 mockId = useSlots ? (100000 + slot) : id;
+            normies.mint(dev, mockId, raw);
+            bytes32 seed = keccak256(abi.encode("preview", slot));
             vm.prank(dev);
-            uint256 cubeId = cubes.mintNormieCube(id, uint32(s), seed);
+            uint256 cubeId = cubes.mintNormieCube(mockId, uint32(slot), seed);
             string memory svg = thumb.thumbnailSVG(cubeId);
-            vm.writeFile(string.concat("data/preview-slot-", vm.toString(s), ".svg"), svg);
+            vm.writeFile(string.concat("data/preview-slot-", vm.toString(slot), ".svg"), svg);
 
-            console2.log("slot", s);
+            console2.log("slot", slot);
             console2.log("  normie id / art:", id, artSrc);
-            console2.log("  expected colour:", _colourName(_axis(s)));
-            console2.log("  emitted in SVG :", _emittedColour(svg));
 
-            // Non-Normie path: same silhouette as a 2-bit tonal payload, rendered
-            // statelessly. Verifies walkers/glass/frame on the customized route.
-            if (s < nnCount) {
-                string memory nn = thumb.previewThumbnailSVG(seed, uint32(s), id, _toPayload(raw));
-                vm.writeFile(string.concat("data/preview-nonnormie-", vm.toString(s), ".svg"), nn);
+            if (!useSlots && s < nnCount) {
+                string memory nn = thumb.previewThumbnailSVG(seed, uint32(slot), id, _toPayload(raw));
+                vm.writeFile(string.concat("data/preview-nonnormie-", vm.toString(slot), ".svg"), nn);
             }
         }
     }

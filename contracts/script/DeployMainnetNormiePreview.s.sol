@@ -126,13 +126,15 @@ contract DeployMainnetNormiePreview is Script {
         vm.broadcast();
         NonNormieArtStore previewStore =
             new NonNormieArtStore(address(deployment.cubes), config.initialOwner);
+        // normieCap = whole supply. Use config.totalSlots (== cubes.totalSlots()) directly:
+        // a staticcall here would trip forge's "no staticcalls after broadcast" guard.
         vm.broadcast();
         deployment.genesis = new MultiSourceGenesisMinter(
             deployment.cubes,
             config.publicSeed,
             config.initialOwner,
             previewStore,
-            deployment.cubes.totalSlots(),
+            config.totalSlots,
             new address[](0),
             new uint32[](0)
         );
