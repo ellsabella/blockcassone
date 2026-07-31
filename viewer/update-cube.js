@@ -173,7 +173,7 @@ async function renderPreviews() {
     return;
   }
   try {
-    const svg = await previewThumbnailSVG({ seed, slot, sourceTokenId: safeBig(nft.tokenId), payload });
+    const svg = await previewThumbnailSVG({ seed, slot, sourceContract: nft.contract, sourceTokenId: safeBig(nft.tokenId), payload });
     if (token !== previewToken) return;
     if (svg && svg.includes('<svg')) {
       els.stageSvg.replaceChildren(svgToImg(svg));

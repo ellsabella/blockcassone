@@ -109,7 +109,7 @@ contract PreviewThumbnail is Script {
             console2.log("  normie id / art:", id, artSrc);
 
             if (!useSlots && s < nnCount) {
-                string memory nn = thumb.previewThumbnailSVG(seed, uint32(slot), id, _toPayload(raw));
+                string memory nn = thumb.previewThumbnailSVG(seed, uint32(slot), address(0x0123456789abcDEF0123456789abCDef01234567), id, _toPayload(raw));
                 vm.writeFile(string.concat("data/preview-nonnormie-", vm.toString(slot), ".svg"), nn);
             }
         }

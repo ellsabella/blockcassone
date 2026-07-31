@@ -325,7 +325,7 @@ contract CubeRendererV2Test is Test {
         // The stateless preview must be byte-identical to what re-basing stores.
         CubeNFT.CubeData memory data = cubes.cubeData(cubeId);
         string memory stored = thumbnailRenderer.thumbnailSVG(cubeId);
-        string memory preview = thumbnailRenderer.previewThumbnailSVG(data.seed, data.slot, 42, payload);
+        string memory preview = thumbnailRenderer.previewThumbnailSVG(data.seed, data.slot, address(0xABCD), 42, payload);
         assertEq(stored, preview);
     }
 

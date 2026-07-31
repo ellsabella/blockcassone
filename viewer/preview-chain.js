@@ -13,7 +13,7 @@ const MINT_EXTERNAL_SELECTOR = '4c92acf4'; // mintExternalERC721CubeWithPayload(
 // keccak256("BLOCKCASSONE_NON_NORMIE_TONAL_BANDS_2BIT_V1") — NonNormieArt.TONAL_BANDS_2BIT_HASH_DOMAIN
 const TONAL_HASH_DOMAIN = '2424f34564746cf332e7899072209873d7b38b19d87170b49d20de18f6a251dd';
 const THUMBNAIL_RENDERER_SELECTOR = 'ad125d79'; // thumbnailRenderer()
-const PREVIEW_SELECTOR = 'f3d3c20b'; // previewThumbnailSVG(bytes32,uint32,uint256,bytes)
+const PREVIEW_SELECTOR = '7aa0522a'; // previewThumbnailSVG(bytes32,uint32,address,uint256,bytes)
 const THUMBNAIL_SVG_SELECTOR = '1df76ecc'; // thumbnailSVG(uint256)
 
 let configPromise = null;
@@ -232,8 +232,9 @@ export function setTransactionSender(fn) { txSender = fn; }
 // Send a tx + wait for the receipt. eth_sendTransaction returns a hash even when
 // the tx reverts on mine, so verify status and, on revert, replay as eth_call to
 // surface the real reason.
-async function sendTx(cfg, from, to, data, label) {
+async function sendTx(cfg, from, to, data, label, value) {
   const tx = { from, to, data };
+  if (value != null) tx.value = value; // hex quantity (e.g. '0x38d7ea4c68000'); omitted = 0
   const txHash = txSender
     ? await txSender(tx)
     : await rpcRaw(cfg, 'eth_sendTransaction', [tx]);
@@ -272,23 +273,56 @@ export async function mintNormieCubeOnChain({ slot, owner = DEV_MINT_OWNER, norm
   return { cubeOwner: owner, normieId: nid, slot: Number(slot), seed: sd };
 }
 
+// Split an eth_call result into `n` 32-byte words as BigInts.
+function decodeWords(result, n) {
+  const hex = String(result || '').replace(/^0x/, '');
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(BigInt('0x' + (hex.slice(i * 64, i * 64 + 64) || '0')));
+  return out;
+}
+const hexQuantity = (n) => '0x' + BigInt(n).toString(16); // minimal hex for tx.value
+
+// Live fee + split for a moveCube (CubeNFT.quoteMove). victim == 0x0 for a vacant
+// move or a free self-swap. All amounts are BigInt wei.
+export async function quoteMove({ cubeId, newSlot }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
+  const res = await ethCall(cfg, cfg.cubeNft, '0x70b01a20' + word(cubeId) + word(newSlot));
+  const [fee, victimWord, victimShare, houseShare] = decodeWords(res, 4);
+  return { fee, victim: '0x' + victimWord.toString(16).padStart(40, '0').slice(-40), victimShare, houseShare };
+}
+
+// Live fee + vacant-plot count for a mergeStreet (CubeNFT.quoteMerge). BigInt wei.
+export async function quoteMerge({ street }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
+  const res = await ethCall(cfg, cfg.cubeNft, '0x2130e9c3' + word(street));
+  const [fee, emptyPlots] = decodeWords(res, 2);
+  return { fee, emptyPlots };
+}
+
+// Move a cube to a vacant slot, or displace an occupant in a street you own >=5/8 of
+// (CubeNFT.moveCube is payable — the fee is quoted on-chain and sent as msg.value).
 export async function moveCube({ cubeId, owner, newSlot }) {
   const cfg = await loadConfig();
   if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
+  const { fee } = await quoteMove({ cubeId, newSlot });
   const data = '0x42ba6aa6' + word(cubeId) + word(newSlot);
-  return sendTx(cfg, owner, cfg.cubeNft, data, 'moveCube');
+  return sendTx(cfg, owner, cfg.cubeNft, data, 'moveCube', hexQuantity(fee));
 }
 
-// Merge every occupied plot of a street the caller solely owns (CubeNFT.mergeStreet).
+// Merge every occupied plot of a street the caller solely owns (CubeNFT.mergeStreet is
+// payable — free at 8/8, else baseFee per vacant plot, quoted on-chain and sent as value).
 export async function mergeStreet({ street, owner, leaderCubeId }) {
   const cfg = await loadConfig();
   if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
+  const { fee } = await quoteMerge({ street });
   // mergeStreet(uint32) auto-picks the lowest plot; mergeStreet(uint32,uint256)
   // uses the owner-chosen leader cube as the street SVG.
   const data = leaderCubeId
     ? '0x991b9e12' + word(street) + word(leaderCubeId)
     : '0x6ea3aa45' + word(street);
-  return sendTx(cfg, owner, cfg.cubeNft, data, 'mergeStreet');
+  return sendTx(cfg, owner, cfg.cubeNft, data, 'mergeStreet', hexQuantity(fee));
 }
 
 function bytesToHex(u8) {
@@ -342,15 +376,17 @@ export async function loadOwnedCubes(owner) {
     .map(r => ({ cubeId: r.cubeId, slot: r.slot, seed: r.seed, sourceTokenId: r.source?.tokenId, owner: r.wallet }));
 }
 
-// seed: 0x bytes32 (or any hex). slot/sourceTokenId: number|bigint. payload: Uint8Array(400).
-export async function previewThumbnailSVG({ seed, slot, sourceTokenId, payload }) {
+// seed: 0x bytes32 (or any hex). slot/sourceTokenId: number|bigint. sourceContract: 0x addr
+// (drives the hex banner — the re-base target's contract). payload: Uint8Array(400).
+export async function previewThumbnailSVG({ seed, slot, sourceContract, sourceTokenId, payload }) {
   const cfg = await loadConfig();
   const to = await thumbnailRendererAddress(cfg);
   const data = '0x' + PREVIEW_SELECTOR
     + seedWord(seed)
     + word(slot)
+    + addrWord(sourceContract || '0x0000000000000000000000000000000000000000')
     + word(sourceTokenId)
-    + word(128) // offset to the bytes arg (4 head words × 32)
+    + word(160) // offset to the bytes arg (5 head words × 32)
     + word(payload.length)
     + padRight32(bytesToHex(payload));
   return decodeString(await ethCall(cfg, to, data));
