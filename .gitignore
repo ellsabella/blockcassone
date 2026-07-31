@@ -16,3 +16,18 @@ allowlist-submissions.jsonl
 
 # ephemeral Share-on-X snapshot images (regenerated per share, swept on a TTL)
 shares/
+
+# generated preview / eyeball render outputs (regenerated on demand)
+data/preview-*.svg
+data/normie-raw-*.hex
+data/world-snapshot.prev.json
+data/world-snapshot.real.json
+data/agent-status-updates.json
+
+# CC0 flatten + pool-selection outputs (regenerated from source ids)
+data/cc0/
+
+# cc0-proof generated comparison pages + bundle (dev tooling outputs)
+dev/cc0-proof/cube-*.html
+dev/cc0-proof/bundle.js
+dev/cc0-proof/out/
