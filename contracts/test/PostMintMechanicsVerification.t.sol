@@ -56,6 +56,7 @@ contract PostMintMechanicsVerificationTest is Test {
         cubes.setCustomizer(address(controller));
         cubes.setMovesEnabled(true);
         cubes.setMergesEnabled(true);
+        cubes.setCustomizesEnabled(true);
         attest.setAuthorizedConsumer(address(controller));
         vm.stopPrank();
 

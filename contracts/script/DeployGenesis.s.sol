@@ -170,10 +170,10 @@ contract DeployGenesis is Script {
         vm.broadcast();
         d.genesis.setSeaDrop(address(d.cubes));
 
-        // Move + merge stay OFF at launch (both default false). The owner enables each
-        // independently AFTER the mint via setMovesEnabled / setMergesEnabled — a move or
-        // merge during the mint window could land on a slot the allocator targets and brick
-        // a mint tx, so they must not be live at deploy.
+        // Move + merge + customize all stay OFF at launch (default false). The owner enables
+        // each independently AFTER the mint via setMovesEnabled / setMergesEnabled /
+        // setCustomizesEnabled — a move/merge/customize during the mint window could interfere
+        // with the allocator or the source-claim registry, so none may be live at deploy.
     }
 
     function _report(Deployment memory d, address seaDrop) private {

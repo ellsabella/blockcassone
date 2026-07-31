@@ -514,15 +514,83 @@ contract CubeNFTTest is Test {
         cubes.moveCube(cubeId, 40);
     }
 
-    function testMoveCubeRevertsForOccupiedTarget() public {
+    function testMoveCubeRevertsForOccupiedTargetWithoutMajority() public {
+        // MINTER owns only 2 of street 0's 8 plots (slots 5, 6) — short of the 5/8
+        // majority — so moving onto an occupied slot in that street is refused.
         uint256 a = _mintCubeAt(401, 5, MINTER);
-        uint256 b = _mintCubeAt(402, 6, MINTER);
+        _mintCubeAt(402, 6, MINTER);
         vm.prank(OWNER);
         cubes.setMovesEnabled(true);
 
         vm.prank(MINTER);
-        vm.expectRevert(abi.encodeWithSelector(CubeNFT.SlotOccupied.selector, uint32(6), b));
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.NotStreetMajority.selector, uint32(6), uint256(2)));
         cubes.moveCube(a, 6);
+    }
+
+    function testMoveCubeDisplacesOccupantWhenStreetMajority() public {
+        // MINTER owns 5/8 of street 0 (slots 0..4) => dominates it. OTHER holds slot 5.
+        _mintCubeAt(410, 0, MINTER);
+        _mintCubeAt(411, 1, MINTER);
+        _mintCubeAt(412, 2, MINTER);
+        _mintCubeAt(413, 3, MINTER);
+        _mintCubeAt(414, 4, MINTER);
+        uint256 victim = _mintCubeAt(420, 5, OTHER);
+        // The mover lives in a DIFFERENT street (slot 40) so the majority count is unambiguous.
+        uint256 mover = _mintCubeAt(430, 40, MINTER);
+
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        // Two CubeMoved events: the mover into slot 5, and the displaced victim into slot 40.
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.CubeMoved(mover, 40, 5, MINTER);
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.CubeMoved(victim, 5, 40, OTHER);
+
+        vm.prank(MINTER);
+        cubes.moveCube(mover, 5);
+
+        // Slots swapped.
+        assertEq(cubes.cubeForSlot(5), mover);
+        assertEq(cubes.cubeForSlot(40), victim);
+        assertEq(cubes.cubeData(mover).slot, 5);
+        assertEq(cubes.cubeData(victim).slot, 40);
+        // Ownership is untouched by the forced swap.
+        assertEq(cubes.ownerOf(mover), MINTER);
+        assertEq(cubes.ownerOf(victim), OTHER);
+    }
+
+    function testMoveDisplacementRevertsBelowMajority() public {
+        // MINTER owns only 4/8 of street 0 — one short of the 5/8 threshold.
+        _mintCubeAt(410, 0, MINTER);
+        _mintCubeAt(411, 1, MINTER);
+        _mintCubeAt(412, 2, MINTER);
+        _mintCubeAt(413, 3, MINTER);
+        _mintCubeAt(420, 5, OTHER);
+        uint256 mover = _mintCubeAt(430, 40, MINTER);
+
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.NotStreetMajority.selector, uint32(5), uint256(4)));
+        cubes.moveCube(mover, 5);
+    }
+
+    function testCannotDisplaceMergedStreet() public {
+        // Merge street 1 (slots 8..15) into an anchored street token, then try to land on it.
+        // The merged-street guard fires BEFORE the majority check, so no majority can override it.
+        _mintCubeAt(450, 8, MINTER);
+        vm.prank(MINTER);
+        uint256 streetId = cubes.mergeStreet(1);
+
+        uint256 mover = _mintCubeAt(430, 40, OTHER);
+        vm.prank(OWNER);
+        cubes.setMovesEnabled(true);
+
+        vm.prank(OTHER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.CannotDisplaceStreet.selector, streetId));
+        cubes.moveCube(mover, 8);
     }
 
     function testMoveCubeRevertsForOutOfRangeSlot() public {
@@ -612,5 +680,59 @@ contract CubeNFTTest is Test {
         vm.stopPrank();
         assertFalse(cubes.movesEnabled());
         assertTrue(cubes.mergesEnabled());
+    }
+
+    // ---- Customize off-switch (independent of moves + merges) --------------------
+    function testCustomizesDisabledByDefault() public view {
+        assertFalse(cubes.customizesEnabled());
+    }
+
+    function testSetCustomizesEnabledOnlyOwner() public {
+        vm.prank(OTHER);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, OTHER));
+        cubes.setCustomizesEnabled(true);
+    }
+
+    function testSetCustomizesEnabledEmitsEvent() public {
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.CustomizesEnabledUpdated(true);
+        vm.prank(OWNER);
+        cubes.setCustomizesEnabled(true);
+    }
+
+    function testCustomizeCubeSourceRevertsWhenDisabled() public {
+        // customizesEnabled defaults false, so the customizer path is gated even when set.
+        uint256 cubeId = _mintCubeAt(401, 5, MINTER);
+        vm.prank(OWNER);
+        cubes.setCustomizer(address(this));
+
+        vm.expectRevert(CubeNFT.CustomizesDisabled.selector);
+        cubes.customizeCubeSource(cubeId, address(0xABCD), 42, 1);
+    }
+
+    function testAllThreeMechanicSwitchesAreIndependent() public {
+        // Each of moves / merges / customizes toggles without disturbing the others.
+        vm.startPrank(OWNER);
+        cubes.setMovesEnabled(true);
+        cubes.setMergesEnabled(false);
+        cubes.setCustomizesEnabled(false);
+        vm.stopPrank();
+        assertTrue(cubes.movesEnabled());
+        assertFalse(cubes.mergesEnabled());
+        assertFalse(cubes.customizesEnabled());
+
+        vm.prank(OWNER);
+        cubes.setCustomizesEnabled(true);
+        assertTrue(cubes.movesEnabled());
+        assertFalse(cubes.mergesEnabled());
+        assertTrue(cubes.customizesEnabled());
+
+        vm.startPrank(OWNER);
+        cubes.setMovesEnabled(false);
+        cubes.setMergesEnabled(true);
+        vm.stopPrank();
+        assertFalse(cubes.movesEnabled());
+        assertTrue(cubes.mergesEnabled());
+        assertTrue(cubes.customizesEnabled()); // untouched by the move/merge flips
     }
 }

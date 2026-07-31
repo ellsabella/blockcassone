@@ -65,7 +65,8 @@ contract CubeRendererV2Test is Test {
 
         vm.startPrank(OWNER);
         cubes.setRenderer(address(renderer));
-        cubes.setMergesEnabled(true); // merge tests below need the gate open
+        cubes.setMergesEnabled(true);      // merge tests below need the gate open
+        cubes.setCustomizesEnabled(true);  // customize tests below need the gate open
         vm.stopPrank();
     }
 

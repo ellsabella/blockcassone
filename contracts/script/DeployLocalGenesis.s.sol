@@ -262,12 +262,14 @@ contract DeployLocalGenesis is Script {
         vm.broadcast();
         d.cubes.updateAllowedSeaDrop(allowed);
 
-        // Local/dev only: enable both mechanics so the dev viewer can exercise move + merge.
-        // (Production DeployGenesis leaves both OFF — owner-enabled post-mint.)
+        // Local/dev only: enable all post-mint mechanics so the dev viewer can exercise
+        // move + merge + customize. (Production DeployGenesis leaves them OFF — owner-enabled.)
         vm.broadcast();
         d.cubes.setMovesEnabled(true);
         vm.broadcast();
         d.cubes.setMergesEnabled(true);
+        vm.broadcast();
+        d.cubes.setCustomizesEnabled(true);
     }
 
     // Deploy the 5 CC0 source mocks + the multi-source genesis minter registering them
