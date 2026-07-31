@@ -340,6 +340,50 @@ contract MultiSourceGenesisMinterTest is Test {
         assertEq(g.reservationRemaining(ALICE), 0);
     }
 
+    function testReleaseReturnsUnmintedToPool() public {
+        (MultiSourceGenesisMinter g, CubeNFT cubes,) = _reservedWorld();
+        // ALICE never minted her reserved Runner 200 — release it back to the pool.
+        address[] memory w = new address[](1); w[0] = ALICE;
+        vm.prank(OWNER);
+        g.releaseReservations(w);
+        assertEq(g.reservedCount(1), 0, "reserved count cleared");
+        assertEq(g.poolRemaining(1), 5, "runner pool fully restored");
+        assertEq(g.reservationRemaining(ALICE), 0, "no reservations left");
+
+        // 200 is now drawable: drain the whole supply and confirm it appears + full sellout.
+        bool saw200;
+        for (uint256 i = 0; i < 16; i++) {
+            vm.prank(SEADROP);
+            uint256[] memory ids = g.mintSeaDrop(address(uint160(5000 + i)), 1);
+            CubeNFT.CubeData memory d = cubes.cubeData(ids[0]);
+            if (d.sourceContract == address(runners) && d.sourceTokenId == 200) saw200 = true;
+        }
+        assertTrue(saw200, "released source is drawable");
+        assertEq(g.mintedCount(), 16, "full sellout, nothing stranded");
+    }
+
+    function testReleaseSkipsAlreadyMinted() public {
+        (MultiSourceGenesisMinter g,,) = _reservedWorld();
+        vm.prank(SEADROP);
+        g.mintSeaDrop(ALICE, 1); // ALICE mints her reservation
+        assertEq(g.reservationRemaining(ALICE), 0);
+        uint256 poolBefore = g.poolRemaining(1);
+        address[] memory w = new address[](1); w[0] = ALICE;
+        vm.prank(OWNER);
+        g.releaseReservations(w); // no-op: nothing unminted
+        assertEq(g.poolRemaining(1), poolBefore, "no double-return of a minted reservation");
+    }
+
+    function testReleaseRevertsDuringAllowlistPhase() public {
+        (MultiSourceGenesisMinter g,,) = _reservedWorld();
+        vm.prank(OWNER);
+        g.setPhase(GenesisMinterBase.Phase.Allowlist);
+        address[] memory w = new address[](1); w[0] = ALICE;
+        vm.prank(OWNER);
+        vm.expectRevert(MultiSourceGenesisMinter.CannotReleaseDuringAllowlist.selector);
+        g.releaseReservations(w);
+    }
+
     function testReserveRejectsUncommittedStoredSource() public {
         (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3);
         uint256[] memory rp = new uint256[](5);

@@ -293,6 +293,14 @@ abstract contract GenesisMinterBase is Ownable {
         _removeFromPublicPool(normieId);
     }
 
+    /// @dev Return a released reservation's Normie to the public snapshot draw
+    ///      (idempotent — no-op if already pooled). Mirrors addSnapshotNormies' push.
+    function _addToPublicPool(uint256 normieId) internal {
+        if (publicIndexPlusOne[normieId] != 0) return;
+        _publicNormies.push(normieId);
+        publicIndexPlusOne[normieId] = _publicNormies.length;
+    }
+
     /// @dev GTD reservation seams. Default: no reservations (single-collection base).
     ///      The multi-source engine overrides these with its wallet→chosen-source map.
     function _reservationsRemaining(address) internal view virtual returns (uint256) {
