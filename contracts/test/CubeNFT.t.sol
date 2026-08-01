@@ -383,18 +383,20 @@ contract CubeNFTTest is Test {
     }
 
     function testMergeStreetBurnsPlotsAndMintsStreetToken() public {
-        // Street 0 = slots 0..7. Occupy 0, 1, 2 with MINTER-owned cubes.
+        // Street 0 = slots 0..7. Fill 0..4 (>= MERGE_MIN_FILLED) with MINTER-owned cubes.
         uint256 c0 = _mintCubeAt(301, 0, MINTER);
         uint256 c1 = _mintCubeAt(302, 1, MINTER);
         uint256 c2 = _mintCubeAt(303, 2, MINTER);
+        _mintCubeAt(304, 3, MINTER);
+        _mintCubeAt(305, 4, MINTER);
 
         vm.expectEmit(true, true, true, true, address(cubes));
-        emit CubeNFT.StreetMerged(4, MINTER, 0, 3);
+        emit CubeNFT.StreetMerged(6, MINTER, 0, 5);
 
         vm.prank(MINTER);
         uint256 streetId = cubes.mergeStreet(0);
 
-        assertEq(streetId, 4); // next id after the 3 cubes
+        assertEq(streetId, 6); // next id after the 5 cubes
         assertEq(cubes.ownerOf(streetId), MINTER);
 
         // Plot cubes are burned.
@@ -418,11 +420,11 @@ contract CubeNFTTest is Test {
 
         (uint32 street, uint8 occ, uint256[8] memory plots) = cubes.streetPlots(streetId);
         assertEq(street, 0);
-        assertEq(occ, 3);
+        assertEq(occ, 5);
         assertEq(plots[0], c0);
         assertEq(plots[1], c1);
         assertEq(plots[2], c2);
-        assertEq(plots[3], 0);
+        assertEq(plots[5], 0); // slots 5..7 stay vacant — merged with the street
 
         // Burned plot data is retained for rendering.
         CubeNFT.CubeData memory pd = cubes.cubeDataUnchecked(c2);
@@ -446,7 +448,7 @@ contract CubeNFTTest is Test {
     }
 
     function testMergeStreetRevertsIfAlreadyMerged() public {
-        _mintCubeAt(301, 0, MINTER);
+        for (uint256 i = 0; i < 5; i++) _mintCubeAt(301 + i, uint32(i), MINTER);
         vm.prank(MINTER);
         cubes.mergeStreet(0);
 
@@ -455,10 +457,21 @@ contract CubeNFTTest is Test {
         cubes.mergeStreet(0);
     }
 
+    function testMergeStreetRevertsBelowMinFilled() public {
+        // Sole owner but only 4 filled — a near-empty street can't mint a golden cube.
+        for (uint256 i = 0; i < 4; i++) _mintCubeAt(301 + i, uint32(i), MINTER);
+        vm.prank(MINTER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.NotEnoughFilled.selector, uint32(0), uint256(4)));
+        cubes.mergeStreet(0);
+    }
+
     function testMergeStreetLeaderIsLowestOccupiedPlot() public {
-        // Slot 0 vacant; occupy 1 then 3 -> leader is the slot-1 cube.
+        // Slot 0 vacant; fill 1..5 -> leader is the slot-1 cube.
         uint256 c1 = _mintCubeAt(302, 1, MINTER);
+        _mintCubeAt(303, 2, MINTER);
         _mintCubeAt(304, 3, MINTER);
+        _mintCubeAt(305, 4, MINTER);
+        _mintCubeAt(306, 5, MINTER);
 
         vm.prank(MINTER);
         uint256 streetId = cubes.mergeStreet(0);
@@ -468,7 +481,7 @@ contract CubeNFTTest is Test {
         assertEq(sd.sourceTokenId, 302);
 
         (, uint8 occ, uint256[8] memory plots) = cubes.streetPlots(streetId);
-        assertEq(occ, 2);
+        assertEq(occ, 5);
         assertEq(plots[0], 0);
         assertEq(plots[1], c1);
     }
@@ -585,7 +598,7 @@ contract CubeNFTTest is Test {
     function testCannotDisplaceMergedStreet() public {
         // Merge street 1 (slots 8..15) into an anchored street token, then try to land on it.
         // The merged-street guard fires BEFORE the majority check, so no majority can override it.
-        _mintCubeAt(450, 8, MINTER);
+        for (uint256 i = 0; i < 5; i++) _mintCubeAt(450 + i, uint32(8 + i), MINTER);
         vm.prank(MINTER);
         uint256 streetId = cubes.mergeStreet(1);
 
@@ -609,7 +622,7 @@ contract CubeNFTTest is Test {
     }
 
     function testCannotMoveMergedStreet() public {
-        _mintCubeAt(401, 0, MINTER); // street 0
+        for (uint256 i = 0; i < 5; i++) _mintCubeAt(401 + i, uint32(i), MINTER); // street 0
         vm.prank(MINTER);
         uint256 streetId = cubes.mergeStreet(0);
 
@@ -758,10 +771,11 @@ contract CubeNFTTest is Test {
 
     function testMergeEmitsMetadataUpdate() public {
         uint256 c = _mintCubeAt(301, 0, MINTER); // first cube => id 1
+        for (uint256 i = 1; i < 5; i++) _mintCubeAt(301 + i, uint32(i), MINTER); // fill to 5
         vm.expectEmit(true, true, true, true, address(cubes));
-        emit CubeNFT.MetadataUpdate(c + 1); // street token is the next id
+        emit CubeNFT.MetadataUpdate(c + 5); // street token is the next id after 5 cubes
         vm.prank(MINTER);
         uint256 streetId = cubes.mergeStreet(0);
-        assertEq(streetId, c + 1);
+        assertEq(streetId, c + 5);
     }
 }

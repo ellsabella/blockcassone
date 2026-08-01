@@ -108,21 +108,19 @@ contract CubeFeesTest is Test {
     }
 
     function testMergeWithVacantPlotsChargesPerPlot() public {
-        _mint(100, 0, MINTER);
-        _mint(101, 1, MINTER);
-        _mint(102, 2, MINTER); // 3 occupied, 5 vacant
+        for (uint256 k = 0; k < 5; k++) _mint(100 + k, uint32(k), MINTER); // 5 occupied, 3 vacant
         (uint256 fee, uint256 empties) = cubes.quoteMerge(0);
-        assertEq(empties, 5);
-        assertEq(fee, 5 * BASE);
+        assertEq(empties, 3);
+        assertEq(fee, 3 * BASE);
         vm.prank(MINTER);
         cubes.mergeStreet{value: fee}(0);
-        assertEq(cubes.houseBalance(), 5 * BASE);
+        assertEq(cubes.houseBalance(), 3 * BASE);
     }
 
     function testMergeUnderpayReverts() public {
-        _mint(100, 0, MINTER); // 1 occupied, 7 vacant -> 7*BASE
+        for (uint256 k = 0; k < 5; k++) _mint(100 + k, uint32(k), MINTER); // 5 occupied, 3 vacant -> 3*BASE
         vm.prank(MINTER);
-        vm.expectRevert(abi.encodeWithSelector(CubeNFT.InsufficientFee.selector, 7 * BASE, 0));
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.InsufficientFee.selector, 3 * BASE, 0));
         cubes.mergeStreet{value: 0}(0);
     }
 

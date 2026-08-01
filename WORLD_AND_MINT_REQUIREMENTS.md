@@ -293,8 +293,11 @@ is out of scope for now). Merge *is* the burn mechanism; there is no standalone
 "destroy one cube."
 
 **Eligibility.** `mergeStreet` requires the caller to **solely own every occupied
-plot** of the street (vacant plots are fine). Majority (≥5/8) does not by itself
-permit a merge — it grants the right to **displace** the minority holders first
+plot** of the street **and hold ≥5 filled plots** (`MERGE_MIN_FILLED`). Vacant plots
+are fine — you merge *with* them (they lock into the street), you don't fill them —
+but a near-empty street can't mint a golden cube (fewer than 5 filled reverts).
+Majority (≥5/8) does not by itself permit a merge — it grants the right to
+**displace** the minority holders first
 (see Displacement above): you evict each other-wallet cube via a paid swap until you
 hold every occupied plot, **then** merge. This two-step model (displace, then merge)
 keeps merge simple and avoids unbounded cascades, and still works in a sold-out

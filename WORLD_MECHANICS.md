@@ -111,7 +111,11 @@ merged street. Built in `CubeRendererV2._attributesJSON`.
 ## 4. Merge (8 → 1)
 
 `CubeNFT.mergeStreet(uint32 street) payable` — a wallet that **solely owns every
-occupied plot** of a street merges it into one **street token**.
+occupied plot** of a street, **and holds ≥ `MERGE_MIN_FILLED` (5) filled plots**,
+merges it into one **street token**. You merge *with* the vacant plots — they lock
+into the street, you don't fill them — but fewer than 5 filled reverts
+`NotEnoughFilled` (no golden cube from a near-empty street). Rivals must be
+displaced out first (sole-occupier requirement).
 
 **Fee:** free when you own the whole street (8/8); otherwise `baseFee` per vacant
 plot locked up (`quoteMerge` returns it). In a sold-out world nearly every merge

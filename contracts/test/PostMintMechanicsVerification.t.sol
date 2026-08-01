@@ -107,21 +107,24 @@ contract PostMintMechanicsVerificationTest is Test {
     // ---- Merge -------------------------------------------------------------
 
     function testMergePopulationExcludesAPlotMovedOutOfTheStreet() public {
-        // Street 0 = slots 0..7. Occupy 0, 1, 2 (all ALICE-owned).
+        // Street 0 = slots 0..7. Fill 0..5 (all ALICE-owned).
         uint256 c0 = _mintNormieAt(ALICE, 601, 0);
         uint256 c1 = _mintNormieAt(ALICE, 602, 1);
         uint256 c2 = _mintNormieAt(ALICE, 603, 2);
+        _mintNormieAt(ALICE, 604, 3);
+        _mintNormieAt(ALICE, 605, 4);
+        _mintNormieAt(ALICE, 606, 5);
 
-        // Move the slot-2 cube out to street 5 (slot 40) before merging.
+        // Move the slot-2 cube out to street 5 (slot 40) before merging -> 5 remain on street 0.
         vm.prank(ALICE);
         cubes.moveCube(c2, 40);
 
         vm.prank(ALICE);
         uint256 streetId = cubes.mergeStreet(0);
 
-        // Only the two cubes still on street 0 are merged into it.
+        // Only the cubes still on street 0 are merged into it.
         (, uint8 occ, uint256[8] memory plots) = cubes.streetPlots(streetId);
-        assertEq(occ, 2);
+        assertEq(occ, 5);
         assertEq(plots[0], c0);
         assertEq(plots[1], c1);
         assertEq(plots[2], 0); // the moved-away plot is vacant
@@ -180,8 +183,11 @@ contract PostMintMechanicsVerificationTest is Test {
     }
 
     function testCustomizedCubeCanBeMergedAndRetainsItsStoreArt() public {
-        uint256 c0 = _mintNormieAt(ALICE, 801, 0);
+        _mintNormieAt(ALICE, 801, 0);
         uint256 c1 = _mintNormieAt(ALICE, 802, 1);
+        _mintNormieAt(ALICE, 803, 2);
+        _mintNormieAt(ALICE, 804, 3);
+        _mintNormieAt(ALICE, 805, 4);
 
         bytes memory payload = _payload(0x77);
         _customize(c1, ALICE, address(externalNft), 3, payload, 1);
@@ -190,7 +196,7 @@ contract PostMintMechanicsVerificationTest is Test {
         uint256 streetId = cubes.mergeStreet(0);
 
         (, uint8 occ,) = cubes.streetPlots(streetId);
-        assertEq(occ, 2);
+        assertEq(occ, 5);
         assertEq(cubes.cubeData(streetId).sourceKind, cubes.SOURCE_KIND_MERGED_STREET());
 
         // The customized plot is burned but its data + store art are retained so the
@@ -199,7 +205,6 @@ contract PostMintMechanicsVerificationTest is Test {
         assertEq(pd.sourceKind, cubes.SOURCE_KIND_EXTERNAL_ERC721());
         assertEq(pd.sourceContract, address(externalNft));
         assertEq(artStore.payloadForCube(c1), payload);
-        c0; // silence
     }
 
     // ---- helpers -----------------------------------------------------------

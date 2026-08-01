@@ -147,6 +147,11 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     // at least this many of the 8 plots — a majority — which force-swaps the occupant out.
     uint256 public constant STREET_MOVE_MAJORITY = 5;
 
+    // A street needs at least this many FILLED plots (all the caller's) to merge. You merge
+    // WITH any vacant plots — you don't fill them — but you can't mint a street token from a
+    // near-empty street. Rivals must be displaced out first (sole occupier required).
+    uint256 public constant MERGE_MIN_FILLED = 5;
+
     // ---- Fee / displacement economics (see FEES_AND_DISPLACEMENT_SPEC.md) -----
     // Flat base fee: move-to-empty and per-empty-plot merge (both to the house), and the
     // base term of a displacement fee (paid to the displaced owner).
@@ -525,6 +530,7 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     mapping(uint256 streetTokenId => StreetInfo) private _streetInfo;
 
     error EmptyStreet(uint32 street);
+    error NotEnoughFilled(uint32 street, uint256 occupied);
     error NotStreetOwner(uint32 street, uint256 cubeId);
     error StreetAlreadyMerged(uint32 street);
     error InvalidLeader(uint32 street, uint256 cubeId);
@@ -592,6 +598,7 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
             occ++;
         }
         if (occ == 0) revert EmptyStreet(street);
+        if (occ < MERGE_MIN_FILLED) revert NotEnoughFilled(street, occ); // merge with vacants OK, but >= 5 filled
         // An explicit leader must be one of this street's occupied plots.
         if (requestedLeader != 0) {
             if (!leaderFound) revert InvalidLeader(street, requestedLeader);

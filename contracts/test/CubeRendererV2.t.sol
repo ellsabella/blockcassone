@@ -234,16 +234,22 @@ contract CubeRendererV2Test is Test {
         bytes memory raw2 = new bytes(64);
         raw2[0] = hex"40";
         normies.mint(MINTER, 6723, raw2);
+        normies.mint(MINTER, 6724, raw2);
+        normies.mint(MINTER, 6725, raw2);
+        normies.mint(MINTER, 6726, raw2);
 
-        // Street 0 = slots 0,1; occupy both, then merge.
+        // Street 0 = slots 0..4; fill 5 (>= MERGE_MIN_FILLED), then merge.
         vm.startPrank(MINTER);
         cubes.mintNormieCube(6722, 0, bytes32("seed-a"));
         cubes.mintNormieCube(6723, 1, bytes32("seed-b"));
+        cubes.mintNormieCube(6724, 2, bytes32("seed-c"));
+        cubes.mintNormieCube(6725, 3, bytes32("seed-d"));
+        cubes.mintNormieCube(6726, 4, bytes32("seed-e"));
         uint256 streetId = cubes.mergeStreet(0);
         vm.stopPrank();
 
         string memory json = renderer.metadataJSON(streetId);
-        assertTrue(_contains(json, '"trait_type":"Population","value":"2"'));
+        assertTrue(_contains(json, '"trait_type":"Population","value":"5"'));
         assertTrue(_contains(json, '"trait_type":"Merged","value":"Y"'));
         assertTrue(_contains(json, '"trait_type":"Source Kind","value":"Merged Street"'));
         assertTrue(_contains(json, '"trait_type":"street","value":"0"'));
@@ -255,17 +261,23 @@ contract CubeRendererV2Test is Test {
         bytes memory raw2 = new bytes(64);
         raw2[0] = hex"40";
         normies.mint(MINTER, 6723, raw2);
+        normies.mint(MINTER, 6724, raw2);
+        normies.mint(MINTER, 6725, raw2);
+        normies.mint(MINTER, 6726, raw2);
 
         vm.startPrank(MINTER);
         cubes.mintNormieCube(6722, 0, bytes32("seed-a"));
         cubes.mintNormieCube(6723, 1, bytes32("seed-b"));
+        cubes.mintNormieCube(6724, 2, bytes32("seed-c"));
+        cubes.mintNormieCube(6725, 3, bytes32("seed-d"));
+        cubes.mintNormieCube(6726, 4, bytes32("seed-e"));
         uint256 streetId = cubes.mergeStreet(0);
         vm.stopPrank();
 
         string memory html = renderer.animationHTML(streetId);
         assertTrue(_contains(html, "kind:'street'"));
         assertTrue(_contains(html, "street:0"));
-        assertTrue(_contains(html, "population:2"));
+        assertTrue(_contains(html, "population:5"));
         assertTrue(_contains(html, "plots:["));
         assertTrue(_contains(html, "occupied:true"));
         assertTrue(_contains(html, "occupied:false")); // slots 2..7 are vacant
