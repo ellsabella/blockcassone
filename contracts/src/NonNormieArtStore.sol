@@ -204,6 +204,15 @@ contract NonNormieArtStore is Ownable {
         return _sourceLoc[sourceKey(sourceContract, sourceTokenId)].length;
     }
 
+    /// @notice The committed pool payload for a source (contract, tokenId) — lets the client
+    ///         preview an as-yet-unminted pool source (the "spin the wheel" re-base). Empty
+    ///         bytes if the source has no committed payload.
+    function sourcePayload(address sourceContract, uint256 sourceTokenId) external view returns (bytes memory) {
+        SourceLoc memory loc = _sourceLoc[sourceKey(sourceContract, sourceTokenId)];
+        if (loc.blob == address(0)) return "";
+        return SSTORE2.read(loc.blob, loc.offset, loc.length);
+    }
+
     // ---- Reads (per-cube override first, then the source-keyed pool) ---------
 
     function _resolveBytes(uint256 cubeId) private view returns (bytes memory data, bool found) {

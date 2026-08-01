@@ -10,6 +10,7 @@ import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
 import {
   previewThumbnailSVG, cubeThumbnailSVG, cubeAnimationURI, loadOwnedCubes,
   customizeCube, rebaseToPoolSource, contractFlags, setTransactionSender,
+  poolSources, poolSourcePayload,
 } from './preview-chain.js';
 import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js';
 
@@ -102,11 +103,27 @@ async function fetchProposed2D() {
   } catch (e) { if (state.proposal === p) { state.proposedSvg = note('preview unavailable', msg(e)); paint2D(); } }
 }
 
-function spin() {
-  // TODO(pool): needs an on-chain enumerator of UNUSED committed CC0/Normie pool sources +
-  // a client reader for their 400-byte tonal payloads (to preview via previewThumbnailSVG),
-  // then commit via rebaseToPoolSource (already wired). Not available yet.
-  toast('CC0 spin needs the on-chain pool index — wiring it next', true);
+async function spin() {
+  const c = state.cube; if (!c) return;
+  toast('spinning…');
+  try {
+    const sources = await poolSources();
+    if (!sources.length) { toast('no CC0 pool art committed on this deploy yet', true); return; }
+    // Pick a random source, avoiding an immediate repeat of the current proposal.
+    let pick, tries = 0;
+    do { pick = sources[(Math.random() * sources.length) | 0]; tries++; }
+    while (state.proposal && state.proposal.kind === 'cc0'
+      && state.proposal.sourceContract === pick.sourceContract
+      && String(state.proposal.sourceTokenId) === String(pick.sourceTokenId)
+      && tries < 6 && sources.length > 1);
+    const payload = await poolSourcePayload(pick);
+    if (!payload || !payload.length) { toast('that source has no art — spin again', true); return; }
+    state.proposal = { kind: 'cc0', sourceContract: pick.sourceContract, sourceTokenId: pick.sourceTokenId,
+      payload, label: 'CC0 ' + short(pick.sourceContract) + ' #' + pick.sourceTokenId };
+    state.proposedSvg = null; state.holding = false;
+    render();
+    fetchProposed2D();
+  } catch (e) { toast('spin failed: ' + msg(e), true); }
 }
 
 function discard() { state.proposal = null; state.holding = false; render(); }
@@ -134,10 +151,11 @@ async function commit() {
 function render() {
   renderStrip();
   const proposing = !!state.proposal, proposed = proposing && !state.holding;
+  const proposed3d = proposed && !!state.proposal.art; // only wallet proposals render 3D pre-commit
   els.pane2d.classList.toggle('proposed', proposed);
-  els.pane3d.classList.toggle('proposed', proposed);
+  els.pane3d.classList.toggle('proposed', proposed3d);
   els.tag2d.textContent = proposed ? '2D · PREVIEW' : (state.holding ? '2D · current' : '2D · thumbnail');
-  els.tag3d.textContent = proposed ? '3D · PREVIEW' : (state.holding ? '3D · current' : '3D · live');
+  els.tag3d.textContent = proposed3d ? '3D · PREVIEW' : (state.holding ? '3D · current' : '3D · live');
   els.previewbar.classList.toggle('on', proposing);
   if (proposing) {
     els.pvtext.textContent = state.holding ? 'Showing current — release to preview' : 'Proposed art · unsaved';
@@ -167,7 +185,13 @@ function paint3D() {
     els.art3d.dataset.key = key;
     return;
   }
-  // Otherwise (current cube, held, or a CC0 proposal) → the cube's real on-chain animation.
+  // CC0 proposal has no off-chain art URL to preview in 3D pre-commit; the 2D is exact.
+  if (proposed && !state.proposal.art) {
+    els.art3d.innerHTML = note('3D updates after you commit', '2D preview is exact');
+    els.art3d.dataset.key = 'cc0';
+    return;
+  }
+  // Otherwise (current cube, or held) → the cube's real on-chain animation.
   if (state.cube && state.currentAnim) {
     const key = 'c|' + state.cube.cubeId;
     if (els.art3d.dataset.key === key) return;
@@ -261,6 +285,7 @@ function wireStatic() {
 
 // ---------- helpers ----------
 function requireCube() { if (!state.cube) { toast('select a cube first', true); return false; } return true; }
+function short(a) { const s = String(a || ''); return s.length > 10 ? s.slice(0, 6) + '…' + s.slice(-4) : s; }
 function note(main, sub) { return `<div class="note">${esc(main)}${sub ? '<br><small>' + esc(sub) + '</small>' : ''}</div>`; }
 function setBusy(b) { const u = $('update'); if (u) { u.disabled = b; u.textContent = b ? 'Updating…' : 'Update art on-chain →'; } }
 let toastT;

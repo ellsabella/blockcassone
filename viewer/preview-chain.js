@@ -424,3 +424,59 @@ export async function rebaseToPoolSource({ cubeId, owner, sourceContract, source
   const data = '0x8cd6cfbb' + word(cubeId) + addrWord(sourceContract) + word(sourceTokenId);
   return sendTx(cfg, owner, cfg.cubeNft, data, 'rebaseToPoolSource');
 }
+
+// ---- CC0 pool ("spin the wheel") ------------------------------------------
+// The committed pool = every source with art in the NonNormieArtStore. We enumerate via its
+// SourcePayloadRecorded logs, read a chosen source's 400-byte payload with the store's
+// sourcePayload view (preview via previewThumbnailSVG), and commit with rebaseToPoolSource.
+// Uniqueness is enforced on-chain (a taken source reverts on commit), so we just re-spin.
+let _artStoreAddr = null, _poolCache = null;
+
+async function rpcNode(cfg, method, params) {
+  const endpoint = cfg.directRpc ? (cfg.rpcUrl || 'http://127.0.0.1:8545') : '/api/chain-rpc';
+  const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const j = await res.json();
+  if (j.error) throw new Error(j.error.message || (method + ' error'));
+  return j.result;
+}
+
+async function artStoreAddress(cfg) {
+  if (_artStoreAddr) return _artStoreAddr;
+  if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
+  const ret = await ethCall(cfg, cfg.cubeNft, '0x960acdbe'); // artStore()
+  const addr = '0x' + String(ret).replace(/^0x/, '').slice(-40);
+  if (/^0x0+$/.test(addr)) throw new Error('token has no art store set');
+  return (_artStoreAddr = addr);
+}
+
+// [{ sourceContract, sourceTokenId }] for every committed pool source. Cached.
+export async function poolSources() {
+  if (_poolCache) return _poolCache;
+  const cfg = await loadConfig();
+  const store = await artStoreAddress(cfg);
+  const logs = await rpcNode(cfg, 'eth_getLogs', [{
+    address: store, fromBlock: 'earliest', toBlock: 'latest',
+    topics: ['0x3b28c236850773c4634072ae961ae2ed0d5584bbba4daecd414cd6f2d6a45445'], // SourcePayloadRecorded
+  }]);
+  const seen = new Set(), out = [];
+  for (const lg of (logs || [])) {
+    const t = lg.topics || []; if (t.length < 3) continue;
+    const sourceContract = '0x' + String(t[1]).replace(/^0x/, '').slice(-40);
+    const sourceTokenId = BigInt(t[2]).toString();
+    const k = sourceContract + ':' + sourceTokenId;
+    if (!seen.has(k)) { seen.add(k); out.push({ sourceContract, sourceTokenId }); }
+  }
+  return (_poolCache = out);
+}
+
+// The committed 400-byte tonal payload of a pool source (Uint8Array; empty if none).
+export async function poolSourcePayload({ sourceContract, sourceTokenId }) {
+  const cfg = await loadConfig();
+  const store = await artStoreAddress(cfg);
+  const ret = await ethCall(cfg, store, '0xea4468b9' + addrWord(sourceContract) + word(sourceTokenId));
+  const hex = String(ret || '').replace(/^0x/, '');
+  if (hex.length < 128) return new Uint8Array(0);
+  const len = Number(BigInt('0x' + hex.slice(64, 128)));
+  return hexToBytes('0x' + hex.slice(128, 128 + len * 2));
+}
