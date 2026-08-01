@@ -360,6 +360,15 @@ export async function cubeThumbnailSVG(cubeId) {
   return decodeString(await ethCall(cfg, cfg.renderer, '0x' + THUMBNAIL_SVG_SELECTOR + word(cubeId)));
 }
 
+// The cube's full on-chain animation (data:text/html;base64 …) — the real 3D that any cube
+// renders to marketplaces, self-contained. In dev without RendererAssetStore chunks the
+// contract returns its own "asset chunks not installed" fallback screen (honest, not blank).
+export async function cubeAnimationURI(cubeId) {
+  const cfg = await loadConfig();
+  if (!cfg.renderer) throw new Error('chain-config.json has no "renderer" address');
+  return decodeString(await ethCall(cfg, cfg.renderer, '0x5209ec17' + word(cubeId)));
+}
+
 // Cubes minted on the local chain. For dev, optionally filter by owner; the
 // returned cubes are the candidate targets to overwrite (cubeId + seed + slot).
 export async function loadOwnedCubes(owner) {
@@ -390,4 +399,28 @@ export async function previewThumbnailSVG({ seed, slot, sourceContract, sourceTo
     + word(payload.length)
     + padRight32(bytesToHex(payload));
   return decodeString(await ethCall(cfg, to, data));
+}
+
+// The three post-mint mechanic switches (owner-flipped on-chain). The Update page hides
+// itself + its nav links when customizesEnabled is false; Streets/move use the others.
+export async function contractFlags() {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft) return { customizesEnabled: false, movesEnabled: false, mergesEnabled: false };
+  const read = async (sel) => {
+    try { return Boolean(BigInt(await ethCall(cfg, cfg.cubeNft, '0x' + sel) || '0x0')); }
+    catch { return false; }
+  };
+  const [customizesEnabled, movesEnabled, mergesEnabled] = await Promise.all([
+    read('c303b017'), read('bd593a6e'), read('41943a98'),
+  ]);
+  return { customizesEnabled, movesEnabled, mergesEnabled };
+}
+
+// Attestation-free re-base onto an UNUSED pool source (a Normie's live art, or a CC0 token
+// whose flattened payload is committed to the store). Not payable. CubeNFT.rebaseToPoolSource.
+export async function rebaseToPoolSource({ cubeId, owner, sourceContract, sourceTokenId }) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft) throw new Error('chain-config.json has no "cubeNft"');
+  const data = '0x8cd6cfbb' + word(cubeId) + addrWord(sourceContract) + word(sourceTokenId);
+  return sendTx(cfg, owner, cfg.cubeNft, data, 'rebaseToPoolSource');
 }
