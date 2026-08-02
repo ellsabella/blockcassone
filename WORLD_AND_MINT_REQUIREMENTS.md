@@ -19,72 +19,118 @@ The project has two linked surfaces:
 The offchain website may use OpenSea, indexers, proxies, and richer rendering.
 The individual token must not depend on those systems after mint.
 
-The project home should ultimately have two tabs:
+Minting itself happens on **OpenSea via SeaDrop** (see Mint Model). Our offchain
+surfaces are:
 
-- **Current Block**: indexed view of the minted 4096-cube world, with wallet
-  focus, whole-block exploration, current owner lookup, and cube detail panels.
-- **Update Cube**: owner flow for validating cube ownership, loading allowable
-  owned/CC0 assets, picking an update source, and submitting onchain update
-  payloads.
+- **Allowlist landing page** (pre-mint): wallet connect + delegation, reads a
+  wallet's qualifying source assets, captures a signed ownership attestation and
+  — for guaranteed spots — the holder's chosen artworks; feeds the allowlist +
+  artwork-reservation bake.
+- **Big Cube explorer** ("Current Block"): indexed view of the minted world —
+  wallet focus, whole-block exploration, current-owner lookup, cube detail. No
+  mint controls.
+- **Update Cube** (post-mint): owner flow to re-base a cube's art (owned assets
+  or the unused CC0/Normie pool — "spin the wheel"), move, and merge.
 
-The dev viewer has an intermediate contract-read mode for the Current Block
-tab. When `data/chain-config.json` is enabled, it reads `CubeNFT` state through
-JSON-RPC and uses that as the minted-cube source. When disabled, it falls back
-to `viewer/data/dev-mints.json`. This does not replace the eventual indexer,
-but it proves the viewer can be driven by contract state.
+The explorer reads minted state from the indexer snapshot
+(`data/world-snapshot.json`) / direct `CubeNFT` JSON-RPC. The indexer is a read
+cache only — never required for token validity or renderer correctness.
+Production copyright policy is CC0-clean: only the six curated genesis
+collections, committed on-chain before the drop; no arbitrary third-party media
+is ingested at mint.
 
-Production copyright policy, Normie-only genesis minting, and the later
-CC0/owned-art update direction live in `PRODUCTION_MINT_AND_CC0_PLAN.md`. In
-production, arbitrary third-party NFT media ingestion is retired from the
-genesis mint unless explicitly reintroduced after legal review.
+## Mint Model
 
-## Mint UX Direction
+**Minting happens on OpenSea via SeaDrop — not on our sites.** OpenSea's mint UI
+and the SeaDrop contract handle the transaction; the only inputs at mint time are
+the minter wallet and a quantity. Our sites carry **no mint button** (the Big Cube
+mint/sim controls are removed). Everything Blockcassone-specific — which source
+art a cube gets and its plot placement — is assigned by our SeaDrop mint hook
+(`MultiSourceGenesisMinter`) when the mint transaction runs.
 
-The mint website should make the newly minted world position immediately legible.
+Hard genesis supply cap: **4096** cubes, one per source NFT. No paid mint ever
+produces a placeholder. Price: **0.0069 ETH** (~$12, same across all phases for
+now). The mint may be closed before 4096 sell out (see "Partial mint").
 
-Production genesis mint source policy:
+### Phases
 
-1. Allowlist phase: Normie holders mint only their snapshot Normies.
-2. Public phase: anyone can mint any unclaimed snapshot Normie source.
-3. The hard genesis supply cap is `4096`.
-4. No paid genesis mint produces a placeholder cube.
+1. **Guaranteed allowlist (GTD)** — strictly opt-in, a marketing lever. A holder
+   visits the allowlist landing page, connects a wallet (**delegation MUST be
+   supported** — a hot wallet acting for a vault), and the page reads the
+   qualifying source assets across the six genesis collections. It surfaces the
+   entitlement, e.g. *"You own 3 Normies, 1 Chain Runner, 0 Nouns → 4 qualifying,
+   capped at 3 GTD spots"*, and the holder signs an **ownership attestation** for
+   that wallet.
+   Crucially the page shows **thumbnails of the holder's qualifying artworks and
+   lets them choose which specific artworks they want turned into cubes**. That
+   selection is captured; a backend script verifies the attested wallet actually
+   controls those assets (pass/fail); approved wallet→artwork reservations are
+   baked on-chain before the drop. When a GTD holder mints their quantity on
+   OpenSea, the hook assigns **their chosen artworks**. Entitlement is 1
+   guaranteed spot per qualifying asset, **capped at 3 per wallet** (provisional);
+   total GTD size TBD. Reserved-but-unminted sources **release back to the pool**
+   when the GTD window closes.
 
-Normie owners should receive cubes tied to their exact snapshot Normie token
-IDs during the allowlist phase. This is a product requirement, not only a
-visual preference. Public-phase cubes are still Normie-sourced; they are simply
-drawn from the unclaimed global snapshot pool.
+2. **FCFS allowlist** — the wider Normie + CC0 community, first-come-first-served
+   via a **simple token-gate** allowlist (holds a qualifying asset ⇒ eligible).
+   FCFS mints are assigned art **randomly from the remaining pool** (no
+   pre-selection); per-wallet cap **8** (same as public).
 
-After a successful mint:
+3. **Public** — open mint, per-wallet cap **8**, art assigned **randomly from the
+   remaining pool**.
 
-- the main world view should return to `region` scale
-- owner focus should activate for the loaded wallet
-- all cubes owned by that wallet should be highlighted at any visible scale
-- the first newly minted cube should become the active selection
-- the active cube should open in the 3D detail panel
-- the camera/orbit target should look at the first newly minted cube
-- the project UI should expose a compact owner inventory list for the focused
-  wallet
+### Artwork assignment
 
-When owner focus is active:
+- **GTD:** the holder's chosen source token(s), reserved off-chain at attestation
+  time and baked on-chain, honoured in order as they mint.
+- **FCFS + Public:** a seeded-PRNG single-draw over the remaining per-collection
+  allocation (the locked 1679/901/655/410/328/123 split) → collection + token.
 
-- clicks in the main world should prioritize, and may be restricted to, cubes
-  owned by the focused wallet
-- if the user deliberately navigates to an empty plot, the UI should label it as
-  `empty slot`
-- if the user navigates to another owner's cube, owner focus may pivot to that
-  owner and show all cubes owned by them
-- the minimap should show the focused owner's cube locations across the entire
-  4096-plot block
+Contract implication (build phase): the minter needs a **reservation registry**
+(wallet → ordered source tokens) consulted first by the SeaDrop hook, falling
+back to the random pool draw. FCFS token-gating is a SeaDrop allowlist stage
+(merkle of qualifying holders). This differs from the current
+`MultiSourceGenesisMinter` (snapshot-Normie allowlist + random public).
 
-This is a UI and discovery feature. Ownership and placement remain contract
-state; any indexer used by the UI is only a read cache.
+### Delegation + attestation (landing page)
+
+- Wallet connect must resolve **delegated** holdings (delegate.xyz / delegate.cash
+  style): a connected hot wallet can represent assets held by a vault that
+  delegated to it.
+- The holder signs an off-chain attestation (EIP-712) binding the wallet + the
+  chosen artworks. A backend script re-verifies on-chain ownership before baking
+  the reservation — no trust in the client. (Attestation format + delegation
+  integration: build-phase detail.)
+
+### Partial mint
+
+The mint may be closed before 4096 sell out. Leftover plots stay empty and the
+un-drawn pool sources stay **unused** — deliberately useful post-mint: empty
+plots give movement room; unused Normie/CC0 sources remain available for the
+post-mint "spin the wheel" re-base; a sparser world makes it easier for a wallet
+to own a whole street for merge, and leaves more vacant targets for moves and
+more slack for burns. (Post-mint burn / merge / move: see below.)
+
+### Explorer owner-focus (post-mint, Big Cube)
+
+When a holder connects/loads a wallet on the explorer:
+
+- owner focus activates; all cubes owned by that wallet highlight at any scale;
+  a compact owner-inventory list is shown.
+- clicks may be restricted to the focused wallet's cubes; an empty plot is
+  labelled `empty slot`; navigating to another owner's cube may pivot focus to
+  them.
+- the minimap shows the focused owner's cube locations across the 4096-plot block.
+
+Ownership and placement remain contract state; the indexer is only a read cache.
 
 ## Art Refinements
 
 ### Post-Mint Updated Cubes
 
-The genesis mint is Normie-only. After launch, the project website should offer
-an owner update flow for people who acquired cubes and want to change the art.
+Genesis cubes are backed by one of the six source collections (or a GTD holder's
+chosen artwork). After launch, the project website offers an owner update flow
+for people who acquired cubes and want to change the art.
 
 Allowed update sources may include:
 
@@ -188,42 +234,79 @@ Solidity.
 
 ## Movement
 
-Post-mint movement is expected.
+Owners can move a cube to **any vacant plot** in the 4096 block (not restricted to
+region/neighbourhood) for a **small fee** (~$2 equivalent — exact price TBD; build
+the fee, tune later). Movement is the assembly tool for merge: scatter at mint →
+move cubes together → merge a street.
 
-Owners should eventually be able to move a cube to a vacant plot elsewhere in
-the Big Cube, subject to placement policy. This lets users choose or change
-communities.
+- **No per-street cap on move** — a wallet may stack any number of its cubes into
+  one street (merge needs ≥5). The max-5-per-wallet-per-street cap applies at
+  **mint only**.
+- Only regular cubes move; **merged / golden street tokens are locked in place**.
+- Vacant plots only (one cube per plot).
+- `plot` / `street` / `neighbourhood` / `region` / `Environment` **and the cube's
+  colour** (a function of slot) change on move; source identity stays permanent;
+  slot occupancy + population counters update atomically.
+- Moving changes the token's metadata + image + animation → the contract must emit
+  an **ERC-4906** metadata-update event so marketplaces re-fetch (see below).
 
-Movement means:
+### Displacement / force-move (LOCKED — territorial, controversy-by-design)
 
-- `plot`, `street`, `neighbourhood`, and `region` are mutable world-state facts.
-- source identity remains permanent.
-- slot occupancy must update atomically.
-- population counters must update atomically.
-- token metadata may change after movement.
+Holding **≥5 of a street's 8 plots gives you control of it.** A controller may
+**force-move** any other wallet's cube out of that street. This is deliberately a
+conquest mechanic — an involuntary change to the displaced token's location,
+colour, and world-traits, with **no cooldown and no compensation**. Only the
+per-move fee applies (a heavier "force" variant may be priced later).
 
-The current contracts should therefore be treated as an early boundary, not the
-final world-state design.
+- **Destination of a displaced cube:** a vacant plot if one exists; otherwise a
+  strict **1:1 swap** — the controller nominates one of their own cubes elsewhere,
+  the displaced cube takes that plot, and the controller's cube moves into the
+  contested street. So clearing a street with M minority cubes requires the
+  controller to hold M cubes elsewhere to swap.
+- **Merge folds this in:** merging a street you hold ≥5 of automatically displaces
+  the remaining minority cubes (by the swap rule above) as part of consolidation,
+  then collapses the 8 plots into the golden survivor. If the controller lacks
+  enough external cubes to swap out every minority cube, the merge is blocked until
+  they do (or acquire the minority).
+- **Immunity:** golden / merged street tokens cannot be displaced and cannot
+  displace — they're locked in place.
+- **Marketplace refresh:** displaced/moved/merged tokens emit **ERC-4906**
+  (`MetadataUpdate` / `BatchMetadataUpdate`) so OpenSea et al. re-fetch the new
+  colour/traits/image. OpenSea refresh is best-effort + laggy; our own explorer
+  reflects chain state instantly.
 
-## Neighbourhood Consolidation
+This is intentional. The world is contested territory; majority control is power.
 
-If one wallet owns an entire neighbourhood, it should eventually be able to
-consolidate that neighbourhood.
+## Street Merge (Burn / Consolidation)
 
-Expected behavior:
+Merge is **street-level** — an 8-plot Hilbert street (neighbourhood/region merge
+is out of scope for now). Merge *is* the burn mechanism; there is no standalone
+"destroy one cube."
 
-- owner proves ownership of every cube in the neighbourhood
-- owner consolidates the set
-- the other cubes are burned, locked, or marked consumed
-- one surviving or newly minted super-rare NFT represents the neighbourhood
+**Eligibility.** A wallet may merge a street when it holds **at least 5 of the 8
+plots** — a simple majority — regardless of who holds the rest. (This replaces the
+earlier sole-owner rule, which becomes unworkable once the world sells out and you
+can't buy/vacate the remaining plots.) Resolving the minority cubes still in the
+street is handled by **displacement** (see Movement → Displacement, under design).
 
-Open design decisions:
+**Outcome — the street collapses into ONE survivor.**
 
-- keep one existing token as the survivor or mint a new consolidated token
-- whether burned cubes remain visible as historical ruins in the Big Cube
-- whether source identities of consumed cubes remain referenced by the
-  consolidated token
-- how consolidation affects population traits
+- The owner's other cubes are **burned** and the vacant plots **consumed**: **7 of
+  the 8 slots are destroyed**, and the 8th holds one **hyper-rare** consolidated
+  NFT representing the whole street.
+- The survivor carries a merged **Population** trait — occupancy + source
+  composition, e.g. *"5/8 occupied · 3 Runners · 2 Normies"* (exact detail TBC) —
+  plus `Merged: Y`.
+- **Visual:** the survivor's static `image` gets a special **"golden"** treatment
+  (e.g. figure lines → golden glow — exact look TBC), and its `animation_url`
+  switches from a single cube to a **street view** (the 8 plots rendered as a
+  street, not one cube). *(The renderer already has a merged-street animation path
+  + Population/Merged metadata; the golden thumbnail is the new visual work.)*
+- The indexer records the merge in the cube's history.
+
+Open / TBC: exact golden aesthetic; exact Population composition detail; which
+plot the survivor occupies; whether burned source identities stay referenced by
+the consolidated token.
 
 ## Contract Direction
 

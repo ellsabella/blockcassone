@@ -171,19 +171,38 @@ export function inflateNormieArt(art) {
   };
 }
 
-// Non-normie (external / CC0) art: the on-chain flattened 2-bit TONAL payload
-// (400 bytes = 1600 pixels x 2 bits) from NonNormieArtStore.payloadForCube. Kept
-// as the raw tonal (not just a 1-bit silhouette) so renderers can shade by band.
+// The on-chain flattened 2-bit TONAL payload (400 bytes = 1600 px x 2 bits, from
+// NonNormieArtStore.payloadForCube) expanded to the same {bits, grayscale} grid
+// the OpenSea-flatten path produces. Bit order matches NonNormieArt.tonalBandAt /
+// PreviewThumbnail._toPayload: pixel i lives in byte i>>2, bits [(i&3)*2, +2).
+function tonalToGrid(tonal) {
+  const size = 40, len = size * size;
+  const bits = new Uint8Array(len);
+  const grayscale = new Float32Array(len);
+  let ones = 0;
+  for (let i = 0; i < len; i++) {
+    const band = (tonal[i >> 2] >> ((i & 3) * 2)) & 3; // 0..3
+    if (band > 0) { bits[i] = 1; ones++; }
+    grayscale[i] = band / 3;                            // 0, 1/3, 2/3, 1
+  }
+  return { discarded: false, kind: 'pixel', gridSize: size, depthLayers: size, ones, bits, grayscale };
+}
+
+// Non-normie (external / CC0) art. Emits the SAME {k:'x', g:<compactGrid>} shape
+// the wallet-flatten path produces, so the viewer's existing
+// hydrateGridFromAssignedSnapshot inflates + renders it with no changes.
 export function compactNonNormieArt({ id, tonal, payloadHash }) {
   if (!tonal || tonal.length !== 400) return null;
-  const art = { v: BIT_VERSION, k: 'x', id: Number(id), p: bytesToBase64(tonal) };
+  const g = compactGrid(tonalToGrid(tonal));
+  if (!g) return null;
+  const art = { v: BIT_VERSION, k: 'x', id: Number(id), g };
   if (payloadHash) art.h = String(payloadHash);
   return art;
 }
 
 export function inflateNonNormieArt(art) {
-  if (!art || art.k !== 'x') return null;
-  return { id: Number(art.id), tonal: base64ToBytes(art.p), payloadHash: art.h || '' };
+  if (!art || art.k !== 'x' || !art.g) return null;
+  return { id: Number(art.id), grid: inflateGrid(art.g), payloadHash: art.h || '' };
 }
 
 function fnv1a(value) {

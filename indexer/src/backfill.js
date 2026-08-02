@@ -4,7 +4,7 @@
 import { createPublicClient, http } from 'viem';
 import { loadConfig } from './config.js';
 import { WorldState } from './snapshot.js';
-import { fetchLogs, fetchMintTimestamps, buildAndWriteSnapshot } from './chain.js';
+import { fetchLogs, fetchBlockTimestamps, buildAndWriteSnapshot } from './chain.js';
 import { NormieArtCache, NonNormieArtCache } from './art.js';
 
 async function main() {
@@ -22,7 +22,7 @@ async function main() {
   );
 
   const ws = new WorldState();
-  ws.setBlockTimestamps(await fetchMintTimestamps(client, batch.minted));
+  ws.setBlockTimestamps(await fetchBlockTimestamps(client, [...batch.minted, ...batch.moved, ...batch.customized]));
   ws.applyLogs(batch);
 
   const artCache = new NormieArtCache(cfg);

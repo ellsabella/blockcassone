@@ -30,10 +30,17 @@ interface INormieGenesisMinter {
     function walletGenesisMinted(address wallet) external view returns (uint256);
 }
 
+// The art store, for the pool-source re-base: a CC0 token is re-basable iff its
+// flattened payload is committed source-keyed (genesis pool + reserve + released).
+interface ICubeArtStore {
+    function hasSourcePayload(address sourceContract, uint256 sourceTokenId) external view returns (bool);
+}
+
 contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     uint8 public constant SOURCE_KIND_NORMIE = 1;
     uint8 public constant SOURCE_KIND_EXTERNAL_ERC721 = 2;
     uint8 public constant SOURCE_KIND_MERGED_STREET = 3;
+    uint8 internal constant PAYLOAD_VERSION_TONAL = 1; // CC0 2-bit tonal (matches NonNormieArt)
 
     struct CubeData {
         uint32 slot;
@@ -77,6 +84,8 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     error CannotMoveStreet(uint256 cubeId);
     error OnlyCustomizer(address caller);
     error CannotCustomizeStreet(uint256 cubeId);
+    error NotPoolSource(address sourceContract, uint256 sourceTokenId);
+    error SourceAlreadyClaimed(address sourceContract, uint256 sourceTokenId, uint256 claimedByCubeId);
     error RendererNotSet();
     error OnlyOwnerOrGenesisMinter(address caller);
     error OnlyAllowedSeaDrop(address caller);
@@ -98,6 +107,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     event CubeMoved(uint256 indexed cubeId, uint32 indexed fromSlot, uint32 indexed toSlot, address owner);
     event MovesEnabledUpdated(bool enabled);
     event CustomizerUpdated(address indexed oldCustomizer, address indexed newCustomizer);
+    event ArtStoreUpdated(address indexed oldArtStore, address indexed newArtStore);
     event CubeCustomized(
         uint256 indexed cubeId,
         address indexed sourceContract,
@@ -123,6 +133,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     // Set to the customization controller, which verifies cube ownership and a
     // flattening attestation before calling.
     address public customizer;
+    address public artStore; // for pool-source re-base eligibility (hasSourcePayload)
 
     // ---- SeaDrop (OpenSea) genesis-mint integration -------------------------
     // This token is the SeaDrop-facing ERC-721: OpenSea's SeaDrop singleton calls
@@ -137,6 +148,10 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     mapping(uint256 cubeId => CubeData data) private _cubeData;
     mapping(uint32 slot => uint256 cubeId) public cubeForSlot;
     mapping(uint256 normieId => uint256 cubeId) public cubeForNormieId;
+    // Genesis (origin) source, written once on a cube's first re-base (address(0) =
+    // never re-based, origin == current). See cubeOrigin().
+    mapping(uint256 cubeId => address originContract) private _cubeOriginContract;
+    mapping(uint256 cubeId => uint256 originTokenId) private _cubeOriginTokenId;
     mapping(bytes32 sourceKey => uint256 cubeId) public cubeForSourceKey;
 
     constructor(
@@ -278,7 +293,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         cubeForNormieId[normieId] = cubeId;
     }
 
-    /// @notice Genesis mint of an external-source cube (e.g. a Brainrot). NO
+    /// @notice Genesis mint of an external-source cube (e.g. a CC0 source). NO
     ///         source-ownership check — the committed genesis pool is the authority,
     ///         exactly like snapshot Normies. Callable by the genesis minter (or
     ///         owner). The tonal art payload is recorded separately by the minter
@@ -544,6 +559,24 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         return _cubeData[cubeId];
     }
 
+    /// @notice A cube's source facts (contract + token id) — the minimal pair the art
+    ///         store needs to resolve source-keyed genesis art. Revert-safe (returns
+    ///         zeros for a nonexistent/burned cube).
+    function cubeSource(uint256 cubeId) external view returns (address sourceContract, uint256 sourceTokenId) {
+        CubeData storage d = _cubeData[cubeId];
+        return (d.sourceContract, d.sourceTokenId);
+    }
+
+    /// @notice A cube's ORIGIN (genesis) source facts — permanent provenance. Set once,
+    ///         lazily, on the cube's first re-base; before any re-base it equals the
+    ///         current source, so this returns the genesis source for every cube.
+    function cubeOrigin(uint256 cubeId) external view returns (address originContract, uint256 originTokenId) {
+        address oc = _cubeOriginContract[cubeId];
+        if (oc != address(0)) return (oc, _cubeOriginTokenId[cubeId]);
+        CubeData storage d = _cubeData[cubeId];
+        return (d.sourceContract, d.sourceTokenId);
+    }
+
     /// @notice The street index, population, and 8 plot cube ids (0 = vacant) of a
     ///         merged-street token.
     function streetPlots(uint256 streetTokenId)
@@ -739,12 +772,88 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         CubeData storage data = _cubeData[cubeId];
         if (data.sourceKind == SOURCE_KIND_MERGED_STREET) revert CannotCustomizeStreet(cubeId);
 
+        _captureOrigin(cubeId, data);
+        _reassignSource(cubeId, data, sourceContract, sourceTokenId); // release old + claim new if pooled
+
         data.sourceKind = SOURCE_KIND_EXTERNAL_ERC721;
         data.sourceContract = sourceContract;
         data.sourceTokenId = sourceTokenId;
         data.payloadVersion = payloadVersion;
 
         emit CubeCustomized(cubeId, sourceContract, sourceTokenId, payloadVersion);
+    }
+
+    /// @notice Attestation-free re-base to an UNUSED "pool" source — any Normie (live
+    ///         art) or any CC0 token whose flattened payload is committed source-keyed
+    ///         to the art store (genesis pool + reserve + released). Owner-gated;
+    ///         enforces one-cube-per-pool-source via `cubeForSourceKey`. This is the
+    ///         "spin the wheel" LOCK-IN: the client previews random unused sources
+    ///         off-chain, then commits the chosen one here. No off-chain flatten /
+    ///         attestation needed — the art already exists on-chain.
+    function rebaseToPoolSource(uint256 cubeId, address sourceContract, uint256 sourceTokenId) external {
+        address owner = _ownerOf(cubeId);
+        if (owner == address(0)) revert NonexistentCube(cubeId);
+        if (owner != msg.sender) revert NotCubeOwner(cubeId, msg.sender);
+
+        CubeData storage data = _cubeData[cubeId];
+        if (data.sourceKind == SOURCE_KIND_MERGED_STREET) revert CannotCustomizeStreet(cubeId);
+        if (!_isPooledSource(sourceContract, sourceTokenId)) {
+            revert NotPoolSource(sourceContract, sourceTokenId);
+        }
+
+        _captureOrigin(cubeId, data);
+        _reassignSource(cubeId, data, sourceContract, sourceTokenId); // claim requires unclaimed
+
+        bool isNormie = sourceContract == normieContract;
+        data.sourceKind = isNormie ? SOURCE_KIND_NORMIE : SOURCE_KIND_EXTERNAL_ERC721;
+        data.sourceContract = sourceContract;
+        data.sourceTokenId = sourceTokenId;
+        data.payloadVersion = isNormie ? 0 : PAYLOAD_VERSION_TONAL; // Normie = live art
+
+        emit CubeCustomized(cubeId, sourceContract, sourceTokenId, data.payloadVersion);
+    }
+
+    // Capture the genesis origin once, on a cube's first re-base (see cubeOrigin()).
+    function _captureOrigin(uint256 cubeId, CubeData storage data) private {
+        if (_cubeOriginContract[cubeId] == address(0)) {
+            _cubeOriginContract[cubeId] = data.sourceContract;
+            _cubeOriginTokenId[cubeId] = data.sourceTokenId;
+        }
+    }
+
+    // Maintain the source-claim registry across a re-base: RELEASE the cube's current
+    // source, then (if the NEW source is a pool source) CLAIM it, requiring it be
+    // unclaimed — the on-chain uniqueness guard behind "spin the wheel" (concurrent
+    // lock-ins race; first wins, others revert). Non-pool wallet-art sources are left
+    // untracked (dupes there are the owner's own choice).
+    function _reassignSource(uint256 cubeId, CubeData storage data, address newContract, uint256 newTokenId)
+        private
+    {
+        bytes32 oldKey = sourceKey(data.sourceChainId, data.sourceContract, data.sourceTokenId);
+        if (cubeForSourceKey[oldKey] == cubeId) cubeForSourceKey[oldKey] = 0;
+        if (_isPooledSource(newContract, newTokenId)) {
+            bytes32 newKey = sourceKey(block.chainid, newContract, newTokenId);
+            uint256 claimer = cubeForSourceKey[newKey];
+            if (claimer != 0 && claimer != cubeId) {
+                revert SourceAlreadyClaimed(newContract, newTokenId, claimer);
+            }
+            cubeForSourceKey[newKey] = cubeId;
+        }
+    }
+
+    // A "pool" source has reusable on-chain art with no per-cube record: any Normie
+    // (renderer reads its bitmap live) or a CC0 token with a committed source-keyed
+    // payload in the art store.
+    function _isPooledSource(address sourceContract, uint256 sourceTokenId) private view returns (bool) {
+        if (sourceContract == normieContract) return true;
+        if (artStore == address(0)) return false;
+        return ICubeArtStore(artStore).hasSourcePayload(sourceContract, sourceTokenId);
+    }
+
+    function setArtStore(address newArtStore) external onlyOwner {
+        address old = artStore;
+        artStore = newArtStore;
+        emit ArtStoreUpdated(old, newArtStore);
     }
 
     function setRenderer(address newRenderer) external onlyOwner {
