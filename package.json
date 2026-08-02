@@ -18,7 +18,8 @@
   "license": "ISC",
   "dependencies": {
     "js-sha3": "^0.9.3",
-    "p5": "^2.2.2"
+    "p5": "^2.2.2",
+    "viem": "^2.55.10"
   },
   "devDependencies": {
     "serve": "^14.2.6"

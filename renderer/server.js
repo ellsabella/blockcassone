@@ -282,6 +282,69 @@ async function proxyChainRpc(req, res) {
   }
 }
 
+// ---------- Attestation signer service (/api/attest) ----------
+// The FlatteningAttestation is signed by a server-held key (never the browser). The
+// client (viewer/preview-chain.js) builds the EXACT EIP-712 typed data it will submit,
+// POSTs it here, and gets back a signature. On local Anvil the client uses the node's
+// unlocked signer (eth_signTypedData_v4) instead and never reaches this route.
+//
+// SECURITY: this signs whatever attestation the client sends — i.e. a signing oracle,
+// acceptable for the Sepolia E2E stub (a throwaway signer key). For a real launch, the
+// service should independently verify the flattening and own the nonce/deadline before
+// signing, rather than trusting the client's payloadHash.
+//
+// viem is required LAZILY so the dev server still boots without it (only the Sepolia
+// signer path needs it — install with `npm i viem` on the VPS). Key from env:
+// BLOCKCASSONE_ATTESTATION_SIGNER_PK (or ATTEST_SIGNER_PK) — the PRIVATE key whose
+// address is the deploy-time BLOCKCASSONE_ATTESTATION_SIGNER.
+let _attestAccount = null;
+function getAttestAccount() {
+  if (_attestAccount) return _attestAccount;
+  const pk = process.env.BLOCKCASSONE_ATTESTATION_SIGNER_PK || process.env.ATTEST_SIGNER_PK;
+  if (!pk) throw new Error('Missing BLOCKCASSONE_ATTESTATION_SIGNER_PK in .env');
+  let privateKeyToAccount;
+  try { ({ privateKeyToAccount } = require('viem/accounts')); }
+  catch (_) { throw new Error('viem not installed for the signer service — run: npm i viem'); }
+  _attestAccount = privateKeyToAccount(pk.startsWith('0x') ? pk : '0x' + pk);
+  return _attestAccount;
+}
+
+// viem wants bigint for uint/int fields and a real bool; the client sends them as
+// strings over JSON, so coerce by the primaryType's field types before signing.
+function coerceTypedMessage(types, primaryType, message) {
+  const out = { ...message };
+  for (const f of (types[primaryType] || [])) {
+    if (out[f.name] == null) continue;
+    if (/^u?int\d*$/.test(f.type)) out[f.name] = BigInt(out[f.name]);
+    else if (f.type === 'bool' && typeof out[f.name] === 'string') out[f.name] = out[f.name] === 'true';
+  }
+  return out;
+}
+
+async function handleAttest(req, res) {
+  if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method not allowed' }); return; }
+  loadDotEnv(ENV_PATH, { override: true });
+  try {
+    const { typedData } = JSON.parse(await readRequestBody(req, 4_000_000));
+    if (!typedData || !typedData.domain || !typedData.message || !typedData.primaryType) {
+      sendJson(res, 400, { error: 'Missing typedData {domain, types, primaryType, message}' });
+      return;
+    }
+    const account = getAttestAccount();
+    const types = { ...typedData.types };
+    delete types.EIP712Domain; // viem derives the domain type itself
+    const signature = await account.signTypedData({
+      domain: typedData.domain,
+      types,
+      primaryType: typedData.primaryType,
+      message: coerceTypedMessage(types, typedData.primaryType, typedData.message),
+    });
+    sendJson(res, 200, { signature, signer: account.address });
+  } catch (err) {
+    sendJson(res, 500, { error: 'Attestation signing failed', detail: String(err?.message || err) });
+  }
+}
+
 async function proxyImage(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const imageUrl = url.searchParams.get('url');
@@ -473,6 +536,11 @@ const server = http.createServer((req, res) => {
 
   if (req.url === '/api/chain-rpc') {
     proxyChainRpc(req, res);
+    return;
+  }
+
+  if (req.url === '/api/attest') {
+    handleAttest(req, res);
     return;
   }
 

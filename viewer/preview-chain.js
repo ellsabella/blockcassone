@@ -166,14 +166,38 @@ async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTok
       deadline: att.deadline.toString(),
     },
   };
-  // Anvil accepts the typed data as an object; some builds want a JSON string.
   let signature;
-  try {
-    signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, typedData]);
-  } catch (e) {
-    signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, JSON.stringify(typedData)]);
+  if (cfg.directRpc) {
+    // Local dev: the Anvil node holds the unlocked attestation signer.
+    // Anvil accepts the typed data as an object; some builds want a JSON string.
+    try {
+      signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, typedData]);
+    } catch (e) {
+      signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, JSON.stringify(typedData)]);
+    }
+  } else {
+    // Sepolia / prod: the signer key lives server-side behind /api/attest. Send the
+    // EXACT typed data we'll submit so the returned signature covers this att verbatim.
+    signature = await attestViaService(typedData);
   }
   return { att, signature };
+}
+
+// POST the EIP-712 typed data to the server-side signer service and return the
+// signature. Used on any non-directRpc chain (Sepolia/prod) where no unlocked signer
+// exists. See renderer/server.js /api/attest.
+async function attestViaService(typedData) {
+  const res = await fetch('/api/attest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ typedData }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.error) {
+    throw new Error(`/api/attest failed: ${j.error || res.status}${j.detail ? ` — ${j.detail}` : ''}`);
+  }
+  if (!j.signature) throw new Error('/api/attest returned no signature');
+  return j.signature;
 }
 
 // Re-base cube `cubeId` (owned by `owner`) onto the wallet token

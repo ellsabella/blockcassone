@@ -40,13 +40,20 @@ Legend: **[build]** = code I produce · **[run]** = you run (needs your keys / S
   node scripts/upload-renderer-chunks.mjs   # against the Sepolia RendererAssetStore + deployer key
   ```
 
-## Phase 3 — attestation signer service  **[build] + [run]**
+## Phase 3 — attestation signer service  **[build ✅ DONE] + [run]**
 Needed only for the Update **wallet-upload** path (the CC0 spin doesn't use it).
-- **[build]** An `/api/attest` endpoint (in the VPS Node app) that takes the attestation
-  params and returns an EIP-712 signature signed with the signer key **server-side**, plus a
-  small `preview-chain.js` change so it calls `/api/attest` on Sepolia instead of the
-  dev-only `eth_signTypedData_v4` (which only works against unlocked Anvil).
-- **[run]** Set `ATTEST_SIGNER_PK` in the VPS env; restart the service.
+- **[build ✅]** `POST /api/attest` in `renderer/server.js` signs the EIP-712
+  FlatteningAttestation with the signer key **server-side** (viem, required lazily so the
+  dev server still boots without it). `viewer/preview-chain.js` now branches on
+  `chain-config.directRpc`: local Anvil still uses the unlocked `eth_signTypedData_v4`;
+  any non-direct chain (Sepolia/prod) POSTs the exact typed data to `/api/attest`.
+  Proven: `scripts/check-attest-signer.mjs` shows the viem signature is **byte-identical**
+  to Anvil's `eth_signTypedData_v4` (deterministic RFC-6979), so it's a drop-in the
+  contract already accepts; verified again through the live HTTP endpoint.
+- **[run]** On the VPS: `npm i` (viem is now a root dep), set
+  `BLOCKCASSONE_ATTESTATION_SIGNER_PK` (the signer's PRIVATE key — NOT the deployer key;
+  its address must equal the deploy-time `BLOCKCASSONE_ATTESTATION_SIGNER`) in the env,
+  restart the service. `ATTEST_SIGNER_PK` is also accepted as an alias.
 
 ## Phase 4 — the site, pointed at Sepolia  **[build] + [run]**
 - **[build]** A Sepolia `chain-config.json` (from Phase 1) with `chainId: 11155111`,
