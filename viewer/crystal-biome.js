@@ -97,6 +97,12 @@ const CRYSTAL = [
   { tint: [0.72, 1.45, 1.9], inner: [0.5, 0.86, 1.15], count: 16, wMin: 0.02, wMax: 0.045, hMin: 0.10, hMax: 0.34, spread: 0.5, innerAlpha: 0.15, glassCount: 6, walks: 5, sparkle: 1.0, sparkBoost: 1.9, grid: 0.24, wire: 0.65 },
 ];
 
+// A single representative RGB per environment id (0..5) — the additive `tint`,
+// reused for cheap impostors / minimap dots so their colour matches the biome.
+export function crystalTintForEnv(envId) {
+  return (CRYSTAL[envId] || CRYSTAL[2]).tint;
+}
+
 // Voxelize the unit-local crystal boxes into the 40^3 grid the walker walks.
 // Local x,z in [-0.5,0.5] -> [0,40); local y in [0,1] -> [0,40).
 function voxelizeLocal(boxes) {

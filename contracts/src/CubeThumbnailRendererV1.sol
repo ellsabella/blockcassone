@@ -6,6 +6,7 @@ import { CubeNFT } from "./CubeNFT.sol";
 import { StrBuf } from "./lib/StrBuf.sol";
 import { NonNormieArt } from "./NonNormieArt.sol";
 import { CubeForestLib } from "./render/CubeForestLib.sol";
+import { NormieHexGlyphs } from "./render/NormieHexGlyphs.sol";
 
 interface IThumbnailNormieRawImageStorage {
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory);
@@ -79,12 +80,14 @@ contract CubeThumbnailRendererV1 {
     function previewThumbnailSVG(
         bytes32 seed,
         uint32 slot,
+        address sourceContract,
         uint256 sourceTokenId,
         bytes calldata tonalPayload
     ) external view returns (string memory) {
         CubeNFT.CubeData memory data;
         data.seed = seed;
         data.slot = slot;
+        data.sourceContract = sourceContract; // drives the hex banner — must match the re-base target
         data.sourceTokenId = sourceTokenId;
         return _renderSVG(data, NonNormieArt.toBinaryBitmap(tonalPayload), tonalPayload);
     }
@@ -188,8 +191,46 @@ contract CubeThumbnailRendererV1 {
             _glassLayer(bodyN, tonal, data.sourceTokenId, data.seed),
             _svgLabel(data),
             _svgFrame(data),
+            _hexBanner(data),
             "</svg>"
         );
+    }
+
+    // Source-contract address as a NormiesFont hex spine: its 40 uppercase nibbles fill one
+    // side edge-to-edge (25px cells across the ~1000px art grid). Orientation (vertical or
+    // horizontal) and the edge-band position are seed-derived so the banner never crosses the
+    // centre art. White, opacity .74, soft glow (feGaussianBlur .2 grid = 5px). Tuned in
+    // tmp/line-lab.html; glyphs from NormieHexGlyphs (NormiesFont, 0-9/A-F).
+    function _hexBanner(CubeNFT.CubeData memory data) private pure returns (string memory) {
+        uint256 h = uint256(keccak256(abi.encodePacked(data.seed, "banner")));
+        bool vertical = (h & 1) == 1;
+        uint256 lo = ((h >> 1) & 1) == 1 ? 700 : 80;  // near-end or near-start edge band
+        uint256 perp = ((h >> 2) % 221) + lo;         // 80..300 or 700..920 grid px within band
+        bytes20 a = bytes20(data.sourceContract);
+        bytes memory buf = StrBuf.alloc(12288);
+        buf.cat(
+            '<defs><filter id="bnrG" x="-40%" y="-40%" width="180%" height="180%">'
+            '<feGaussianBlur stdDeviation="5" result="b"/>'
+            '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'
+            '<g fill="#fff" fill-opacity="0.74" filter="url(#bnrG)">'
+        );
+        for (uint256 i = 0; i < 20; i++) {
+            uint8 bb = uint8(a[i]);
+            for (uint256 k = 0; k < 2; k++) {
+                uint256 nib = k == 0 ? (bb >> 4) : (bb & 0x0f);
+                uint256 idx = i * 2 + k;
+                uint256 cx = vertical ? (101 + perp) : (101 + idx * 25);
+                uint256 cy = vertical ? (86 + idx * 25) : (86 + perp);
+                buf.cat(
+                    string.concat(
+                        '<path transform="translate(', cx.toString(), " ", cy.toString(),
+                        ') scale(0.025)" d="', NormieHexGlyphs.path(nib), '"/>'
+                    )
+                );
+            }
+        }
+        buf.cat("</g>");
+        return buf.str();
     }
 
     function _svgDefs(CubeNFT.CubeData memory data, bytes memory raw, bytes memory grid) private view returns (string memory) {
@@ -515,8 +556,8 @@ contract CubeThumbnailRendererV1 {
     // on an evenly-spaced 120deg triangle; the triangle's ROTATION is derived from
     // the cube seed, so every cube lands the rainbow differently. Tuned in
     // tmp/line-lab.html; lab grid-units x25 -> these viewBox-px constants.
-    uint256 private constant GLASS_CONV_MIN = 5;   // glass where >= this many of 8 neighbours are on (body)
-    uint256 private constant GLASS_COVERAGE = 38;  // % of body cells kept (seeded scatter)
+    uint256 private constant GLASS_CONV_MIN = 4;   // glass where >= this many of 8 neighbours are on (body)
+    uint256 private constant GLASS_COVERAGE = 26;  // % of body cells kept (seeded scatter)
     int256 private constant GLASS_CX = 600;        // light-triangle centre (viewBox px)
     int256 private constant GLASS_CY = 585;
     int256 private constant GLASS_SPREAD = 400;    // light distance from centre (16 grid x25)
@@ -541,7 +582,7 @@ contract CubeThumbnailRendererV1 {
         // screen blend = bright luminous glass over the dark cube (alpha-over would
         // only darken). glowG1/G2 = 1 in the lab -> the filter is just a faint soft
         // halo (no colour amplification).
-        buf.cat('<g filter="url(#gGlass)" stroke-width="0.3" style="mix-blend-mode:screen">');
+        buf.cat('<g filter="url(#gGlass)" stroke-width="0.3" style="mix-blend-mode:plus-lighter">');
         uint256 kept = 0;
         for (uint256 i = 0; i < 1600 && kept < 760; i++) {
             // bodyN[i] >= GLASS_CONV_MIN == "lit AND neigh8 >= 5" (from the shared mask),
@@ -588,28 +629,35 @@ contract CubeThumbnailRendererV1 {
         // (band 3 = eye sockets / hollows) dim toward dark, so sockets read as hollows
         // rather than bright blocks — matching the source and the 3D cube.
         d = d * (100 - 40 * (uint256(band) - 1)) / 100; // band1=100% band2=60% band3=20%
-        uint256 fo = 580 + d * 550 / 1000;    // fillBase .58 + density x fillScale .55
-        if (fo > 1000) fo = 1000;             // fillCap 1
+        uint256 fo = 240 + d * 1100 / 1000;   // fillBase .24 + density x fillScale 1.1
+        if (fo > 720) fo = 720;               // fillCap .72
         uint256 so = fo * 16 / 10;            // rim opacity = fill x rimOp 1.6
         if (so > 1000) so = 1000;
+        (uint256 r, uint256 g, uint256 b) = _glassRGB(col, row, L);
+        string memory fill = string.concat(r.toString(), ",", g.toString(), ",", b.toString());
+        // rim = the cell tone lightened toward white by rimLight .8
+        string memory rim = string.concat(_rim(r).toString(), ",", _rim(g).toString(), ",", _rim(b).toString());
         return string.concat(
             '<rect x="', (101 + col * 25).toString(), '" y="', (86 + row * 25).toString(),
-            '" width="20" height="20" fill="rgb(', _glassFill(col, row, L), ')" fill-opacity="', _dec2(fo),
-            '" stroke="#fff" stroke-opacity="', _dec2(so), '"/>'
+            '" width="20" height="20" fill="rgb(', fill, ')" fill-opacity="', _dec2(fo),
+            '" stroke="rgb(', rim, ')" stroke-opacity="', _dec2(so), '"/>'
         );
     }
 
-    // "r,g,b" fill for a glass cell: light field -> saturate (bold hue) -> colour
-    // gain (brightness) -> whiten. Matches the lab's col3().
-    function _glassFill(uint256 col, uint256 row, uint256[6] memory L)
+    // Glass cell colour: light field -> saturate (bold hue) -> colour gain (brightness)
+    // -> whiten. Matches the lab's col3(). Returns numeric (r,g,b) so the rect can build
+    // both the fill and the brightened rim.
+    function _glassRGB(uint256 col, uint256 row, uint256[6] memory L)
         private
         pure
-        returns (string memory)
+        returns (uint256, uint256, uint256)
     {
         (uint256 R, uint256 G, uint256 B) = _lightColor(112 + col * 25, 97 + row * 25, L);
-        (uint256 r, uint256 g, uint256 b) = _glassTone(R, G, B);
-        return string.concat(r.toString(), ",", g.toString(), ",", b.toString());
+        return _glassTone(R, G, B);
     }
+
+    // rim colour = cell tone brightened toward white by rimLight .8 (v + (255-v)*.8 = .2v+204).
+    function _rim(uint256 v) private pure returns (uint256) { return (v * 2 + 2040) / 10; }
 
     function _glassTone(uint256 R, uint256 G, uint256 B)
         private
@@ -620,10 +668,10 @@ contract CubeThumbnailRendererV1 {
         return (_glassChan(int256(R), luma), _glassChan(int256(G), luma), _glassChan(int256(B), luma));
     }
 
-    // saturate 3, then colour gain 2.6 * (1 - whiten .1) = 2.34, then + 255*.1.
+    // saturate 3, then colour gain 2.6 * (1 - whiten .42) = 1.508, then + 255*.42.
     // Signed: a saturated channel can dip below 0 before clamping.
     function _glassChan(int256 c, int256 luma) private pure returns (uint256) {
-        int256 v = (luma + (c - luma) * 3) * 2340 / 1000 + 26;
+        int256 v = (luma + (c - luma) * 3) * 1508 / 1000 + 107;
         if (v < 0) return 0;
         if (v > 255) return 255;
         return uint256(v);

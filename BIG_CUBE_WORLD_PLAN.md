@@ -46,12 +46,16 @@ edge-point identity. This is the crux that makes move/merge coherent.
 - **Status: on-chain `CubeEnv` lib + `Environment` trait done; weights confirmed;
   JS parity pending.**
 
-### 3. Move
-- Holder moves a cube they own from its plot to **any vacant plot** via the UI.
-- `moveCube(cubeId, newSlot)`: verify ownership + newSlot vacant; update the
-  cube's slot + slot→cube mapping. Colour/environment/street follow the new slot.
-- Purpose: drive post-mint activity, consolidate streets for merging, chase
-  scarcer environments, negotiate between holders.
+### 3. Move (+ displacement)
+- Holder moves a cube they own to **any vacant plot** (cheap flat fee), or
+  **displaces** an occupant in a street they own ≥5/8 of (force-swap + pay the
+  victim), via the UI.
+- `moveCube(cubeId, newSlot) payable`: verify ownership; if vacant, charge
+  `baseFee`; if occupied, require 5/8 majority, swap the occupant into the mover's
+  old slot, pay them a biome-rarity fee (house cut on upgrades), enforce cooldown.
+  Colour/environment/street follow the new slot. See `FEES_AND_DISPLACEMENT_SPEC.md`.
+- Purpose: drive post-mint activity, consolidate streets for merging (assemble a
+  contested street by displacing minority holders), chase scarcer environments.
 
 ### 4. Merge (8→1 burn → street NFT)
 - Eligibility: wallet is the **sole owner of every occupied plot** on a street
@@ -98,18 +102,22 @@ edge-point identity. This is the crux that makes move/merge coherent.
    of-8 final street. Caveat: togetherness is **per-transaction** (split mints far
    apart land wherever the cursor then sits). `NoVacantPlot` guards the >1536-per-
    wallet edge.
-5. **Move** — **🟡 BUILT (contract), pending WSL test; UI later.** `moveCube(cubeId,
-   newSlot)` in `CubeNFT`: owner-only, cube keeps its `seed` but takes a new slot,
-   so colour/geometry/street/environment follow. Gated behind owner-flipped
-   `movesEnabled` (off during mint so a move can't collide with an allocator-
-   targeted slot). Merged-street tokens are anchored (`CannotMoveStreet`); target
-   must be a vacant in-range slot. Frees the old slot for reuse / street
-   consolidation before a merge.
+5. **Move (+ displacement + fees)** — **✅ BUILT + TESTED (contract); UI later.**
+   `moveCube(cubeId, newSlot) payable` in `CubeNFT`: owner-only, cube keeps its
+   `seed` but takes a new slot, so colour/geometry/street/environment follow. Gated
+   behind owner-flipped `movesEnabled` (off during mint). Merged-street tokens are
+   anchored (`CannotMoveStreet` / `CannotDisplaceStreet`). Target may be **vacant**
+   (flat `baseFee` to the house) **or occupied** — a **displacement**: allowed only
+   if the mover owns ≥5/8 of the target's street (`NotStreetMajority`), force-swaps
+   the occupant into the mover's old slot, pays the victim a biome-rarity-scaled fee
+   (house takes ~1/3 only on upgrades), and enforces a 15-min per-victim cooldown.
+   See `FEES_AND_DISPLACEMENT_SPEC.md` + `test/CubeFees.t.sol`.
 6. **Merge** — kind flag, 8→1 burn, street-record store, street SVG + HTML,
    placeholders. *(produces the `TOKEN.plots` the street view consumes)*
-   **🟡 BUILT, pending WSL test.** `mergeStreet(street)` in `CubeNFT`: caller must
+   **✅ BUILT + TESTED.** `mergeStreet(street) payable` in `CubeNFT`: caller must
    solely own every occupied plot; occupied plot cubes are burned (CubeData +
-   source/normie mappings retained), all 8 slots lock to the new street token.
+   source/normie mappings retained), all 8 slots lock to the new street token. Free
+   when you own the whole street; `baseFee` per vacant plot locked otherwise.
    Leader = lowest occupied plot (drives the SVG thumbnail). Irreversible v1 (data
    preserved for a future un-merge). `SOURCE_KIND_MERGED_STREET = 3`; `StreetInfo`
    record + `streetPlots()` / `cubeDataUnchecked()` getters. `CubeRendererV2`:

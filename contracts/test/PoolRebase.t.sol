@@ -37,6 +37,7 @@ contract PoolRebaseTest is Test {
         runner = new PoolMockCC0("Chain Runners");
         store = new NonNormieArtStore(address(cubes), address(this));
         cubes.setArtStore(address(store));
+        cubes.setCustomizesEnabled(true); // open the customize gate for the re-base tests
 
         // Commit source-keyed CC0 art for two Runner tokens (the "pool" the wheel draws).
         store.recordSourcePayload(address(runner), 500, _payload(1));
@@ -97,6 +98,22 @@ contract PoolRebaseTest is Test {
     function testRebaseRejectsNonOwner() public {
         vm.prank(BOB);
         vm.expectRevert(abi.encodeWithSelector(CubeNFT.NotCubeOwner.selector, cubeA, BOB));
+        cubes.rebaseToPoolSource(cubeA, address(runner), 500);
+    }
+
+    function testRebaseRevertsWhenCustomizesDisabled() public {
+        // The customize off-switch gates the pool re-base path too (test owns the token).
+        cubes.setCustomizesEnabled(false);
+        vm.prank(ALICE);
+        vm.expectRevert(CubeNFT.CustomizesDisabled.selector);
+        cubes.rebaseToPoolSource(cubeA, address(runner), 500);
+    }
+
+    function testRebaseEmitsMetadataUpdate() public {
+        // ERC-4906: a source-art change must signal marketplaces to re-fetch.
+        vm.expectEmit(true, true, true, true, address(cubes));
+        emit CubeNFT.MetadataUpdate(cubeA);
+        vm.prank(ALICE);
         cubes.rebaseToPoolSource(cubeA, address(runner), 500);
     }
 

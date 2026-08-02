@@ -2,231 +2,135 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data:; connect-src 'self' http: https:; img-src 'self' data: blob: http: https:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data:; connect-src 'self' http: https:; img-src 'self' data: blob: http: https:; frame-src 'self' data:;">
   <title>Blockcassone · Update Cube</title>
   <style>
-    @font-face {
-      font-family: 'NormiesFont';
-      src: url('/viewer/assets/NormiesFont.otf') format('opentype');
-      font-display: block;
+    @font-face { font-family:'NormiesFont'; src:url('/viewer/assets/NormiesFont.otf') format('opentype'); font-display:block; }
+    :root{
+      --bg:#040406; --panel:#0e0e13; --panel2:#15151c; --line:rgba(130,130,150,.26);
+      --ink:#d3d3da; --dim:#8a8a95; --faint:#5c5c67;
+      --green:#48d19a; --orange:#ff9a3c; --pink:#ff7dcc; --red:#ff5d6c;
+      --mono:ui-monospace,'SFMono-Regular',Menlo,'Courier New',monospace;
     }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      height: 100%;
-      background: #030304;
-      color: #c8c8cc;
-      font-family: 'Courier New', monospace;
-      overflow: hidden;
-    }
-    button, input, select {
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-      font-weight: 700;
-    }
-    button {
-      background: rgba(24, 24, 28, 0.86);
-      border: 1px solid rgba(120, 120, 140, 0.38);
-      color: #d6d6dc;
-      padding: 6px 10px;
-      cursor: pointer;
-      min-height: 29px;
-    }
-    button:hover:not(:disabled) { background: rgba(46, 46, 54, 0.92); color: #fff; box-shadow: 0 0 12px rgba(255, 58, 184, 0.18); }
-    button:disabled { opacity: 0.4; cursor: not-allowed; }
-    button.active { background: rgba(72, 72, 88, 0.95); border-color: #ff7dcc; color: #fff; box-shadow: 0 0 14px rgba(255, 58, 184, 0.32); }
-    button.wallet-btn.connected { border-color: #48d19a; color: #9affc9; box-shadow: 0 0 12px rgba(72, 209, 154, 0.28); }
-    input, select {
-      background: rgba(20, 20, 24, 0.88);
-      border: 1px solid rgba(120, 120, 140, 0.38);
-      color: #e8e8ee;
-      padding: 6px 8px;
-      min-height: 29px;
-    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:13px;line-height:1.4;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+    .wrap{max-width:720px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column}
+    a{color:inherit}
 
-    /* ---- Top HUD ---- */
-    #hud {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 5;
-      display: flex; align-items: center; gap: 10px;
-      padding: 6px 12px;
-      background: linear-gradient(180deg, rgba(5, 5, 8, 0.96), rgba(5, 5, 8, 0.5));
-      border-bottom: 2px solid rgba(255, 58, 184, 0.22);
-      backdrop-filter: blur(10px);
-      height: 50px;
-    }
-    .brand { font-family: 'NormiesFont', 'Courier New', monospace; font-size: 18px; color: #fff; letter-spacing: 1px; text-shadow: 0 0 12px rgba(255, 58, 184, 0.5); }
-    .tabs { display: flex; gap: 4px; margin-left: 6px; }
-    .tabs a { text-decoration: none; }
-    .spacer { flex: 1; }
-    #wallet-addr { width: 380px; max-width: 38vw; }
-    #wallet-status { font-size: 11px; color: #8f8f98; min-width: 120px; }
+    .top{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(4,4,6,.9);backdrop-filter:blur(8px);z-index:5}
+    .top .back{color:var(--dim);text-decoration:none;font-weight:700}
+    .top h1{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);font-weight:800;flex:1;text-align:center}
+    #wallet-connect{border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:var(--panel2);color:var(--ink);font:700 11px var(--mono);cursor:pointer}
+    #wallet-connect.connected{border-color:var(--green);color:#9affc9}
 
-    /* ---- Page layout ---- */
-    #page {
-      position: fixed; top: 50px; left: 0; right: 0; bottom: 0;
-      display: grid;
-      grid-template-columns: 320px 1fr;
-      grid-template-rows: minmax(0, 1.1fr) minmax(0, 0.9fr);
-      gap: 10px; padding: 10px;
-    }
-    .panel {
-      background: rgba(12, 12, 16, 0.72);
-      border: 1px solid rgba(120, 120, 140, 0.28);
-      border-radius: 2px;
-      overflow: hidden;
-      display: flex; flex-direction: column;
-      min-height: 0;
-    }
-    .panel-title {
-      font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
-      color: #ff9ad6; padding: 7px 10px;
-      border-bottom: 1px solid rgba(255, 58, 184, 0.18);
-      text-shadow: 0 0 8px rgba(255, 58, 184, 0.3);
-    }
+    .strip-label{padding:12px 14px 6px;color:var(--faint);font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:800}
+    .strip{display:flex;gap:9px;overflow-x:auto;padding:0 14px 12px;scrollbar-width:none}
+    .strip::-webkit-scrollbar{display:none}
+    .thumb{flex:0 0 auto;width:60px;height:60px;border-radius:10px;overflow:hidden;border:2px solid transparent;background:#060608;cursor:pointer;position:relative;transition:border-color .12s}
+    .thumb svg,.thumb img{display:block;width:100%;height:100%}
+    .thumb.sel{border-color:var(--pink);box-shadow:0 0 0 3px rgba(255,125,204,.16)}
+    .thumb .id{position:absolute;left:4px;bottom:2px;font-size:9px;color:var(--ink);text-shadow:0 1px 2px #000;font-weight:700}
+    .strip .empty{color:var(--faint);font-size:11px;padding:8px 2px;white-space:nowrap}
 
-    /* left wallet list spans both rows */
-    #wallet-col { grid-row: 1 / 3; }
-    #wallet-list { flex: 1; overflow-y: auto; padding: 4px; }
-    .wallet-item {
-      display: flex; align-items: center; gap: 8px;
-      padding: 4px 6px; cursor: pointer; border: 1px solid transparent; border-radius: 2px;
-    }
-    .wallet-item:hover { background: rgba(40, 40, 48, 0.6); }
-    .wallet-item.selected { border-color: #ff7dcc; background: rgba(60, 30, 50, 0.5); box-shadow: 0 0 10px rgba(255, 58, 184, 0.18); }
-    .wallet-thumb {
-      width: 40px; height: 40px; flex: 0 0 40px; object-fit: cover;
-      background: #0a0a0c; border: 1px solid rgba(120, 120, 140, 0.3);
-      image-rendering: pixelated;
-    }
-    .wallet-meta { min-width: 0; }
-    .wallet-name { font-size: 12px; color: #e2e2e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .wallet-sub { font-size: 10px; color: #7f7f88; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #wallet-pager {
-      display: flex; align-items: center; justify-content: space-between; gap: 6px;
-      padding: 6px; border-top: 1px solid rgba(120, 120, 140, 0.2);
-    }
-    #wallet-page { font-size: 11px; color: #9f9fa8; }
+    .hero{flex:1;display:flex;flex-direction:column;gap:14px;padding:6px 14px 14px}
+    .panes{display:grid;grid-template-columns:1fr;gap:14px}
+    @media(min-width:600px){.panes{grid-template-columns:1fr 1fr}}
+    .pane{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;aspect-ratio:1/1;transition:border-color .15s,box-shadow .15s}
+    .pane .tag{position:absolute;top:8px;left:8px;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);font-weight:800;z-index:2;pointer-events:none;text-shadow:0 1px 3px #000}
+    .pane.proposed{border-color:var(--orange);box-shadow:0 0 0 2px rgba(255,154,60,.28),inset 0 0 40px rgba(255,154,60,.06)}
+    .pane .fill{width:100%;height:100%}
+    .pane .fill svg,.pane .fill img{width:100%;height:100%;display:block;object-fit:contain}
+    .pane iframe{width:100%;height:100%;border:0;display:block;background:#060608}
+    .pane .note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--faint);font-size:11px;padding:20px}
 
-    /* right previews: two square panels side by side */
-    #preview-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-height: 0; }
-    .preview-stage {
-      position: relative;
-      flex: 1; display: flex; align-items: center; justify-content: center;
-      background:
-        repeating-linear-gradient(45deg, rgba(255,255,255,0.012) 0 10px, transparent 10px 20px),
-        #050507;
-      min-height: 0; overflow: hidden;
-    }
-    #cube-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: none; background: #050507; }
-    .preview-stage img, .preview-stage canvas, .preview-stage svg { max-width: 100%; max-height: 100%; }
-    .preview-empty { color: #565660; font-size: 12px; }
+    .previewbar{display:none;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--orange);background:rgba(255,154,60,.08);border-radius:10px;color:var(--orange);font-weight:700;font-size:12px}
+    .previewbar.on{display:flex}
+    .previewbar .pdot{width:8px;height:8px;border-radius:50%;background:var(--orange);box-shadow:0 0 8px var(--orange);flex:0 0 auto}
+    .previewbar .src{color:var(--dim);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #compare{margin-left:auto;flex:0 0 auto;border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:8px;padding:7px 11px;font:700 11px var(--mono);cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none}
+    #compare.holding{background:var(--ink);color:#000;border-color:var(--ink)}
 
-    /* owned cubes section */
-    #owned-col { grid-column: 1 / 3; }
-    #owned-list { flex: 1; overflow-y: auto; display: flex; gap: 10px; padding: 10px; }
-    .owned-card {
-      flex: 0 0 auto; display: flex; gap: 4px; padding: 6px;
-      border: 1px solid rgba(120, 120, 140, 0.28); border-radius: 2px; cursor: pointer;
-      background: rgba(8, 8, 11, 0.6);
-    }
-    .owned-card.selected { border-color: #ff7dcc; box-shadow: 0 0 12px rgba(255, 58, 184, 0.28); }
-    .owned-tile { width: 96px; height: 96px; background: #050507; display: flex; align-items: center; justify-content: center; }
-    .owned-tile img, .owned-tile svg { max-width: 100%; max-height: 100%; }
-    .owned-label { position: absolute; font-size: 10px; color: #9f9fa8; }
-    #owned-empty { color: #6f6f78; font-size: 13px; padding: 18px; text-align: center; }
+    .actions{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 26%);padding:14px;display:flex;flex-direction:column;gap:10px}
+    .row{display:flex;gap:10px}
+    button.act{flex:1;border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:11px;padding:14px 12px;font:800 13px var(--mono);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:transform .06s,background .12s}
+    button.act:active{transform:translateY(1px)} button.act:hover{background:#1c1c25}
+    button.act:disabled{opacity:.4;cursor:not-allowed}
+    button.primary{background:var(--green);color:#04120c;border-color:var(--green)} button.primary:hover{background:#5fe0ac}
+    button.ghost{color:var(--dim)} button.spin{border-color:var(--pink);color:var(--pink)}
+    .hint{color:var(--faint);font-size:10.5px;text-align:center;min-height:14px}
 
-    /* commit bar */
-    #commit-bar { grid-column: 1 / 3; display: none; }
-    #update-btn {
-      background: rgba(60, 18, 44, 0.9); border-color: #ff7dcc; color: #fff;
-      font-size: 13px; padding: 9px 22px; letter-spacing: 1px;
-      box-shadow: 0 0 16px rgba(255, 58, 184, 0.25);
-    }
+    .scrim{position:fixed;inset:0;background:rgba(0,0,0,.62);opacity:0;pointer-events:none;transition:opacity .18s;z-index:20}
+    .scrim.on{opacity:1;pointer-events:auto}
+    .sheet{position:fixed;left:0;right:0;bottom:0;max-width:720px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-bottom:none;border-radius:18px 18px 0 0;transform:translateY(102%);transition:transform .24s cubic-bezier(.2,.8,.2,1);z-index:21;max-height:84dvh;display:flex;flex-direction:column}
+    .sheet.on{transform:translateY(0)}
+    .sheet .grab{width:38px;height:4px;border-radius:99px;background:#33333c;margin:9px auto 4px}
+    .sheet h2{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);padding:6px 16px;font-weight:800}
+    .warn{margin:2px 16px 10px;padding:9px 11px;border:1px solid rgba(255,93,108,.4);background:rgba(255,93,108,.07);border-radius:9px;color:#ff9aa4;font-size:11px;line-height:1.45}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:4px 16px 24px;overflow-y:auto}
+    @media(min-width:520px){.grid{grid-template-columns:repeat(4,1fr)}}
+    .nft{border:2px solid transparent;border-radius:11px;overflow:hidden;background:#060608;cursor:pointer;position:relative}
+    .nft img,.nft svg{display:block;width:100%;aspect-ratio:1/1;object-fit:cover}
+    .nft:hover{border-color:var(--pink)}
+    .nft .lab{position:absolute;left:0;right:0;bottom:0;font-size:9px;padding:3px 5px;color:var(--ink);background:linear-gradient(transparent,rgba(0,0,0,.8));font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sheet .status{color:var(--faint);font-size:11px;padding:0 16px 18px}
 
-    /* confirm modal */
-    #confirm-overlay {
-      position: fixed; inset: 0; z-index: 20; display: none;
-      align-items: center; justify-content: center;
-      background: rgba(2, 2, 4, 0.78); backdrop-filter: blur(4px);
-    }
-    #confirm-box {
-      background: #0c0c10; border: 1px solid #ff7dcc; border-radius: 3px;
-      padding: 26px 30px; max-width: 440px; text-align: center;
-      box-shadow: 0 0 40px rgba(255, 58, 184, 0.3);
-    }
-    #confirm-box h2 { font-family: 'NormiesFont', monospace; color: #fff; font-size: 20px; margin-bottom: 12px; }
-    #confirm-box p { color: #c8c8cc; font-size: 13px; line-height: 1.5; margin-bottom: 22px; }
-    #confirm-actions { display: flex; gap: 12px; justify-content: center; }
-    #confirm-lfg { background: rgba(60, 18, 44, 0.9); border-color: #ff7dcc; color: #fff; padding: 9px 26px; font-size: 13px; }
+    .toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,20px);background:var(--green);color:#04120c;font-weight:800;padding:11px 18px;border-radius:11px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:40;font-size:12px;max-width:88vw;text-align:center}
+    .toast.on{opacity:1;transform:translate(-50%,0)}
+    .toast.err{background:var(--red);color:#fff}
+
+    .gate{display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:40px}
+    .gate .big{font-size:40px}
+    .gate p{color:var(--dim);max-width:300px}
+    .gate a{color:var(--pink);text-decoration:none;font-weight:800}
   </style>
 </head>
 <body>
-  <div id="hud">
-    <span class="brand">BLOCKCASSONE</span>
-    <div class="tabs">
-      <a href="/viewer/index.html"><button>Big Cube</button></a>
-      <button class="active">Update Cube</button>
-      <a href="/viewer/streets.html"><button>Streets</button></a>
-    </div>
-    <span class="spacer"></span>
-    <button id="wallet-connect" class="wallet-btn" title="Connect an injected wallet">Connect Wallet</button>
-    <input id="wallet-addr" placeholder="0x… wallet address" spellcheck="false" />
-    <button id="wallet-load">Load wallet</button>
-    <span id="wallet-status">no wallet loaded</span>
-  </div>
-
-  <div id="page">
-    <div id="wallet-col" class="panel">
-      <div class="panel-title">Your wallet art</div>
-      <div id="wallet-list"><div class="preview-empty" style="padding:16px">Load a wallet to browse its artwork.</div></div>
-      <div id="wallet-pager">
-        <button id="wallet-prev" disabled>◄ prev</button>
-        <span id="wallet-page">—</span>
-        <button id="wallet-next" disabled>next ►</button>
+  <div class="wrap">
+    <div id="app" style="display:flex;flex-direction:column;flex:1">
+      <div class="top">
+        <a href="/viewer/index.html" class="back">‹ Big Cube</a>
+        <h1>Update Cube</h1>
+        <button id="wallet-connect">Connect</button>
       </div>
-    </div>
 
-    <div id="preview-row" class="panel" style="background:transparent;border:none">
-      <div class="panel" style="min-height:0">
-        <div class="panel-title">Cube view — selected art</div>
-        <div id="stage-cube" class="preview-stage">
-          <span class="preview-empty" id="cube-empty">select an item</span>
-          <iframe id="cube-frame" title="cube preview"></iframe>
+      <div class="strip-label">Your cubes — pick one to edit</div>
+      <div class="strip" id="strip"><span class="empty" id="strip-empty">connect a wallet to load your cubes</span></div>
+
+      <div class="hero">
+        <div class="panes">
+          <div class="pane" id="pane2d"><span class="tag" id="tag2d">2D · thumbnail</span><div class="fill" id="art2d"><div class="note">select a cube</div></div></div>
+          <div class="pane" id="pane3d"><span class="tag" id="tag3d">3D · live</span><div class="fill" id="art3d"><div class="note" id="art3d-note">select a cube</div></div></div>
+        </div>
+        <div class="previewbar" id="previewbar">
+          <span class="pdot"></span><span id="pvtext">Proposed art · unsaved</span>
+          <span class="src" id="pvsrc"></span>
+          <button id="compare">◉ Hold to compare</button>
         </div>
       </div>
-      <div class="panel" style="min-height:0">
-        <div class="panel-title">SVG view — selected art</div>
-        <div id="stage-svg" class="preview-stage"><span class="preview-empty">select an item</span></div>
-      </div>
+
+      <div class="actions" id="actions"></div>
     </div>
 
-    <div id="owned-col" class="panel">
-      <div class="panel-title">Cubes you already own — pick one to overwrite or move</div>
-      <div id="owned-list"><div id="owned-empty">Connect / load a wallet that owns Blockcassone cubes.</div></div>
-      <div id="owned-actions" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;border-top:1px solid rgba(120,120,140,0.2)">
-        <span style="font-size:11px;color:#9f9fa8">move selected →</span>
-        <input id="move-slot" type="number" min="0" placeholder="slot" style="width:90px" />
-        <button id="move-btn" disabled>Move</button>
-        <span style="flex:1"></span>
-        <a href="/viewer/streets.html" style="text-decoration:none;font-size:11px;color:#9f9fa8">merge streets ▸</a>
-      </div>
-    </div>
-
-    <div id="commit-bar" style="display:flex;align-items:center;justify-content:center;padding:6px">
-      <button id="update-btn" disabled>UPDATE ARTWORK</button>
+    <div class="gate" id="gate">
+      <div class="big">🚫</div>
+      <h1 style="letter-spacing:.1em;color:var(--ink)">Not available</h1>
+      <p>Art updates are paused right now (<b style="color:var(--ink)">customizesEnabled</b> is off on-chain). This page and its links are hidden until updates re-open.</p>
+      <a href="/viewer/index.html">‹ Back to the Big Cube</a>
     </div>
   </div>
 
-  <div id="confirm-overlay">
-    <div id="confirm-box">
-      <h2>Are you sure?</h2>
-      <p id="confirm-text">This overwrites your cube's current artwork.</p>
-      <div id="confirm-actions">
-        <button id="confirm-cancel">Cancel</button>
-        <button id="confirm-lfg">LFG</button>
-      </div>
-    </div>
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet">
+    <div class="grab"></div>
+    <h2>Pick art from your wallet</h2>
+    <div class="warn">⚠ Use only art you own the rights to. Re-basing onto infringing artwork is your responsibility.</div>
+    <div class="grid" id="walletgrid"></div>
+    <div class="status" id="sheet-status">connect a wallet to list your NFTs</div>
   </div>
+
+  <div class="toast" id="toast"></div>
 
   <script type="module" src="./update-cube.js"></script>
 </body>

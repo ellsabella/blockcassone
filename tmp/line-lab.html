@@ -18,8 +18,9 @@
   .frame { width:var(--fr); height:var(--fr); background:#050507; border:1px solid #222; overflow:hidden; cursor:grab; position:relative; }
   .frame.grabbing { cursor:grabbing; }
   #gl, #svgwrap, #svgwrap svg { width:var(--fr); height:var(--fr); display:block; }
-  .controls { width:360px; display:flex; flex-direction:column; gap:2px; max-height:90vh; overflow:auto; }
-  .tabs { display:flex; gap:4px; margin-bottom:6px; }
+  .controls { width:360px; display:flex; flex-direction:column; gap:2px; max-height:92vh; overflow:hidden; }
+  .rows-scroll { flex:1 1 auto; min-height:100px; overflow-y:auto; overflow-x:hidden; }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
   .row { display:grid; grid-template-columns:120px 1fr 52px; align-items:center; gap:8px; padding:2px 0; }
   .row label { color:#aab; font-size:11px; }
   .row input[type=range] { width:100%; }
@@ -28,6 +29,7 @@
   textarea { width:100%; height:150px; background:#070709; color:#9adf9a; border:1px solid #333; font:11px 'Courier New',monospace; }
   .hint { color:#777; font-size:10px; line-height:1.4; }
   #zoomread { color:#9adf9a; }
+  @font-face { font-family:'NormiesFont'; src:url('/viewer/assets/NormiesFont.otf') format('opentype'); font-display:block; }
 </style>
 </head>
 <body>
@@ -40,6 +42,8 @@
   </span>
   <span>shape:</span>
   <select id="shape"><option value="0">blocks</option><option value="1">ring</option><option value="2">glyph</option></select>
+  <span>lines:</span>
+  <select id="contour"><option value="sil">silhouette (on/off)</option><option value="tonal">tonal contours (bands)</option></select>
   <button id="resetView">reset view</button>
   <button id="reset">reset params</button>
   <span class="sub">scroll = zoom-to-cursor · drag = pan · dbl-click = reset view. zoom <span id="zoomread">1.0×</span></span>
@@ -66,8 +70,13 @@
       <button data-tab="glass">Glass</button>
       <button data-tab="walkers">Walkers</button>
       <button data-tab="forest">Forest</button>
+      <button data-tab="banner">Banner</button>
     </div>
     <div id="forest-note" style="display:none;color:#c8a;font-size:10px;margin-bottom:4px">Normie-only layer — non-Normie / customized cubes never grow forest.</div>
+    <div id="banner-note" style="display:none;align-items:center;gap:8px;margin-bottom:4px">
+      <label style="color:#aab;font-size:11px">source contract (CA) — text + length are data; size/count auto-fill the side (0.78 ratio); V/H + edge-band placement from the seed slider</label>
+      <input id="bannerText" value="9EB6E2025B64F340691E424B7FE7022FFDE12438" spellcheck="false" style="flex:1;min-width:120px;background:#16161a;color:#9adf9a;border:1px solid #444;font:11px 'Courier New',monospace;padding:4px 6px">
+    </div>
     <div id="glass-blend-row" style="display:none;align-items:center;gap:8px;margin-bottom:4px">
       <label style="color:#aab;font-size:11px">glass blend (the brightness lever)</label>
       <select id="glassBlend">
@@ -77,18 +86,22 @@
         <option value="normal">normal (over — dim)</option>
       </select>
     </div>
+    <div class="rows-scroll">
     <div id="rows_normie"></div>
     <div id="rows_frame" style="display:none"></div>
     <div id="rows_points" style="display:none"></div>
     <div id="rows_glass" style="display:none"></div>
     <div id="rows_walkers" style="display:none"></div>
     <div id="rows_forest" style="display:none"></div>
+    <div id="rows_banner" style="display:none"></div>
+    </div><!-- /rows-scroll -->
     <div class="grp">PORTABLE OUTPUT (40-grid units · scale(25))</div>
     <textarea id="dump" readonly></textarea>
     <div class="hint">All widths/σ in 40-grid units → paste straight into the .sol scale(25) group. feBlend screen = on-chain-safe additive. Frame = the plane's 3 border sides; orbs = corners + edge slots.</div>
   </div>
 </main>
 
+<script src="cc0-samples.js"></script>
 <script>
 // ---------- shared geometry ----------
 function buildGrid(shape){
@@ -116,6 +129,34 @@ function svgPath(g){
     if(!at(r-1,c)) d+=`M${c} ${r}h1`; if(!at(r+1,c)) d+=`M${c} ${r+1}h1`; }
   return d;
 }
+// --- tonal band-boundary contours (the render fix under test): draw a line
+// wherever adjacent cells differ in BAND, not just on/off, so internal features
+// (sockets, teeth, folds) become line-work. internal=false = silhouette only.
+function bandSegs(t, internal){
+  const at=(r,c)=> (r<0||r>39||c<0||c>39)?0:t[r*40+c];
+  const diff = internal ? (a,b)=>a!==b : (a,b)=>((a>0)!==(b>0));
+  const segs=[];
+  for(let r=0;r<40;r++)for(let c=0;c<40;c++){ const b=at(r,c);
+    if(diff(b,at(r,c+1))){ const u=(c+1)/40; segs.push([u,r/40,u,(r+1)/40]); }
+    if(diff(b,at(r+1,c))){ const v=(r+1)/40; segs.push([c/40,v,(c+1)/40,v]); }
+    if(c===0 && diff(b,0)) segs.push([0,r/40,0,(r+1)/40]);
+    if(r===0 && diff(b,0)) segs.push([c/40,0,(c+1)/40,0]); }
+  return segs;
+}
+function bandPath(t, internal){
+  const at=(r,c)=> (r<0||r>39||c<0||c>39)?0:t[r*40+c];
+  const diff = internal ? (a,b)=>a!==b : (a,b)=>((a>0)!==(b>0));
+  let d='';
+  for(let r=0;r<40;r++)for(let c=0;c<40;c++){ const b=at(r,c);
+    if(diff(b,at(r,c+1))) d+=`M${c+1} ${r}v1`;
+    if(diff(b,at(r+1,c))) d+=`M${c} ${r+1}h1`;
+    if(c===0 && diff(b,0)) d+=`M0 ${r}v1`;
+    if(r===0 && diff(b,0)) d+=`M${c} 0h1`; }
+  return d;
+}
+function unpackPayload(hex){ const h=String(hex).replace(/^0x/,''); const t=new Uint8Array(1600);
+  for(let i=0;i<1600;i++){ const byte=parseInt(h.substr((i>>2)*2,2),16)||0; t[i]=(byte>>((i&3)*2))&3; } return t; }
+function tonalToBits(t){ const g=new Uint8Array(1600); for(let i=0;i<1600;i++) g[i]=t[i]>0?1:0; return g; }
 // frame = the plane's 3 border sides (top, left, right; bottom open). grid 0..40.
 // ---- glass voxels: selection + RGB light field (ports _glassLayer/_lightColor) ----
 function h32(x){ x=Math.imul(x^(x>>>16),0x45d9f3b); x=Math.imul(x^(x>>>16),0x45d9f3b); return (x^(x>>>16))>>>0; }
@@ -209,6 +250,10 @@ const ORBS = [[0,0],[40,0],[40,40],[0,40],
 const ORBS_UV = ORBS.map(([x,y])=>[x/40,y/40]);
 
 let AXIS=0, SHAPE=0, GRID=buildGrid(0);
+let TONAL=GRID.slice(); let CONTOUR='sil';
+// figure line source: 1-bit silhouette or tonal band-boundaries (the fix under test)
+function figureSegs(){ return CONTOUR==='tonal' ? bandSegs(TONAL,true) : edges(GRID); }
+function figurePath(){ return CONTOUR==='tonal' ? bandPath(TONAL,true) : svgPath(GRID); }
 let glassBlend='screen'; // additive compositing is what makes glass read bright over black
 let view={z:1,cx:0.5,cy:0.5};
 const PAD_N=0.14, VS_N=1+2*PAD_N; // blank margin around the grid so edge lines/orbs aren't clipped
@@ -286,7 +331,7 @@ function glMesh(segs,width){
 const orbSegs=ORBS_UV.map(([x,y])=>[x,y,x+1e-3,y]);
 let M=null;
 function rebuildGL(){
-  const s=edges(GRID);
+  const s=figureSegs();
   M={ glow:glMesh(s,GLOW_W), white:glMesh(s,WHITE_W), core:glMesh(s,CORE_W),
       fglow:glMesh(FRAME_SEGS,FGLOW_W), fwhite:glMesh(FRAME_SEGS,FWHITE_W), fcore:glMesh(FRAME_SEGS,FCORE_W),
       orb:glMesh(orbSegs,ORB_W), orbcore:glMesh(orbSegs,ORB_CORE_W),
@@ -433,12 +478,24 @@ const FOREST_SCHEMA=[
   ['partAlpha','particle bloom α',0.1,3,0.05],
 ];
 const FOREST_DEF={trees:9,sideAxis:0,seed:3,trunkLen:7,trunkJitter:0.7,maxDepth:4,spread:0.48,spreadJit:0.6,decay:0.76,decayJit:0.8,inward:0.12,initVar:1,fibers:2,fiberDecay:2.5,fiberSpread:1.2,bend:0.18,glowW:0.035,glowOp:0,glowS1:0.025,glowG1:2.5,glowS2:0.08,glowG2:2,coreW:0.048,coreOp:0.26,particles:8,partSize:0.35,partSpread:0.6,haloCount:14,haloSize:0.85,haloSpread:5.2,whiteFrac:0,partOp:0.12,partBlur:0.4,partGain:3.5,partAlpha:1.55};
+// Source-contract banner: NormiesFont chars stacked into a vertical spine, white + glow
+// (mirrors the 3D buildNonNormieBanner — the 0x-stripped contract hex on a cube face).
+// Text + length are DATA (the source contract address); orientation (V/H) and the
+// edge-band position are SEED-derived. fontSize/step/glow/op are the aesthetic knobs
+// that port to the .sol as constants; `seed` just scrubs placements in the lab.
+const BANNER_SCHEMA=[
+  ['seed','seed (scrub)',0,999,1],
+  ['glow','glow blur',0,0.4,0.01],
+  ['op','opacity',0,1,0.02],
+];
+const BANNER_DEF={seed:7,glow:0.2,op:0.74};
 const G={ normie:{schema:LINE_SCHEMA, state:{...NORMIE_DEF}, def:NORMIE_DEF},
           frame :{schema:LINE_SCHEMA, state:{...FRAME_DEF},  def:FRAME_DEF},
           points:{schema:POINT_SCHEMA,state:{...POINT_DEF},  def:POINT_DEF},
           glass :{schema:GLASS_SCHEMA,state:{...GLASS_DEF},  def:GLASS_DEF},
           walkers:{schema:WALKER_SCHEMA,state:{...WALKER_DEF}, def:WALKER_DEF},
-          forest:{schema:FOREST_SCHEMA,state:{...FOREST_DEF}, def:FOREST_DEF} };
+          forest:{schema:FOREST_SCHEMA,state:{...FOREST_DEF}, def:FOREST_DEF},
+          banner:{schema:BANNER_SCHEMA,state:{...BANNER_DEF}, def:BANNER_DEF} };
 
 const amplify=(gain,alpha)=>{ const g=(+gain).toFixed(2),a=(+alpha).toFixed(2); return `${g} 0 0 0 0  0 ${g} 0 0 0  0 0 ${g} 0 0  0 0 0 ${a} 0`; };
 // neon LINE layer -> {defs, body}. Hue-preserving (works for any stroke colour).
@@ -498,6 +555,39 @@ function buildGlass(cells,p){
     if(d>p.sparkleThr*1000 && p.sparkleR>0) body+=`<circle cx="${(c+0.32).toFixed(2)}" cy="${(r+0.32).toFixed(2)}" r="${p.sparkleR}" fill="#fff" opacity="${p.sparkleOp}"/>`;
   }
   return {defs, body:body+`</g>`};
+}
+
+// Source-contract banner: the CA (0x-stripped, uppercase) as a NormiesFont line, white +
+// glow. TEXT + LENGTH are the cube's data (meaningful — the contract address). ORIENTATION
+// (vertical/horizontal) and the perpendicular POSITION are seed-derived, and the position is
+// clamped into an EDGE BAND (8–30% or 70–92% of the 40-grid) so it never crosses the centre art.
+function buildBanner(p){
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const raw=(document.getElementById('bannerText')?.value||'').replace(/^0[xX]/,'');
+  const text=esc(raw.toUpperCase());
+  const n=text.length; if(!n) return {defs:'', body:''};
+  const s=p.seed|0;
+  const rnd=k=>h32((s*2654435761) ^ (k*40503))/4294967296; // deterministic [0,1) per key
+  const vertical = rnd(1) < 0.5;
+  const band = rnd(2) < 0.5 ? [0.08,0.30] : [0.70,0.92];    // near-start or near-end edge
+  const perp = (band[0] + rnd(3)*(band[1]-band[0])) * 40;   // grid units within the band
+  // Fill the whole side edge-to-edge: N chars evenly span the 40-grid, glyph:cell ratio
+  // 0.78 to match the cube HTML banner. So count+size follow the CA length automatically.
+  const SPAN=40;
+  const step=SPAN/n, fontSize=step*0.78, alongStart=step/2;
+  const defs=`<filter id="bGlow" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB">`+
+    `<feGaussianBlur stdDeviation="${p.glow}" result="b"/>`+
+    `<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`;
+  let t='';
+  for(let i=0;i<n;i++){
+    const along=alongStart+i*step;
+    const x=(vertical?perp:along).toFixed(3), y=(vertical?along:perp).toFixed(3);
+    t+=`<text x="${x}" y="${y}">${text[i]}</text>`;
+  }
+  const body=`<g font-family="NormiesFont, monospace" font-weight="700" font-size="${fontSize.toFixed(3)}" `+
+    `text-anchor="middle" dominant-baseline="middle" fill="#fff" fill-opacity="${p.op}" `+
+    `stroke="none" filter="url(#bGlow)">${t}</g>`;
+  return {defs, body, meta:{vertical, perpPct:(perp/40*100), n, step, fontSize}};
 }
 
 // stone walkers: thin core (primary axis hue) + bobbly beads + soft glow, with
@@ -654,11 +744,12 @@ function buildSVG(){
   const wkAxisHex=HEX[[0,1,2].filter(a=>a!==AXIS)[(G.walkers.state.walkAxis|0)%2]];
   const walk=buildWalkers(walkerPaths(GRID, G.walkers.state), G.walkers.state);
   const forest=buildForest(G.forest.state);
+  const banner=buildBanner(G.banner.state);
   const svg=
    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBoxStr()}">`+
      `<rect x="-2000" y="-2000" width="6000" height="6000" fill="#050507"/>`+
-     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}${walk.defs}${forest.defs}<path id="o" d="${svgPath(GRID)}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
-     `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${forest.body}${fig.body}${walk.body}${glass.body}${frm.body}${orb.body}</g>`+
+     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}${walk.defs}${forest.defs}${banner.defs}<path id="o" d="${figurePath()}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
+     `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${forest.body}${fig.body}${walk.body}${glass.body}${frm.body}${orb.body}${banner.body}</g>`+
    `</svg>`;
   document.getElementById('svgwrap').innerHTML=svg;
   svgEl=document.querySelector('#svgwrap svg');
@@ -669,10 +760,12 @@ function buildSVG(){
     `[GLASS] blend=${glassBlend}  ${ps(G.glass.state)}  (${cells.length} cells)\n\n`+
     `[WALKERS] figure=${HEX[AXIS]} (front) walker=${wkAxisHex} (sides, majority)  ${ps(G.walkers.state)}\n\n`+
     `[FOREST] (Normie-only) unique=${HEX[AXIS]} doubled=${HEX[[0,1,2].filter(a=>a!==AXIS)[(G.forest.state.sideAxis|0)%2]]} (1:2 by walker rule)  ${ps(G.forest.state)}\n\n`+
+    `[BANNER] CA="${(document.getElementById('bannerText')?.value||'')}" (data) ${banner.meta?`chars=${banner.meta.n} size=${banner.meta.fontSize.toFixed(3)} step=${banner.meta.step.toFixed(3)} (fills side-to-side)`:''} placement=${banner.meta?(banner.meta.vertical?'vertical':'horizontal'):'-'} @ ${banner.meta?banner.meta.perpPct.toFixed(1):'-'}% edge-band  ${ps(G.banner.state)}\n\n`+
     `--- figure defs ---\n${fig.defs}\n--- figure body ---\n${fig.body}\n\n`+
     `--- frame defs ---\n${frm.defs}\n--- frame body ---\n${frm.body}\n\n`+
     `--- orb defs ---\n${orb.defs}\n--- orb body ---\n${orb.body}\n\n`+
-    `--- glass defs ---\n${glass.defs}\n--- glass rect sample ---\n${glass.body.slice(0,400)}…`;
+    `--- glass defs ---\n${glass.defs}\n--- glass rect sample ---\n${glass.body.slice(0,400)}…\n\n`+
+    `--- banner defs ---\n${banner.defs}\n--- banner body ---\n${banner.body}`;
 }
 function applyViewSVG(){ if(svgEl) svgEl.setAttribute('viewBox',viewBoxStr()); }
 
@@ -702,7 +795,7 @@ function makeRows(grpName){
     cont.appendChild(row);
   });
 }
-['normie','frame','points','glass','walkers','forest'].forEach(makeRows);
+['normie','frame','points','glass','walkers','forest','banner'].forEach(makeRows);
 document.querySelector('.controls').addEventListener('input',e=>{
   const grp=e.target.dataset.grp, k=e.target.dataset.k; if(!grp)return;
   G[grp].state[k]=parseFloat(e.target.value); document.getElementById(`v_${grp}_${k}`).textContent=G[grp].state[k]; buildSVG();
@@ -710,15 +803,25 @@ document.querySelector('.controls').addEventListener('input',e=>{
 });
 document.getElementById('tabs').addEventListener('click',e=>{ const t=e.target.dataset.tab; if(!t)return;
   [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
-  ['normie','frame','points','glass','walkers','forest'].forEach(g=>document.getElementById('rows_'+g).style.display=(g===t?'':'none'));
+  ['normie','frame','points','glass','walkers','forest','banner'].forEach(g=>document.getElementById('rows_'+g).style.display=(g===t?'':'none'));
   document.getElementById('glass-blend-row').style.display=(t==='glass'?'flex':'none');
-  document.getElementById('forest-note').style.display=(t==='forest'?'':'none'); });
+  document.getElementById('forest-note').style.display=(t==='forest'?'':'none');
+  document.getElementById('banner-note').style.display=(t==='banner'?'flex':'none'); });
 document.getElementById('glassBlend').addEventListener('change',e=>{ glassBlend=e.target.value; buildSVG(); });
+document.getElementById('bannerText').addEventListener('input',()=>buildSVG());
 document.getElementById('axis').addEventListener('click',e=>{ const a=e.target.dataset.axis; if(a==null)return;
   AXIS=+a; [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.axis===a)); drawGL(); buildSVG(); });
-document.getElementById('shape').addEventListener('change',e=>{ SHAPE=+e.target.value; GRID=buildGrid(SHAPE); rebuildGL(); buildSVG(); });
+document.getElementById('shape').addEventListener('change',e=>{ const val=e.target.value;
+  if(val.slice(0,4)==='cc0:'){ const s=CC0_SAMPLES[+val.slice(4)]; TONAL=unpackPayload(s.payload); GRID=tonalToBits(TONAL); }
+  else { SHAPE=+val; GRID=buildGrid(SHAPE); TONAL=GRID.slice(); }
+  rebuildGL(); buildSVG(); });
+document.getElementById('contour').addEventListener('change',e=>{ CONTOUR=e.target.value; rebuildGL(); buildSVG(); });
+if(window.CC0_SAMPLES&&CC0_SAMPLES.length){ const sel=document.getElementById('shape');
+  const og=document.createElement('optgroup'); og.label='— real flattened art —';
+  CC0_SAMPLES.forEach((s,i)=>{ const o=document.createElement('option'); o.value='cc0:'+i; o.textContent=s.name; og.appendChild(o); });
+  sel.appendChild(og); }
 document.getElementById('reset').addEventListener('click',()=>{
-  for(const g of ['normie','frame','points','glass','walkers','forest']){ G[g].state={...G[g].def};
+  for(const g of ['normie','frame','points','glass','walkers','forest','banner']){ G[g].state={...G[g].def};
     G[g].schema.forEach(([k])=>{ const el=document.querySelector(`[data-grp="${g}"][data-k="${k}"]`); if(el){el.value=G[g].state[k]; document.getElementById(`v_${g}_${k}`).textContent=G[g].state[k];} }); }
   buildSVG(); });
 document.getElementById('resetView').addEventListener('click',()=>{ view={z:1,cx:0.5,cy:0.5}; updateView(); });

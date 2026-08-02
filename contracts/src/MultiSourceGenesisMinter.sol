@@ -214,6 +214,41 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
         return (r.collectionId, r.sourceId);
     }
 
+    event ReservationsReleased(address indexed wallet, uint256 count);
+    error CannotReleaseDuringAllowlist();
+
+    /// @notice Return each wallet's UNMINTED reservations to the draw pool (owner). Run
+    ///         after the GTD (Allowlist) window closes so guaranteed-but-unclaimed art
+    ///         isn't stranded — reserved sources were pulled from the pool, so without
+    ///         this the collection under-fills. Reserved→pool keeps `pool + reserved ==
+    ///         cap` invariant. Blocked while `phase == Allowlist` so a live GTD can't be
+    ///         rugged mid-mint. Idempotent per wallet (only the unminted tail is released).
+    function releaseReservations(address[] calldata wallets) external onlyOwner {
+        if (phase == Phase.Allowlist) revert CannotReleaseDuringAllowlist();
+        for (uint256 w = 0; w < wallets.length; w++) {
+            address wallet = wallets[w];
+            Reservation[] storage res = _reservations[wallet];
+            uint256 cursor = reservationCursor[wallet];
+            uint256 len = res.length;
+            uint256 released = 0;
+            for (uint256 i = cursor; i < len; i++) {
+                uint8 c = res[i].collectionId;
+                uint256 sid = res[i].sourceId;
+                if (_collections[c].model == MODEL_LIVE) {
+                    _addToPublicPool(sid); // Normie: back into _publicNormies
+                } else {
+                    _pool[c].push(sid); // CC0: back into the collection draw pool
+                }
+                reservedCount[c] -= 1;
+                released += 1;
+            }
+            if (released > 0) {
+                reservationCursor[wallet] = len; // mark the tail consumed (released)
+                emit ReservationsReleased(wallet, released);
+            }
+        }
+    }
+
     // ---- Views --------------------------------------------------------------
 
     function collectionCount() external view returns (uint256) {

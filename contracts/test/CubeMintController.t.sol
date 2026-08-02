@@ -41,6 +41,7 @@ contract CubeMintControllerTest is Test {
         controller = new CubeMintController(cubes, artStore, attestationVerifier);
 
         cubes.setCustomizer(address(controller)); // authorize re-base (while test still owns cubes)
+        cubes.setCustomizesEnabled(true); // open the customize gate (while test still owns cubes)
         cubes.transferOwnership(address(controller));
         artStore.transferOwnership(address(controller));
 

@@ -250,32 +250,41 @@ move cubes together → merge a street.
 - Moving changes the token's metadata + image + animation → the contract must emit
   an **ERC-4906** metadata-update event so marketplaces re-fetch (see below).
 
-### Displacement / force-move (LOCKED — territorial, controversy-by-design)
+### Displacement / force-move (BUILT — territorial, with guardrails)
 
 Holding **≥5 of a street's 8 plots gives you control of it.** A controller may
-**force-move** any other wallet's cube out of that street. This is deliberately a
-conquest mechanic — an involuntary change to the displaced token's location,
-colour, and world-traits, with **no cooldown and no compensation**. Only the
-per-move fee applies (a heavier "force" variant may be priced later).
+**force-move** any other wallet's cube out of that street via `moveCube` — an
+involuntary change to the displaced token's location, colour, and world-traits.
+It is still a conquest mechanic, but **priced and rate-limited** rather than
+free-for-all. (This supersedes the earlier "no cooldown, no compensation,
+controversy" framing — we chose to compensate the victim and add a cooldown; see
+`FEES_AND_DISPLACEMENT_SPEC.md`.)
 
-- **Destination of a displaced cube:** a vacant plot if one exists; otherwise a
-  strict **1:1 swap** — the controller nominates one of their own cubes elsewhere,
-  the displaced cube takes that plot, and the controller's cube moves into the
-  contested street. So clearing a street with M minority cubes requires the
-  controller to hold M cubes elsewhere to swap.
-- **Merge folds this in:** merging a street you hold ≥5 of automatically displaces
-  the remaining minority cubes (by the swap rule above) as part of consolidation,
-  then collapses the 8 plots into the golden survivor. If the controller lacks
-  enough external cubes to swap out every minority cube, the merge is blocked until
-  they do (or acquire the minority).
+- **Mechanic (1:1 swap):** the controller moves one of their own cubes into the
+  contested plot; the displaced cube takes the controller's now-vacated slot. So
+  clearing a street with M minority cubes takes M such swaps, each needing a cube
+  the controller holds elsewhere.
+- **Compensation + fee:** `fee = baseFee + D × premiumPerPoint`, where `D` is the
+  biome-rarity the victim *loses* (their new slot vs the slot taken from them). The
+  fee is **paid to the displaced victim** (direct transfer, pull-fallback). When the
+  controller grabs a **higher-tier** slot (`D > 0`) the house takes ~1/3; a lateral
+  or upgrade move pays the victim the full baseFee. Move-to-vacant is a flat baseFee
+  to the house.
+- **Cooldown:** the same victim address cannot be displaced twice within 15 minutes.
+- **Merge is a SEPARATE step, not auto-displacement:** `mergeStreet` still requires
+  you own **every occupied plot** of the street. To consolidate a contested street
+  you first **displace** each minority holder (the paid swaps above), which makes you
+  sole owner of the occupied plots, **then** merge. Merge itself is free when you own
+  the whole street (else baseFee per vacant plot locked).
 - **Immunity:** golden / merged street tokens cannot be displaced and cannot
-  displace — they're locked in place.
-- **Marketplace refresh:** displaced/moved/merged tokens emit **ERC-4906**
-  (`MetadataUpdate` / `BatchMetadataUpdate`) so OpenSea et al. re-fetch the new
+  displace — they're locked in place (`CannotDisplaceStreet`).
+- **Marketplace refresh (BUILT):** displaced/moved/merged/re-based tokens emit
+  **ERC-4906** (`MetadataUpdate`) so OpenSea et al. re-fetch the new
   colour/traits/image. OpenSea refresh is best-effort + laggy; our own explorer
   reflects chain state instantly.
 
-This is intentional. The world is contested territory; majority control is power.
+The world is contested territory; majority control is power — but the displaced are
+paid for the land taken from them, and can't be harassed on a loop.
 
 ## Street Merge (Burn / Consolidation)
 
@@ -283,11 +292,16 @@ Merge is **street-level** — an 8-plot Hilbert street (neighbourhood/region mer
 is out of scope for now). Merge *is* the burn mechanism; there is no standalone
 "destroy one cube."
 
-**Eligibility.** A wallet may merge a street when it holds **at least 5 of the 8
-plots** — a simple majority — regardless of who holds the rest. (This replaces the
-earlier sole-owner rule, which becomes unworkable once the world sells out and you
-can't buy/vacate the remaining plots.) Resolving the minority cubes still in the
-street is handled by **displacement** (see Movement → Displacement, under design).
+**Eligibility.** `mergeStreet` requires the caller to **solely own every occupied
+plot** of the street **and hold ≥5 filled plots** (`MERGE_MIN_FILLED`). Vacant plots
+are fine — you merge *with* them (they lock into the street), you don't fill them —
+but a near-empty street can't mint a golden cube (fewer than 5 filled reverts).
+Majority (≥5/8) does not by itself permit a merge — it grants the right to
+**displace** the minority holders first
+(see Displacement above): you evict each other-wallet cube via a paid swap until you
+hold every occupied plot, **then** merge. This two-step model (displace, then merge)
+keeps merge simple and avoids unbounded cascades, and still works in a sold-out
+world where you can't just buy or vacate the remaining plots.
 
 **Outcome — the street collapses into ONE survivor.**
 

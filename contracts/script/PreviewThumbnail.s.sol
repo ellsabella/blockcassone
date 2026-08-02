@@ -57,6 +57,15 @@ contract PreviewThumbnail is Script {
     uint256 private constant HILBERT_ORDER = 5;
     // Live Normies bitmap storage (mainnet). Has code only when forked.
     address private constant NORMIES_STORAGE = 0x1B976bAf51cF51F0e369C070d47FBc47A706e602;
+    address private constant DEV = address(0xBEEF);
+
+    // Deployed refs bundled so the loop passes ONE stack slot, not four (fixes stack-too-deep).
+    struct Env {
+        PreviewMockNormies normies;
+        CubeNFT cubes;
+        CubeThumbnailRendererV1 thumb;
+        bool forked;
+    }
 
     function run() external {
         uint256[] memory ids = _realIds();
@@ -64,7 +73,6 @@ contract PreviewThumbnail is Script {
         if (count > ids.length) count = ids.length; // one cube per unique source id
         uint256 nnCount = vm.envOr("NONNORMIE_COUNT", uint256(4));
         if (nnCount > count) nnCount = count;
-        address dev = address(0xBEEF);
 
         bool forked = NORMIES_STORAGE.code.length > 0;
         console2.log(
@@ -73,40 +81,54 @@ contract PreviewThumbnail is Script {
                 : "mode: fork-free - using cached fixtures, else placeholder silhouette"
         );
 
-        PreviewMockNormies normies = new PreviewMockNormies();
-        CubeNFT cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, dev);
-        CubeThumbnailRendererV1 thumb = new CubeThumbnailRendererV1(
-            cubes,
-            address(normies),
+        Env memory e;
+        e.forked = forked;
+        e.normies = new PreviewMockNormies();
+        e.cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(e.normies), 4096, DEV);
+        e.thumb = new CubeThumbnailRendererV1(
+            e.cubes,
+            address(e.normies),
             address(0),
             address(new CubeHilbertGeometry()),
             address(new CubeFrameLayer()),
             address(new CubeWalkerLayer())
         );
 
-        for (uint256 s = 0; s < count; s++) {
-            uint256 id = ids[s];
-            (bytes memory raw, string memory artSrc) = _bitmapFor(id, forked);
+        // Optional: render OUR exact snapshot slots + their Normie ids (SLOTS/IDS env), so
+        // the viewer's per-slot thumbnails match each cube. Falls back to the 0..COUNT path.
+        uint256[] memory slots = vm.envOr("SLOTS", ",", new uint256[](0));
+        uint256[] memory slotIds = vm.envOr("IDS", ",", new uint256[](0));
+        bool useSlots = slots.length > 0;
+        uint256 iters = useSlots ? slots.length : count;
 
-            // Normie path: mint a cube on the mock holding this (real) art and render.
-            normies.mint(dev, id, raw);
-            bytes32 seed = keccak256(abi.encode("preview", s));
-            vm.prank(dev);
-            uint256 cubeId = cubes.mintNormieCube(id, uint32(s), seed);
-            string memory svg = thumb.thumbnailSVG(cubeId);
-            vm.writeFile(string.concat("data/preview-slot-", vm.toString(s), ".svg"), svg);
+        for (uint256 s = 0; s < iters; s++) {
+            uint256 slot = useSlots ? slots[s] : s;
+            uint256 id = useSlots ? slotIds[s % slotIds.length] : ids[s];
+            uint256 mockId = useSlots ? (100000 + slot) : id;
+            // Per-slot work lives in a helper so run()'s stack stays shallow (was stack-too-deep).
+            _renderSlot(e, slot, id, mockId, !useSlots && s < nnCount);
+        }
+    }
 
-            console2.log("slot", s);
-            console2.log("  normie id / art:", id, artSrc);
-            console2.log("  expected colour:", _colourName(_axis(s)));
-            console2.log("  emitted in SVG :", _emittedColour(svg));
+    function _renderSlot(Env memory e, uint256 slot, uint256 id, uint256 mockId, bool doNonNormie) private {
+        (bytes memory raw, string memory artSrc) = _bitmapFor(id, e.forked);
+        // Mint a UNIQUE mock Normie per slot (snapshot reuses ids), holding this art.
+        e.normies.mint(DEV, mockId, raw);
+        bytes32 seed = keccak256(abi.encode("preview", slot));
+        vm.prank(DEV);
+        uint256 cubeId = e.cubes.mintNormieCube(mockId, uint32(slot), seed);
+        vm.writeFile(string.concat("data/preview-slot-", vm.toString(slot), ".svg"), e.thumb.thumbnailSVG(cubeId));
 
-            // Non-Normie path: same silhouette as a 2-bit tonal payload, rendered
-            // statelessly. Verifies walkers/glass/frame on the customized route.
-            if (s < nnCount) {
-                string memory nn = thumb.previewThumbnailSVG(seed, uint32(s), id, _toPayload(raw));
-                vm.writeFile(string.concat("data/preview-nonnormie-", vm.toString(s), ".svg"), nn);
-            }
+        console2.log("slot", slot);
+        console2.log("  normie id / art:", id, artSrc);
+
+        if (doNonNormie) {
+            vm.writeFile(
+                string.concat("data/preview-nonnormie-", vm.toString(slot), ".svg"),
+                e.thumb.previewThumbnailSVG(
+                    seed, uint32(slot), address(0x0123456789abcDEF0123456789abCDef01234567), id, _toPayload(raw)
+                )
+            );
         }
     }
 

@@ -107,9 +107,11 @@ async function ethCallString(rpcUrl, to, signature, tokenId) {
     params: [{
       to,
       data: calldata(selector(signature), tokenId),
-      // The production renderer can return a large HTML string. Local Anvil
-      // tolerates this higher ceiling for inspection.
-      gas: '0x5f5e100',
+      // The production renderer can return a large HTML string, and the CC0
+      // tonal thumbnail path is intentionally gas-heavy (a view path, not
+      // block-bound). Use a very high eth_call ceiling so external/CC0 cubes
+      // export too — 100M OOMs on the tonal render.
+      gas: '0x2000000000000',
     }, 'latest'],
   }));
 }
@@ -122,7 +124,7 @@ async function loadMetadataFromCubeTokenURI(rpcUrl, cubeNft, tokenId) {
     params: [{
       to: cubeNft,
       data: calldata(TOKEN_URI_SELECTOR, tokenId),
-      gas: '0x5f5e100',
+      gas: '0x2000000000000',
     }, 'latest'],
   });
 

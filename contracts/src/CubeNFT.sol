@@ -4,7 +4,9 @@ pragma solidity ^0.8.26;
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import {IERC721} from "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
+import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {ICubeRenderer} from "./interfaces/ICubeRenderer.sol";
+import {CubeEnv} from "./lib/CubeEnv.sol";
 import {
     INonFungibleSeaDropToken,
     ISeaDrop,
@@ -36,7 +38,7 @@ interface ICubeArtStore {
     function hasSourcePayload(address sourceContract, uint256 sourceTokenId) external view returns (bool);
 }
 
-contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
+contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     uint8 public constant SOURCE_KIND_NORMIE = 1;
     uint8 public constant SOURCE_KIND_EXTERNAL_ERC721 = 2;
     uint8 public constant SOURCE_KIND_MERGED_STREET = 3;
@@ -82,6 +84,9 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     error MovesDisabled();
     error NotCubeOwner(uint256 cubeId, address caller);
     error CannotMoveStreet(uint256 cubeId);
+    error CannotDisplaceStreet(uint256 cubeId);
+    error NotStreetMajority(uint32 slot, uint256 owned);
+    error CustomizesDisabled();
     error OnlyCustomizer(address caller);
     error CannotCustomizeStreet(uint256 cubeId);
     error NotPoolSource(address sourceContract, uint256 sourceTokenId);
@@ -106,6 +111,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     event AgentStatusRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event CubeMoved(uint256 indexed cubeId, uint32 indexed fromSlot, uint32 indexed toSlot, address owner);
     event MovesEnabledUpdated(bool enabled);
+    event CustomizesEnabledUpdated(bool enabled);
     event CustomizerUpdated(address indexed oldCustomizer, address indexed newCustomizer);
     event ArtStoreUpdated(address indexed oldArtStore, address indexed newArtStore);
     event CubeCustomized(
@@ -128,6 +134,59 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     // on a slot the allocator will target (which would brick a mint tx); the owner
     // flips it on once the mint is done.
     bool public movesEnabled;
+
+    // Post-mint merge game. Independent of moves — off at deploy, flipped on by the
+    // owner when merging opens (kept separate so move and merge reveal on their own).
+    bool public mergesEnabled;
+
+    // Post-mint customize game (re-base a cube's source art). Independent of move/merge —
+    // off at deploy, gates BOTH update paths (customizeCubeSource + rebaseToPoolSource).
+    bool public customizesEnabled;
+
+    // A move can target a VACANT slot, or an occupied slot in a street where the mover owns
+    // at least this many of the 8 plots — a majority — which force-swaps the occupant out.
+    uint256 public constant STREET_MOVE_MAJORITY = 5;
+
+    // A street needs at least this many FILLED plots (all the caller's) to merge. You merge
+    // WITH any vacant plots — you don't fill them — but you can't mint a street token from a
+    // near-empty street. Rivals must be displaced out first (sole occupier required).
+    uint256 public constant MERGE_MIN_FILLED = 5;
+
+    // ---- Fee / displacement economics (see FEES_AND_DISPLACEMENT_SPEC.md) -----
+    // Flat base fee: move-to-empty and per-empty-plot merge (both to the house), and the
+    // base term of a displacement fee (paid to the displaced owner).
+    uint256 public baseFee;
+    // Added per downgrade-point when a displacement pushes the victim into a lower-rarity biome.
+    uint256 public premiumPerPoint;
+    // Fee-rarity points per biome id (0 desert,1 water,2 grass,3 forest,4 mountain,5 ice).
+    // Independent of CubeEnv's world distribution so pricing tunes without moving biomes.
+    uint256[6] public biomeWeight;
+    // House cut (bps) of a displacement fee, taken ONLY when the mover grabs a higher tier.
+    uint16 public displaceHouseCutBps;
+    // Min seconds between displacements of the same victim address (anti-harassment).
+    uint256 public displaceCooldown;
+
+    uint256 public houseBalance;                        // accrued house fees, owner-withdrawable
+    mapping(address => uint256) public owed;            // pull-payment fallback for failed pushes
+    mapping(address => uint256) public lastDisplacedAt; // victim address -> last displacement ts
+
+    event MoveFeePaid(uint256 indexed cubeId, uint256 fee);
+    event DisplacementPaid(uint256 indexed cubeId, address indexed victim, uint256 victimShare, uint256 houseShare);
+    event MergeFeePaid(uint32 indexed street, uint256 emptyPlots, uint256 fee);
+    event HouseWithdrawn(address indexed to, uint256 amount);
+    event OwedWithdrawn(address indexed to, uint256 amount);
+    event FeeKnobUpdated(bytes32 indexed knob, uint256 value);
+
+    error InsufficientFee(uint256 required, uint256 sent);
+    error DisplaceCooldownActive(address victim, uint256 readyAt);
+    error NothingOwed();
+    error BadBiomeId(uint8 biomeId);
+    error CutTooHigh(uint16 bps);
+    error WithdrawFailed();
+
+    // ERC-4906 metadata-update signals so marketplaces re-fetch after a slot/source change.
+    event MetadataUpdate(uint256 _tokenId);
+    event BatchMetadataUpdate(uint256 _fromTokenId, uint256 _toTokenId);
 
     // Authorized to re-base a cube's displayed source (post-mint customization).
     // Set to the customization controller, which verifies cube ownership and a
@@ -164,6 +223,14 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         if (normieContract_.code.length == 0) revert InvalidNormieContract();
         normieContract = normieContract_;
         totalSlots = totalSlots_;
+
+        // Fee defaults (owner-tunable). Weights by biome id: desert 3, water 1, grass 1,
+        // forest 1, mountain 8, ice 12. See FEES_AND_DISPLACEMENT_SPEC.md.
+        baseFee = 0.001 ether;
+        premiumPerPoint = 0.01 ether;
+        biomeWeight = [uint256(3), 1, 1, 1, 8, 12];
+        displaceHouseCutBps = 3333; // ~1/3
+        displaceCooldown = 15 minutes;
     }
 
     function mintNormieCube(uint256 normieId, uint32 slot, bytes32 seed)
@@ -463,9 +530,11 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     mapping(uint256 streetTokenId => StreetInfo) private _streetInfo;
 
     error EmptyStreet(uint32 street);
+    error NotEnoughFilled(uint32 street, uint256 occupied);
     error NotStreetOwner(uint32 street, uint256 cubeId);
     error StreetAlreadyMerged(uint32 street);
     error InvalidLeader(uint32 street, uint256 cubeId);
+    error MergesDisabled();
 
     event StreetMerged(
         uint256 indexed streetTokenId,
@@ -473,6 +542,13 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         uint32 indexed street,
         uint8 occupiedCount
     );
+    event MergesEnabledUpdated(bool enabled);
+
+    /// @notice Owner switch that opens the merge game (off at deploy). Independent of moves.
+    function setMergesEnabled(bool enabled) external onlyOwner {
+        mergesEnabled = enabled;
+        emit MergesEnabledUpdated(enabled);
+    }
 
     /// @notice Merge every occupied plot of `street` (all owned by the caller)
     ///         into one street token. The occupied plot cubes are burned and all
@@ -480,7 +556,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     /// @dev Reverts unless the caller solely owns every occupied plot. The leader
     ///      (street SVG) defaults to the lowest occupied plot. Irreversible in v1,
     ///      but plot CubeData is preserved so an un-merge could be added later.
-    function mergeStreet(uint32 street) external returns (uint256 streetTokenId) {
+    function mergeStreet(uint32 street) external payable nonReentrant returns (uint256 streetTokenId) {
         return _mergeStreet(street, 0);
     }
 
@@ -489,6 +565,8 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     ///         the street token's SVG. The viewer lets the owner pick the lead.
     function mergeStreet(uint32 street, uint256 leaderCubeId)
         external
+        payable
+        nonReentrant
         returns (uint256 streetTokenId)
     {
         return _mergeStreet(street, leaderCubeId);
@@ -498,6 +576,8 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         internal
         returns (uint256 streetTokenId)
     {
+        if (!mergesEnabled) revert MergesDisabled();
+
         uint256 base = uint256(street) * 8;
         if (base + 8 > totalSlots) revert InvalidSlot(uint32(base));
 
@@ -518,11 +598,18 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
             occ++;
         }
         if (occ == 0) revert EmptyStreet(street);
+        if (occ < MERGE_MIN_FILLED) revert NotEnoughFilled(street, occ); // merge with vacants OK, but >= 5 filled
         // An explicit leader must be one of this street's occupied plots.
         if (requestedLeader != 0) {
             if (!leaderFound) revert InvalidLeader(street, requestedLeader);
             leader = requestedLeader;
         }
+
+        // Fee: free when you own the whole street; baseFee per vacant plot you lock up.
+        uint256 emptyPlots = 8 - occ;
+        uint256 fee = emptyPlots * baseFee;
+        if (msg.value < fee) revert InsufficientFee(fee, msg.value);
+        houseBalance += fee;
 
         streetTokenId = _nextCubeId++;
         CubeData memory ld = _cubeData[leader];
@@ -551,6 +638,9 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
 
         _safeMint(msg.sender, streetTokenId);
         emit StreetMerged(streetTokenId, msg.sender, street, uint8(occ));
+        emit MergeFeePaid(street, emptyPlots, fee);
+        emit MetadataUpdate(streetTokenId);
+        _refundExcess(fee);
     }
 
     /// @notice CubeData for a (possibly burned) cube, with no ownership check.
@@ -597,9 +687,12 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         emit MovesEnabledUpdated(enabled);
     }
 
-    /// @notice Move a cube you own to any vacant slot. Merged-street tokens are
-    ///         anchored and cannot be moved.
-    function moveCube(uint256 cubeId, uint32 newSlot) external {
+    /// @notice Move a cube you own to a VACANT slot (flat baseFee to the house), or
+    ///         force-swap into an occupied slot in a street you dominate (you own
+    ///         >= STREET_MOVE_MAJORITY of its 8 plots), paying the displaced owner. The
+    ///         displaced cube takes the mover's old slot. Merged-street tokens are anchored —
+    ///         they can neither be moved nor displaced. See FEES_AND_DISPLACEMENT_SPEC.md.
+    function moveCube(uint256 cubeId, uint32 newSlot) external payable nonReentrant {
         if (!movesEnabled) revert MovesDisabled();
 
         address owner = _ownerOf(cubeId);
@@ -610,15 +703,186 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         if (data.sourceKind == SOURCE_KIND_MERGED_STREET) revert CannotMoveStreet(cubeId);
         if (newSlot >= totalSlots) revert InvalidSlot(newSlot);
 
-        uint256 occupant = cubeForSlot[newSlot];
-        if (occupant != 0) revert SlotOccupied(newSlot, occupant);
-
         uint32 oldSlot = data.slot;
-        cubeForSlot[oldSlot] = 0;
+        if (newSlot == oldSlot) revert InvalidSlot(newSlot);
+
+        uint256 occupant = cubeForSlot[newSlot];
+        if (occupant == 0) {
+            // Plain move into a vacant slot: flat base fee to the house.
+            if (msg.value < baseFee) revert InsufficientFee(baseFee, msg.value);
+            houseBalance += baseFee;
+            cubeForSlot[oldSlot] = 0;
+            cubeForSlot[newSlot] = cubeId;
+            data.slot = newSlot;
+            emit CubeMoved(cubeId, oldSlot, newSlot, msg.sender);
+            emit MoveFeePaid(cubeId, baseFee);
+            emit MetadataUpdate(cubeId); // slot changed => colour/env/street changed
+            _refundExcess(baseFee);
+            return;
+        }
+
+        // Occupied target => displacement (handled in a helper to keep this frame shallow).
+        if (_cubeData[occupant].sourceKind == SOURCE_KIND_MERGED_STREET) {
+            revert CannotDisplaceStreet(occupant);
+        }
+        _displace(cubeId, oldSlot, newSlot, occupant);
+    }
+
+    /// @dev Force-swap `cubeId` into `newSlot`, sending the occupant to `oldSlot`. A self-swap
+    ///      (you own both) is free; otherwise requires majority + cooldown and pays the victim.
+    function _displace(uint256 cubeId, uint32 oldSlot, uint32 newSlot, uint256 occupant) private {
+        CubeData storage data = _cubeData[cubeId];
+        CubeData storage other = _cubeData[occupant];
+        address victim = _ownerOf(occupant);
+
+        if (victim != msg.sender) {
+            uint256 ownedCount = _ownedInStreet(msg.sender, newSlot);
+            if (ownedCount < STREET_MOVE_MAJORITY) revert NotStreetMajority(newSlot, ownedCount);
+            // No cooldown for a never-displaced victim (lastDisplacedAt == 0).
+            uint256 last = lastDisplacedAt[victim];
+            if (last != 0 && block.timestamp < last + displaceCooldown) {
+                revert DisplaceCooldownActive(victim, last + displaceCooldown);
+            }
+        }
+
+        (uint256 fee, uint256 houseShare, uint256 victimShare) =
+            victim == msg.sender ? (0, 0, 0) : _displaceFee(oldSlot, newSlot);
+        if (msg.value < fee) revert InsufficientFee(fee, msg.value);
+
+        // Effects.
+        houseBalance += houseShare;
+        if (victim != msg.sender) lastDisplacedAt[victim] = block.timestamp;
+        cubeForSlot[oldSlot] = occupant;
         cubeForSlot[newSlot] = cubeId;
+        other.slot = oldSlot;
         data.slot = newSlot;
 
         emit CubeMoved(cubeId, oldSlot, newSlot, msg.sender);
+        emit CubeMoved(occupant, newSlot, oldSlot, victim); // the displaced cube
+        emit MetadataUpdate(cubeId); // both cubes changed slot => colour/env/street changed
+        emit MetadataUpdate(occupant);
+        if (victimShare > 0 || houseShare > 0) emit DisplacementPaid(cubeId, victim, victimShare, houseShare);
+
+        // Interactions last: pay the victim (push, pull-fallback), then refund the mover.
+        _payout(victim, victimShare);
+        _refundExcess(fee);
+    }
+
+    /// @dev Displacement fee split. D = rarity the victim loses = weight(target) - weight(oldSlot);
+    ///      the house cut applies only when the mover grabs a higher tier (D > 0).
+    function _displaceFee(uint32 oldSlot, uint32 newSlot)
+        private
+        view
+        returns (uint256 fee, uint256 houseShare, uint256 victimShare)
+    {
+        uint256 wTarget = _biomeWeightForSlot(newSlot);
+        uint256 wOld = _biomeWeightForSlot(oldSlot);
+        uint256 d = wTarget > wOld ? wTarget - wOld : 0;
+        fee = baseFee + d * premiumPerPoint;
+        houseShare = d > 0 ? (fee * displaceHouseCutBps) / 10000 : 0;
+        victimShare = fee - houseShare;
+    }
+
+    /// @dev Send `amount` to `to`; on failure credit a withdrawable balance so a recipient
+    ///      that reverts on receive can't block the caller's action. Capped gas bounds griefing.
+    function _payout(address to, uint256 amount) private {
+        if (amount == 0) return;
+        (bool ok,) = payable(to).call{value: amount, gas: 30000}("");
+        if (!ok) owed[to] += amount;
+    }
+
+    /// @dev Return any msg.value above `fee` to the caller (fee already validated as <= msg.value).
+    function _refundExcess(uint256 fee) private {
+        uint256 excess = msg.value - fee;
+        if (excess > 0) _payout(msg.sender, excess);
+    }
+
+    /// @dev Fee-rarity weight of a slot's biome (street property).
+    function _biomeWeightForSlot(uint32 slot) private view returns (uint256) {
+        return biomeWeight[CubeEnv.idForStreet(uint256(slot) / 8)];
+    }
+
+    /// @dev How many of the 8 plots in `slot`'s street are cubes owned by `account`.
+    function _ownedInStreet(address account, uint32 slot) private view returns (uint256 count) {
+        uint32 base = (slot / 8) * 8;
+        for (uint32 k = 0; k < 8; k++) {
+            uint256 cid = cubeForSlot[base + k];
+            if (cid != 0 && _ownerOf(cid) == account) count++;
+        }
+    }
+
+    // ---- Fee quotes, admin knobs, treasury -----------------------------------
+
+    /// @notice What a moveCube(cubeId, newSlot) would cost right now, and how it splits.
+    ///         victim == address(0) for a vacant move or a free self-swap.
+    function quoteMove(uint256 cubeId, uint32 newSlot)
+        external
+        view
+        returns (uint256 fee, address victim, uint256 victimShare, uint256 houseShare)
+    {
+        uint256 occupant = cubeForSlot[newSlot];
+        if (occupant == 0) return (baseFee, address(0), 0, 0);
+        address v = _ownerOf(occupant);
+        if (v == _ownerOf(cubeId)) return (0, address(0), 0, 0); // free self-swap
+        (fee, houseShare, victimShare) = _displaceFee(_cubeData[cubeId].slot, newSlot);
+        victim = v;
+    }
+
+    /// @notice What a mergeStreet(street) would cost right now, plus the vacant-plot count.
+    function quoteMerge(uint32 street) external view returns (uint256 fee, uint256 emptyPlots) {
+        uint256 base = uint256(street) * 8;
+        uint256 occ;
+        for (uint256 k = 0; k < 8; k++) {
+            if (cubeForSlot[uint32(base + k)] != 0) occ++;
+        }
+        emptyPlots = 8 - occ;
+        fee = emptyPlots * baseFee;
+    }
+
+    function setBaseFee(uint256 v) external onlyOwner {
+        baseFee = v;
+        emit FeeKnobUpdated("baseFee", v);
+    }
+
+    function setPremiumPerPoint(uint256 v) external onlyOwner {
+        premiumPerPoint = v;
+        emit FeeKnobUpdated("premiumPerPoint", v);
+    }
+
+    function setBiomeWeight(uint8 biomeId, uint256 weight) external onlyOwner {
+        if (biomeId > 5) revert BadBiomeId(biomeId);
+        biomeWeight[biomeId] = weight;
+        emit FeeKnobUpdated(bytes32(uint256(biomeId)), weight);
+    }
+
+    function setDisplaceHouseCutBps(uint16 bps) external onlyOwner {
+        if (bps > 10000) revert CutTooHigh(bps);
+        displaceHouseCutBps = bps;
+        emit FeeKnobUpdated("displaceHouseCutBps", bps);
+    }
+
+    function setDisplaceCooldown(uint256 secs) external onlyOwner {
+        displaceCooldown = secs;
+        emit FeeKnobUpdated("displaceCooldown", secs);
+    }
+
+    /// @notice Sweep accrued house fees. Does NOT touch victim `owed` balances.
+    function withdrawHouse(address to) external onlyOwner {
+        uint256 amt = houseBalance;
+        houseBalance = 0;
+        (bool ok,) = payable(to).call{value: amt}("");
+        if (!ok) revert WithdrawFailed();
+        emit HouseWithdrawn(to, amt);
+    }
+
+    /// @notice Pull compensation credited when a direct displacement payout failed.
+    function withdrawOwed() external nonReentrant {
+        uint256 amt = owed[msg.sender];
+        if (amt == 0) revert NothingOwed();
+        owed[msg.sender] = 0;
+        (bool ok,) = payable(msg.sender).call{value: amt}("");
+        if (!ok) revert WithdrawFailed();
+        emit OwedWithdrawn(msg.sender, amt);
     }
 
     // ---- Customization (post-mint re-base) -----------------------------------
@@ -629,6 +893,13 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     function setCustomizer(address newCustomizer) external onlyOwner {
         emit CustomizerUpdated(customizer, newCustomizer);
         customizer = newCustomizer;
+    }
+
+    /// @notice Owner switch that opens the customize game (off at deploy). Independent of
+    ///         move/merge; gates BOTH update paths (customizeCubeSource + rebaseToPoolSource).
+    function setCustomizesEnabled(bool enabled) external onlyOwner {
+        customizesEnabled = enabled;
+        emit CustomizesEnabledUpdated(enabled);
     }
 
     // ---- SeaDrop (OpenSea) genesis-mint integration --------------------------
@@ -754,6 +1025,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         returns (bool)
     {
         return interfaceId == type(INonFungibleSeaDropToken).interfaceId
+            || interfaceId == bytes4(0x49064906) // ERC-4906 (MetadataUpdate)
             || super.supportsInterface(interfaceId);
     }
 
@@ -766,6 +1038,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         uint256 sourceTokenId,
         uint8 payloadVersion
     ) external {
+        if (!customizesEnabled) revert CustomizesDisabled();
         if (msg.sender != customizer) revert OnlyCustomizer(msg.sender);
         if (_ownerOf(cubeId) == address(0)) revert NonexistentCube(cubeId);
 
@@ -781,6 +1054,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         data.payloadVersion = payloadVersion;
 
         emit CubeCustomized(cubeId, sourceContract, sourceTokenId, payloadVersion);
+        emit MetadataUpdate(cubeId); // source art changed
     }
 
     /// @notice Attestation-free re-base to an UNUSED "pool" source — any Normie (live
@@ -791,6 +1065,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
     ///         off-chain, then commits the chosen one here. No off-chain flatten /
     ///         attestation needed — the art already exists on-chain.
     function rebaseToPoolSource(uint256 cubeId, address sourceContract, uint256 sourceTokenId) external {
+        if (!customizesEnabled) revert CustomizesDisabled();
         address owner = _ownerOf(cubeId);
         if (owner == address(0)) revert NonexistentCube(cubeId);
         if (owner != msg.sender) revert NotCubeOwner(cubeId, msg.sender);
@@ -811,6 +1086,7 @@ contract CubeNFT is ERC721, Ownable, INonFungibleSeaDropToken {
         data.payloadVersion = isNormie ? 0 : PAYLOAD_VERSION_TONAL; // Normie = live art
 
         emit CubeCustomized(cubeId, sourceContract, sourceTokenId, data.payloadVersion);
+        emit MetadataUpdate(cubeId); // source art changed
     }
 
     // Capture the genesis origin once, on a cube's first re-base (see cubeOrigin()).

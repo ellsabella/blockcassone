@@ -56,6 +56,17 @@ contract NonNormieArtStoreTest is Test {
         assertEq(store.sourcePayloadHash(store.sourceKey(src, 42)), NonNormieArt.hashTonalBands2Bit(payload));
     }
 
+    function testSourcePayloadReadsCommittedBytesBySource() public {
+        address src = address(0xCC0);
+        bytes memory payload = _samplePayload();
+        vm.prank(OWNER);
+        store.recordSourcePayload(src, 42, payload);
+        // By-source reader (previews an unminted pool source for the "spin the wheel" re-base).
+        assertEq(store.sourcePayload(src, 42).length, 400);
+        assertEq(keccak256(store.sourcePayload(src, 42)), keccak256(payload));
+        assertEq(store.sourcePayload(src, 999).length, 0); // uncommitted -> empty
+    }
+
     function testPerCubeOverrideWinsOverSourcePool() public {
         address src = address(0xCC0);
         cubes.setSource(9, src, 1);

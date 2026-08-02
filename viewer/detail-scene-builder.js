@@ -5,7 +5,6 @@ import {
   build3DVoxels,
   buildPlaneOutline,
   buildNormieIdLabel,
-  buildNormieTraitsBanner,
   isNormieCube,
 } from './normies-manager.js';
 import { buildHilbertLines } from './hilbert-lines.js';
@@ -133,6 +132,7 @@ export function pushDetailPlaneItems({
   buildNonNormieArtworkPlane = null,
   buildNonNormieWalker = null,
   buildNonNormieBanner = null,
+  buildNonNormieIdLabel = null,
   isAgenticNonNormieCube = identityAgenticNonNormie,
   categoryForMotif = unknownCategory,
 }) {
@@ -175,6 +175,13 @@ export function pushDetailPlaneItems({
     applyDim(bannerItems, dim);
     if (bannerItems?.length) itemsOut.push(...bannerItems);
 
+    const idLabelItems = showNormieIdLabel && buildNonNormieIdLabel
+      ? buildNonNormieIdLabel(plane, serializedPlanes, gl, meshes)
+      : [];
+    if (agenticNonNormie) applyAgenticAwakening(idLabelItems);
+    applyDim(idLabelItems, dim);
+    if (idLabelItems?.length) itemsOut.push(...idLabelItems);
+
     if (showForest && agenticNonNormie) {
       const forestItems = buildForestPlane(plane, hilbert, gl, meshes, renderMode, cubeCtx);
       const items = Array.isArray(forestItems) ? forestItems : (forestItems ? [forestItems] : []);
@@ -199,12 +206,15 @@ export function pushDetailPlaneItems({
       if (idLabelItems?.length) itemsOut.push(...idLabelItems);
     }
 
-    if (showNormieTraitsBanner) {
-      const traitsBannerItems = buildNormieTraitsBanner(plane, hilbert, gl, meshes);
-      applyMotifStyle(traitsBannerItems, cat, motifIdx);
-      applyBannerGlitch(traitsBannerItems, cat);
-      applyDim(traitsBannerItems, dim);
-      if (traitsBannerItems?.length) itemsOut.push(...traitsBannerItems);
+    // Source-contract banner (the Normies address), same as non-Normie cubes get —
+    // one consistent banner across all artwork. Replaces the old traits-hash banner,
+    // whose data (traits.raw from the normies API) isn't in the self-contained path.
+    if (showNormieTraitsBanner && buildNonNormieBanner) {
+      const bannerItems = buildNonNormieBanner(plane, serializedPlanes, gl, meshes);
+      applyMotifStyle(bannerItems, cat, motifIdx);
+      applyBannerGlitch(bannerItems, cat);
+      applyDim(bannerItems, dim);
+      if (bannerItems?.length) itemsOut.push(...bannerItems);
     }
   }
 
@@ -250,6 +260,7 @@ export function buildCubeDetailScene({
   buildNonNormieArtworkPlane = null,
   buildNonNormieWalker = null,
   buildNonNormieBanner = null,
+  buildNonNormieIdLabel = null,
   isAgenticNonNormieCube = identityAgenticNonNormie,
   categoryForMotif = unknownCategory,
 }) {
@@ -297,6 +308,7 @@ export function buildCubeDetailScene({
       buildNonNormieArtworkPlane,
       buildNonNormieWalker,
       buildNonNormieBanner,
+      buildNonNormieIdLabel,
       isAgenticNonNormieCube,
       categoryForMotif,
     });

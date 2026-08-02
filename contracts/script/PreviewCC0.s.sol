@@ -41,7 +41,8 @@ contract PreviewCC0 is Script {
             uint32 slot = uint32((i * 691) % 4096);
             bytes32 seed = keccak256(abi.encode("cc0", i));
             uint256 srcId = vm.parseUint(vm.readFile(string.concat("data/cc0/", vm.toString(i), ".id")));
-            string memory svg = thumb.previewThumbnailSVG(seed, slot, srcId, payload);
+            // sample source contract that cycles every hex glyph 0-F, so the banner shows the full font
+            string memory svg = thumb.previewThumbnailSVG(seed, slot, address(0x0123456789abcDEF0123456789abCDef01234567), srcId, payload);
             vm.writeFile(string.concat("data/cc0/thumb-", vm.toString(i), ".svg"), svg);
             console2Log(i, slot);
         }
