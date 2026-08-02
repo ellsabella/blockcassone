@@ -99,6 +99,20 @@ contract LocalMockCC0 {
     }
 }
 
+interface IMintSeaDrop {
+    function mintSeaDrop(address minter, uint256 quantity) external returns (uint256[] memory);
+}
+
+/// @notice Test faucet standing in for OpenSea SeaDrop. Anyone can mint (no payment/limits),
+///         routed through the token's REAL mintSeaDrop -> genesis allocation path, so it
+///         exercises the true mint code. The token allows this as a SeaDrop caller. For
+///         local + Sepolia E2E only — never allowed on a production deploy.
+contract MockSeaDrop {
+    function mintPublic(address token, address to, uint256 quantity) external returns (uint256[] memory) {
+        return IMintSeaDrop(token).mintSeaDrop(to, quantity);
+    }
+}
+
 contract DeployLocalGenesis is Script {
     // Anvil account #1 — the dev flattening-attestation signer. It's an unlocked Anvil
     // account, so the viewer can eth_signTypedData_v4 with it (no off-chain signer
@@ -123,6 +137,8 @@ contract DeployLocalGenesis is Script {
         NonNormieArtStore artStore;
         FlatteningAttestation attestation;
         CubeMintController customizer;
+        address mockSeaDrop;      // faucet: anyone -> mintSeaDrop -> genesis allocation
+        address attestationSigner; // signer address baked into the attestation contract
     }
 
     function _ccNames() private pure returns (string[CC0_COUNT] memory n) {
@@ -214,8 +230,11 @@ contract DeployLocalGenesis is Script {
             d.cubes, d.assetStore, address(d.normies), address(d.thumbnailRenderer), address(d.artStore)
         );
 
+        // Signer baked into the attestation: the unlocked Anvil acct in local dev, or a real
+        // keypair on Sepolia (its private key runs the /api/attest signer service).
+        d.attestationSigner = vm.envOr("BLOCKCASSONE_ATTESTATION_SIGNER", DEV_ATTESTATION_SIGNER);
         vm.broadcast();
-        d.attestation = new FlatteningAttestation(initialOwner, DEV_ATTESTATION_SIGNER);
+        d.attestation = new FlatteningAttestation(initialOwner, d.attestationSigner);
 
         vm.broadcast();
         d.customizer = new CubeMintController(d.cubes, d.artStore, d.attestation);
@@ -257,8 +276,13 @@ contract DeployLocalGenesis is Script {
         vm.broadcast();
         d.cubes.setGenesisMinter(address(d.genesis));
 
-        address[] memory allowed = new address[](1);
-        allowed[0] = seaDrop;
+        // MockSeaDrop faucet: testers mint through it (-> mintSeaDrop -> genesis allocation).
+        vm.broadcast();
+        d.mockSeaDrop = address(new MockSeaDrop());
+
+        address[] memory allowed = new address[](2);
+        allowed[0] = seaDrop;        // env/owner convenience caller
+        allowed[1] = d.mockSeaDrop;  // the faucet
         vm.broadcast();
         d.cubes.updateAllowedSeaDrop(allowed);
 
@@ -376,7 +400,8 @@ contract DeployLocalGenesis is Script {
         console2.log("NonNormieArtStore", address(d.artStore));
         console2.log("FlatteningAttestation", address(d.attestation));
         console2.log("CubeMintController", address(d.customizer));
-        console2.log("SeaDrop", seaDrop);
+        console2.log("SeaDrop (allowed)", seaDrop);
+        console2.log("MockSeaDrop (faucet)", d.mockSeaDrop);
         console2.log("Sample mints", sampleMints);
 
         _writeViewerConfig(d);
@@ -388,7 +413,11 @@ contract DeployLocalGenesis is Script {
         string memory root = "chainConfig";
         vm.serializeBool(root, "enabled", true);
         vm.serializeUint(root, "chainId", block.chainid);
-        vm.serializeString(root, "rpcUrl", "http://127.0.0.1:8545");
+        // Local default: direct to Anvil. Sepolia: set BLOCKCASSONE_RPC_URL to your endpoint
+        // and BLOCKCASSONE_DIRECT_RPC=false so the site routes through the /api/chain-rpc proxy.
+        vm.serializeString(root, "rpcUrl", vm.envOr("BLOCKCASSONE_RPC_URL", string("http://127.0.0.1:8545")));
+        vm.serializeBool(root, "directRpc", vm.envOr("BLOCKCASSONE_DIRECT_RPC", true));
+        vm.serializeAddress(root, "mockSeaDrop", d.mockSeaDrop);
         vm.serializeAddress(root, "cubeNft", address(d.cubes));
         vm.serializeAddress(root, "genesisMinter", address(d.genesis));
         vm.serializeAddress(root, "renderer", address(d.renderer));
@@ -403,7 +432,7 @@ contract DeployLocalGenesis is Script {
         vm.serializeAddress(root, "cubeMintController", address(d.customizer));
         vm.serializeAddress(root, "flatteningAttestation", address(d.attestation));
         string memory json =
-            vm.serializeAddress(root, "attestationSigner", DEV_ATTESTATION_SIGNER);
+            vm.serializeAddress(root, "attestationSigner", d.attestationSigner);
         vm.writeJson(json, outPath);
     }
 }
