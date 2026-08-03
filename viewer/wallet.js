@@ -83,6 +83,26 @@ export async function connect() {
   return state.account;
 }
 
+// Re-open the wallet's account picker so the user can change WHICH account is shared
+// with this site (or drop one) without the manual disconnect dance. Uses EIP-2255
+// wallet_requestPermissions, which MetaMask surfaces as its account-selection prompt;
+// once connected, plain eth_requestAccounts just returns the existing grant silently,
+// so this is the only reliable way to switch. Falls back gracefully if unsupported.
+// Returns the (possibly new) active account.
+export async function switchAccount() {
+  const p = provider();
+  wireEvents();
+  try {
+    await p.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
+  } catch (e) {
+    if (e?.code === 4001) return state.account; // user dismissed the picker
+    // Wallet lacks EIP-2255 — fall back to a plain connect so we at least re-read.
+  }
+  setAccount(await p.request({ method: 'eth_accounts' }));
+  state.chainId = normalizeChainId(await p.request({ method: 'eth_chainId' }));
+  return state.account;
+}
+
 // Best-effort: make the wallet's active chain match `expected` (decimal chainId).
 // Tries switch, then add (for a local/custom chain the wallet doesn't know yet, e.g.
 // Anvil 31337). Returns true iff the wallet ends up on the expected chain.
@@ -150,18 +170,22 @@ export function mountConnectButton(el, { onChange, chainId: wantChain, rpcUrl, c
     el.textContent = a ? shortAddress(a) : hasWallet() ? 'Connect Wallet' : 'No Wallet';
     el.disabled = !hasWallet();
     el.classList.toggle('connected', !!a);
-    el.title = a || (hasWallet() ? 'Connect an injected wallet' : 'No injected wallet detected');
+    el.title = a
+      ? `${a} — click to switch account`
+      : (hasWallet() ? 'Connect an injected wallet' : 'No injected wallet detected');
   };
 
   el.addEventListener('click', async () => {
     if (!hasWallet()) return;
     try {
-      await connect();
+      // Already connected → open the account picker so a stuck/wrong account can be
+      // swapped in place. Otherwise do the first-time connect.
+      await (account() ? switchAccount() : connect());
       if (wantChain) await ensureChain(wantChain, { rpcUrl, chainName });
       render();
       onChange && onChange(account());
     } catch (e) {
-      console.warn('wallet connect failed', e);
+      console.warn('wallet action failed', e);
     }
   });
 
