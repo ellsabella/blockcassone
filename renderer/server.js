@@ -120,14 +120,20 @@ function writeDevMints(state) {
 }
 
 function readChainConfig() {
+  // The proxy's upstream RPC. Prefer a SERVER-ONLY env var so a key-bearing endpoint
+  // (e.g. Alchemy on Sepolia) never has to live in the browser-served chain-config.json
+  // — in proxied mode the deploy writes rpcUrl:"" there on purpose. Fall back to the
+  // config's rpcUrl only for local dev, where it's a non-secret 127.0.0.1 node.
+  loadDotEnv(ENV_PATH, { override: true });
+  const envRpc = process.env.BLOCKCASSONE_RPC_URL || process.env.BLOCKCASSONE_PROXY_RPC_URL;
   try {
     const configPath = path.join(REPO_ROOT, 'data', 'chain-config.json');
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     return {
-      rpcUrl: String(parsed.rpcUrl || 'http://127.0.0.1:8545'),
+      rpcUrl: String(envRpc || parsed.rpcUrl || 'http://127.0.0.1:8545'),
     };
   } catch (_) {
-    return { rpcUrl: 'http://127.0.0.1:8545' };
+    return { rpcUrl: String(envRpc || 'http://127.0.0.1:8545') };
   }
 }
 

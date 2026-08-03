@@ -425,8 +425,16 @@ contract DeployLocalGenesis is Script {
         vm.serializeUint(root, "chainId", block.chainid);
         // Local default: direct to Anvil. Sepolia: set BLOCKCASSONE_RPC_URL to your endpoint
         // and BLOCKCASSONE_DIRECT_RPC=false so the site routes through the /api/chain-rpc proxy.
-        vm.serializeString(root, "rpcUrl", vm.envOr("BLOCKCASSONE_RPC_URL", string("http://127.0.0.1:8545")));
-        vm.serializeBool(root, "directRpc", vm.envOr("BLOCKCASSONE_DIRECT_RPC", true));
+        // SECURITY: this config is served to the BROWSER, so only expose a direct rpcUrl when
+        // it's the non-secret local node. In proxied mode (directRpc=false) the browser uses
+        // /api/chain-rpc and the real endpoint — which may embed an API key — stays server-side
+        // (renderer/server.js reads BLOCKCASSONE_RPC_URL from its own env), so write "" here.
+        bool directRpc = vm.envOr("BLOCKCASSONE_DIRECT_RPC", true);
+        vm.serializeString(
+            root, "rpcUrl",
+            directRpc ? vm.envOr("BLOCKCASSONE_RPC_URL", string("http://127.0.0.1:8545")) : string("")
+        );
+        vm.serializeBool(root, "directRpc", directRpc);
         vm.serializeAddress(root, "mockSeaDrop", d.mockSeaDrop);
         vm.serializeAddress(root, "cubeNft", address(d.cubes));
         vm.serializeAddress(root, "genesisMinter", address(d.genesis));
