@@ -67,6 +67,12 @@ if (typeof window !== 'undefined') {
   window.perfReset = () => { resetMetrics(); return 'perf metrics reset'; };
 }
 
+// Build stamp — bump alongside the ?v= query on the module script tags. If the console
+// shows an OLD value after reloading, the browser is still serving cached JS (open
+// DevTools → Network → tick "Disable cache", then reload).
+const VIEWER_BUILD = '20260803-2';
+if (typeof window !== 'undefined') console.log('[viewer] build', VIEWER_BUILD);
+
 const canvas = document.getElementById('gl');
 const logEl  = document.getElementById('log');
 const nftLabelEl = document.getElementById('nft-label');
