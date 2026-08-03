@@ -188,6 +188,19 @@ contract DeployLocalGenesis is Script {
             gasBefore - gasleft()
         );
         _setupAndMint(d, initialOwner, sampleMints);
+
+        // Hand the collection's admin to the intended long-term owner AFTER all owner-only
+        // setup (the deployer HAD to be owner during deploy/setup, else those calls revert).
+        // CubeNFT is 1-step Ownable, so this is immediate — no accept step. The deployer keeps
+        // RendererAssetStore/genesis ownership so it can still upload engine chunks + admin the
+        // drop; move those later if you want the new owner to control everything.
+        address finalOwner = vm.envOr("CONTRACT_OWNER", address(0));
+        if (finalOwner != address(0) && finalOwner != d.cubes.owner()) {
+            vm.broadcast();
+            d.cubes.transferOwnership(finalOwner);
+            console2.log("CubeNFT ownership -> CONTRACT_OWNER", finalOwner);
+        }
+
         _report(d, seaDrop, sampleMints);
     }
 
