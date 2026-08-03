@@ -100,7 +100,10 @@ contract LocalMockCC0 {
 }
 
 interface IMintSeaDrop {
-    function mintSeaDrop(address minter, uint256 quantity) external returns (uint256[] memory);
+    // CubeNFT.mintSeaDrop returns NOTHING (matches OpenSea's ISeaDrop mintSeaDrop). Declaring
+    // a return here would make the mock try to ABI-decode empty return data -> a bare revert
+    // AFTER the mint already succeeded. So this must be void, exactly like the real token.
+    function mintSeaDrop(address minter, uint256 quantity) external;
 }
 
 /// @notice Test faucet standing in for OpenSea SeaDrop. Anyone can mint (no payment/limits),
@@ -108,8 +111,8 @@ interface IMintSeaDrop {
 ///         exercises the true mint code. The token allows this as a SeaDrop caller. For
 ///         local + Sepolia E2E only — never allowed on a production deploy.
 contract MockSeaDrop {
-    function mintPublic(address token, address to, uint256 quantity) external returns (uint256[] memory) {
-        return IMintSeaDrop(token).mintSeaDrop(to, quantity);
+    function mintPublic(address token, address to, uint256 quantity) external {
+        IMintSeaDrop(token).mintSeaDrop(to, quantity);
     }
 }
 
@@ -348,14 +351,21 @@ contract DeployLocalGenesis is Script {
         d.genesis.setPhase(GenesisMinterBase.Phase.Public);
 
         // Sample public mint (one wallet): the weighted draw pulls a MIX of collections.
+        // Recipient defaults to the deployer, but can be pointed at a test wallet so a
+        // real MetaMask account anchors street 0 (sole occupier -> the merge flow is
+        // testable end-to-end). Everything else is unchanged.
+        address sampleRecipient = vm.envOr("BLOCKCASSONE_SAMPLE_RECIPIENT", initialOwner);
         vm.broadcast();
-        d.genesis.mintPublicFor(initialOwner, sampleMints);
+        d.genesis.mintPublicFor(sampleRecipient, sampleMints);
 
         // Dev: hand cube #1 (slot 0 -> street 0) to a second account so street 0 has
-        // mixed ownership and the merge "consolidate first" flow is testable.
+        // mixed ownership and the merge "consolidate first" flow is testable. Transfers
+        // from whoever received the sample batch (deployer by default, else the test
+        // wallet). Turn off (BLOCKCASSONE_DEV_SPLIT_OWNER=false) to keep street 0 a
+        // sole-occupier street for the merge test.
         if (sampleMints >= 3 && vm.envOr("BLOCKCASSONE_DEV_SPLIT_OWNER", true)) {
             vm.broadcast();
-            d.cubes.transferFrom(initialOwner, DEV_ATTESTATION_SIGNER, 1);
+            d.cubes.transferFrom(sampleRecipient, DEV_ATTESTATION_SIGNER, 1);
         }
     }
 
