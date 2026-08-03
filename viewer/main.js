@@ -1520,7 +1520,7 @@ if (walletLoadBtn) walletLoadBtn.addEventListener('click', loadWalletFromInput);
 // Wallet Connect (injected EIP-1193): connecting owner-focuses the connected address,
 // so the viewer filters to that wallet's cubes (its list panel + navigation light up).
 // The default fake "my wallet" for testing (owns cubes in the dev registry).
-const MY_WALLET = '0x15f89dc0088f13ffabbc75ff3f279c9570a69c33';
+const MY_WALLET = '0x19be634c0aa60db9b43494d05fd5a5f5d910aaeb';
 let connectedAddress = null;
 let _cloudItems = []; // impostor-cloud draw items, faded per frame by camera distance
 
@@ -1576,6 +1576,12 @@ function resolveDisplayOwner() {
 // Focus the resolved display owner's first Normie — opens the list + cube detail + thumbnail.
 // Never blanks: falls back to any minted cube only if no Normies exist at all.
 function focusDefaultOwner() {
+  // Prefer the connected wallet, then the dev test wallet (MY_WALLET) — whichever
+  // actually owns cubes here — so the view opens on YOUR cubes, not an arbitrary
+  // Normie holder. Falls back to the deterministic Normie-owner pick, then any cube.
+  for (const addr of [connectedAddress, MY_WALLET]) {
+    if (addr && focusOwnerFirstCube(addr)) return;
+  }
   const owner = resolveDisplayOwner();
   if (owner) { focusCubeAndOwner(normieOwnersMap().get(owner)[0]); return; }
   const cubes = getMintedCubes();
