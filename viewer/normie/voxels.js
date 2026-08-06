@@ -2,6 +2,7 @@
 
 import { isNormieCube, normieIdForCube } from './status.js';
 import { ensureFetched, getPlanePixelArray, makePlanePixelFn } from './api.js';
+import { artCorners } from '../materials/plane-2d.js';
 import { otsuRecursiveBands } from '../nft-art-grid.js';
 import { createMeshGL } from '../../renderer/src/geometry.js';
 import { mat4, identity } from '../../renderer/src/math.js';
@@ -100,7 +101,7 @@ export function build3DVoxels(motifIdx, hilbert, allPlanes, gl, meshes) {
       (mx[2] - mn[2]) / 40,
     ];
 
-    const planePixelFns = cubePlanes.map(pl => makePlanePixelFn(pl, mn, voxelSize));
+    const planePixelFns = cubePlanes.map(pl => makePlanePixelFn(pl, mn, voxelSize, artCorners(pl)));
     const maxScore = cubePlanes.length;
     const filled = new Uint8Array(40 * 40 * 40);
     const centers3  = [];

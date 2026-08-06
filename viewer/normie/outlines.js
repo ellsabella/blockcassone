@@ -1,7 +1,7 @@
 // Normie outline meshes — 2D silhouette and plane-edge outlines.
 
 import { mat4, identity } from '../../renderer/src/math.js';
-import { uvToWorld, planeBasis } from '../materials/plane-2d.js';
+import { uvToWorld, planeBasis, artCorners } from '../materials/plane-2d.js';
 import { buildCoreLineMesh, buildGlowLineMesh, planePerpFn } from '../materials/line-mesh.js';
 import { normieIdForCube } from './status.js';
 import { ensureFetched, getPlanePixelArray, getAllPlanes } from './api.js';
@@ -84,7 +84,7 @@ export function build2DOutline(plane, gl, meshes) {
   const pixels = getPlanePixelArray(plane);
   if (!pixels) return [];
 
-  const p    = plane.vertices.positions;
+  const p    = artCorners(plane);
   const tint = axisColorLinear(plane.axis);
   const role = planeRoleFor(plane);
   const lineKey      = `normie-outline-line-${plane.id}-${role}`;

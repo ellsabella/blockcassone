@@ -4,7 +4,7 @@ import { hash1, V } from './tree-walker.js';
 import { makePlanePixelFn, buildVoxelMesh, ensureBannerFont, renderBannerTexture } from './normies-manager.js';
 import { otsuRecursiveBands, otsuMultiLevelThresholds } from './nft-art-grid.js';
 import { buildWalkGlowMeshWS, buildWalkCoreMeshWS } from './materials/stone-walker.js';
-import { planeBasis, uvToWorld } from './materials/plane-2d.js';
+import { planeBasis, uvToWorld, artCorners } from './materials/plane-2d.js';
 import { buildIdLabelFor } from './normie/label.js';
 
 const { add: vadd, sub: vsub, scale: vscale, dot: vdot, cross: vcross, len: vlen, norm: vnorm } = V;
@@ -355,7 +355,7 @@ export function buildNonNormieWalker(plane, allPlanes, gl, meshes) {
       return [];
     }
 
-    const p = plane.vertices.positions;
+    const p = artCorners(plane);
     let n = planeBasis(plane).N;
     const planeCenter = uvToWorld(0.5, 0.5, p);
     if (vdot(vsub(bounds.center, planeCenter), n) < 0) n = vscale(n, -1);
@@ -461,7 +461,7 @@ function buildArtworkVoxelMesh(gl, motifIdx, allPlanes, bounds, grid, meshes) {
     (mx[1] - mn[1]) / srcSize,
     (mx[2] - mn[2]) / srcSize,
   ];
-  const planePixelFns = cubePlanes.map(pl => makePlanePixelFn(pl, mn, srcVoxelSize));
+  const planePixelFns = cubePlanes.map(pl => makePlanePixelFn(pl, mn, srcVoxelSize, artCorners(pl)));
   const maxScore = cubePlanes.length;
 
   // 3D boolean intersection at reduced resolution.
@@ -651,7 +651,7 @@ export function buildNonNormieArtworkPlane(plane, allPlanes, gl, meshes) {
       name: nft.name,
     });
     const flat = new Float32Array(segs.length * 6);
-    const p = plane.vertices.positions;
+    const p = artCorners(plane);
     let i = 0;
     for (const { ua, va, ub, vb } of segs) {
       const a = uvToWorld(ua, va, p);
@@ -750,7 +750,7 @@ export function buildNonNormieBanner(plane, allPlanes, gl, meshes) {
   const cubeCenter = [(mn[0]+mx[0])*0.5, (mn[1]+mx[1])*0.5, (mn[2]+mx[2])*0.5];
   const halfExtent = Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) * 0.5;
 
-  const p = plane.vertices.positions;
+  const p = artCorners(plane);
   const uVec = [p[1].x-p[0].x, p[1].y-p[0].y, p[1].z-p[0].z];
   const vVec = [p[3].x-p[0].x, p[3].y-p[0].y, p[3].z-p[0].z];
   let nx = uVec[1]*vVec[2] - uVec[2]*vVec[1];

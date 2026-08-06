@@ -225,8 +225,8 @@ function makeNormieTexture(gl, pixels) {
 // ---------------------------------------------------------------------------
 // Pixel-function utility — used by voxels, stone-walker, non-normie-art-plane
 // ---------------------------------------------------------------------------
-export function makePlanePixelFn(plane, mn, voxelSize) {
-  const p  = plane.vertices.positions;
+export function makePlanePixelFn(plane, mn, voxelSize, corners) {
+  const p  = corners || plane.vertices.positions;
   const p0 = p[0], p1 = p[1], p3 = p[3];
   const ax = plane.axis;
   const [a0, a1] = ax === 'x' ? [1, 2] : ax === 'y' ? [0, 2] : [0, 1];
