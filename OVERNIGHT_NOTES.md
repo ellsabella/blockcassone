@@ -1,5 +1,123 @@
 # Overnight batch — notes
 
+---
+
+## 2026-08-02 — AFK session: deployability fix + local E2E + signer service
+
+You asked me to crack on while AFK so you could test on return. Committed on WSL branch
+`nonnormie-store-sstore2` (not pushed — that's yours):
+
+- **`f3b7b68` EIP-170 fix (the deploy blocker).** CubeNFT (24,701) and
+  CubeThumbnailRendererV1 (26,592) were both over the 24,576-byte contract-size limit, so
+  a real broadcast reverted even though `forge test` (no EIP-170) was green. Fixed:
+  `NormieHexGlyphs.path` internal→public (its ~3.4KB deploys as its own DELEGATECALL-linked
+  contract → renderer 26,535→**23,438**, +1,138), and `optimizer_runs` 200→1 (CubeNFT→
+  **24,230**, +346). Both now deployable. Suite **197 green**.
+- **`2b518e0` Attestation signer service (Sepolia Update wallet path).** `POST /api/attest`
+  in renderer/server.js signs the EIP-712 attestation server-side (viem, lazy-required).
+  preview-chain.js branches on `directRpc`: local Anvil keeps the unlocked signer, Sepolia
+  POSTs to /api/attest. Proven byte-identical to the working dev signature
+  (`scripts/check-attest-signer.mjs`). viem added as a root dep; env var
+  `BLOCKCASSONE_ATTESTATION_SIGNER_PK`.
+
+### Local E2E is LIVE right now — test it
+- **Anvil** on :8545 (chainId 31337) with the full stack deployed; **8 sample cubes** minted
+  (token 1 → acct#1 `0x7099…`, tokens 2–8 → acct#0 `0xf39F…`). `data/chain-config.json` written.
+- **Site** on **http://localhost:3000** (renderer/server.js) — landing, /viewer/,
+  /viewer/update.html, /viewer/streets.html all serve; /api/chain-rpc proxies to Anvil.
+- `tokenURI(1)` renders an 85KB on-chain SVG (proves the glyph delegatecall link resolves).
+- To SEE your cubes: import an Anvil key into MetaMask — acct#0
+  `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` (pk `0xac09…ff80`) holds 7 cubes — add a
+  network for `http://127.0.0.1:8545` chainId 31337, connect.
+- Both Update paths work locally (CC0 spin = rebaseToPoolSource; wallet upload = customizeCube
+  via the Anvil unlocked signer). Streets: fill/evict/merge wired to the payable quotes.
+- 3D `animation_url` shows the honest "asset chunks not installed" fallback until you upload
+  renderer chunks (Sepolia runbook Phase 2) — expected, not a bug.
+
+### Caveat / open decision
+- `optimizer_runs=1` minimises code but raises runtime gas system-wide. CubeNFT margin is
+  tight (**+346 B**) — any future CubeNFT growth needs logic moved to a library before you
+  can raise runs back up for gas. Flag for the real launch.
+- If :3000 or Anvil isn't up when you return, restart: `anvil --gas-limit 100000000` then
+  from repo root `forge script contracts/script/DeployLocalGenesis.s.sol --tc
+  DeployLocalGenesis --rpc-url http://localhost:8545 --broadcast --private-key 0xac09…ff80`,
+  then `node renderer/server.js`.
+
+---
+
+## 2026-07-07 — pre-launch technical prerequisites (autonomous)
+
+Nothing deployed, broadcast, pushed, or sent to any network. `forge test` after every
+change. **Tests: 194 → 195 passing** (0 failing). Only code + docs + local sims + a
+read-only mainnet-fork simulation.
+
+### Done tonight
+1. **Production deploy script — `contracts/script/DeployGenesis.s.sol` (NEW).** Full
+   mainnet-shaped stack: real Normie contract (`NormieAddresses.NORMIES`), real OpenSea
+   SeaDrop 1.0 singleton, the 5 real CC0 addresses, locked caps 1679/901/655/410/328/123
+   = 4096. Decoupled ownership (admin stays token owner). Deploys + wires only — no mint,
+   no pool/snapshot commit, no drop config (those are owner ops). **Validated end-to-end
+   against a real mainnet fork** (publicnode): `Script ran successfully`, **~20.25M gas**
+   for the contract deploy (excl. renderer chunks). Requires env `BLOCKCASSONE_OWNER` +
+   `BLOCKCASSONE_ATTESTATION_SIGNER`; `--sender` must == owner.
+2. **`LAUNCH_RUNBOOK.md` (NEW)** — the exact ordered launch ops: Phase 0 prep (Normie
+   snapshot+merkle, CC0 pool select+flatten, renderer build), Phase 1 deploy, Phase 2
+   owner ops (upload chunks → commit CC0 pools → commit Normie snapshot+root → verify
+   pools art-backed → finalize → configure SeaDrop → open phases), Phase 3 verify, +
+   cost table.
+3. **`PRODUCTION_MINT_AND_CC0_PLAN.md`** — added a STATUS banner: the old "Normie-only
+   genesis, CC0 deferred" premise is superseded by the multi-source drop; corrected the
+   Objective; pointed to the runbook.
+4. **Audit finding + fix.** `_beforeFinalize` checks pool length == cap but NOT per-token
+   payloads → a pool token missing its payload would cause intermittent
+   `MissingSourcePayload` reverts in the public phase. Added
+   `MultiSourceGenesisMinter.firstUncommittedPoolToken(collectionId)` view (ops run it
+   per STORED collection before finalize) + a test + a runbook step. Other review notes
+   below.
+5. **Token-renderer bundle** rebuilt + **network-free** (117KB, **7 chunks ≤ 18KB** for
+   RendererAssetStore; chunk upload ≈ 25M gas ≈ 0.0025 ETH @ 0.1 gwei).
+6. **CC0 pool-selection scaffold — `dev/cc0-proof/select-pools.mjs` (NEW).** Evenly-
+   spaced algorithmic default → `data/cc0/pool-<key>.json` (2417 ids matching the
+   allocation). Fork-free. Clearly marked NOT final (needs supply confirmation + the
+   curated-vs-algorithmic decision).
+
+### Cost recap (@ 0.1 gwei)
+Deploy ~20.25M (~0.002 ETH) · renderer chunks ~25M (~0.0025) · CC0 pool commit ~210M
+(~0.021, one-time, dedup means it's the ONLY copy) · CC0 mints now ≈ Normie mint gas.
+
+### NEEDS YOUR INPUT (blocks the pool step)
+- **CC0 selection method**: currently algorithmic (evenly spaced across each supply);
+  confirm that's final vs hand-curated hero ids.
+- Attestation signer + owner/admin addresses for the real deploy.
+
+_Resolved 2026-07-08:_ Legal — all 5 are CC0, nothing to validate. All supplies confirmed
+(Runners 10k / Skulls 7k / Pepes 20k / Nouns 1.9k / Kevin 1.9k) → 2417 pool ids generated
+(`data/cc0/pool-*.json`). Normie = live-art collection: no art pool to preselect/store
+(renderer reads Normie art live on-chain); the snapshot only supplies allowlist
+eligibility + the public pull list, and the 1679 stays as the allocation cap.
+
+### Still open (technical, not started / needs external)
+- Flatten the CC0 pools (needs a mainnet fork/archive RPC — none was running tonight).
+- `flatten-pools.mjs` wrapper (referenced by the runbook) not yet written — flatten.mjs
+  currently takes env id-lists; a pool-file reader is a small add once IDs are locked.
+- Renderer chunk upload not run against a live deploy.
+- Security audit; Big Cube virtualisation (UI track).
+
+### Audit review notes (mint stack)
+- **Predictable-random public draw** (`keccak(publicSeed,minter,mintedCount,mintedNow,total)`):
+  a determined minter could revert-on-unwanted-outcome / time around others. Accepted per
+  "move fast or miss out"; flag for the auditor. Not a fund-loss bug.
+- **CEI ok**: `_consumeAndMint` updates all state (caps, counters, pool swap-pop) BEFORE
+  the external mint; `mintSeaDrop` is `onlySeaDrop`. Reentrancy via `onERC721Received`
+  can't double-spend.
+- **Short-fill** already handled: base `mintSeaDrop` reverts `IncompletePublicFill` when
+  available < quantity (all-or-nothing for the paid path).
+- Source-payload double-commit is unguarded (owner op; last write wins) — acceptable.
+
+---
+
+## 2026-06 — earlier batch
+
 Branch: `overnight-seadrop-brainrot` (off `cube-thumbnail-colour-nonnormie`).
 Nothing pushed, deployed, broadcast, or sent to any network. `forge test` run
 after every change.

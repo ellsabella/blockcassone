@@ -41,7 +41,8 @@ import {
   sourceNftForSlot,
 } from './mint-simulator.js';
 import { mintNormieCubeOnChain } from './preview-chain.js';
-import { mountConnectButton } from './wallet.js';
+import { mountConnectButton } from './wallet.js?v=20260806-1';
+import { makePanel } from './panels.js';
 import {
   applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor,
 } from './scene/styling.js';
@@ -70,7 +71,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260803-2';
+const VIEWER_BUILD = '20260806-1';
 if (typeof window !== 'undefined') console.log('[viewer] build', VIEWER_BUILD);
 
 const canvas = document.getElementById('gl');
@@ -559,21 +560,27 @@ function updateSvgThumb(motifIdx) {
   const seq = ++_svgThumbSeq; // every call invalidates any still-in-flight load below
   const hide = () => { svgThumbEl.classList.remove('open'); svgThumbEl.setAttribute('aria-hidden', 'true'); };
   if (motifIdx === null || motifIdx === undefined || !isMintedSlot(motifIdx)) { hide(); return; }
-  // Real per-slot SVG if one was pre-rendered, else a TYPE-matched placeholder (Normie vs
-  // source/CC0). Only ~21 real files exist for now; the indexer renders these per cube in
-  // production, so the placeholder won't match the exact art yet.
+  // Primary = the LIVE on-chain thumbnail (/api/thumbnail?slot=N), rendered by
+  // CubeThumbnailRendererV1 from the SAME art bytes the 3D cube uses — so the two
+  // panels always match. Falls back to a pre-rendered static file for dev-only
+  // (off-chain) slots or if the endpoint is unavailable.
   const cube = getMintedCubeForSlot(motifIdx);
   const isNormie = cube && cube.sourceKind === 'normie';
-  const real = `/data/preview-slot-${motifIdx}.svg`;
-  const fallback = isNormie
+  const real = `/api/thumbnail?slot=${motifIdx}`;
+  const fallback = `/data/preview-slot-${motifIdx}.svg`;
+  const fallback2 = isNormie
     ? `/data/preview-slot-${motifIdx % 12}.svg`
     : `/data/preview-nonnormie-${motifIdx % 6}.svg`;
   // Probe candidates off-screen; only swap the VISIBLE <img> once a load is confirmed, and
   // only if this is still the latest request (seq guard). This kills the abort-races that
   // previously left the panel on a placeholder or a stale cube during fast navigation/flyby.
   const stale = () => seq !== _svgThumbSeq;
-  const tryLoad = (src, next) => {
+  // Candidate chain: live on-chain thumbnail → per-slot static → type placeholder.
+  const candidates = [...new Set([real, fallback, fallback2])];
+  const tryLoad = (idx) => {
     if (stale()) return;
+    const src = candidates[idx];
+    if (src === undefined) { hide(); return; }
     const probe = new Image();
     probe.onload = () => {
       if (stale()) return;
@@ -581,10 +588,10 @@ function updateSvgThumb(motifIdx) {
       svgThumbEl.classList.add('open');
       svgThumbEl.setAttribute('aria-hidden', 'false');
     };
-    probe.onerror = () => { if (stale()) return; next ? tryLoad(next, null) : hide(); };
+    probe.onerror = () => { if (stale()) return; tryLoad(idx + 1); };
     probe.src = src;
   };
-  tryLoad(real, fallback !== real ? fallback : null);
+  tryLoad(0);
 }
 // Resizable SVG thumbnail (drag the left edge, like the cube-detail panel).
 const svgThumbResizeEl = document.getElementById('svg-thumb-resize');
@@ -1735,7 +1742,13 @@ function applyViewerMode() {
   else if (_flyby) { stopFlyby(); recentreOrbit(); } // only when leaving an ACTIVE flyby (orbit exists by then)
   syncFlybyControls(); // owns nav-bar + flyby-transport visibility for both modes
 }
-if (modeNavBtn) modeNavBtn.addEventListener('click', () => { viewerMode = 'navigation'; applyViewerMode(); });
+if (modeNavBtn) modeNavBtn.addEventListener('click', () => { viewerMode = 'navigation'; applyViewerMode();
+
+// Draggable + resizable HUD panels (persisted per panel). Titlebars drag; a bottom-right grip
+// resizes both ways. Reset: localStorage.removeItem('bc-panels-v2') then reload.
+makePanel(document.getElementById('cube-detail'), { handle: document.getElementById('cube-detail-bar'), key: 'cube-detail' });
+makePanel(document.getElementById('svg-thumb'), { handle: document.getElementById('svg-thumb-bar'), key: 'svg-thumb', minH: 180 });
+makePanel(document.getElementById('owner-inventory'), { handle: document.getElementById('owner-inventory-title'), key: 'owner-inventory' }); });
 if (modeFlybyBtn) modeFlybyBtn.addEventListener('click', () => { viewerMode = 'flyby'; applyViewerMode(); });
 
 // Show / hide the floating info panels (owned list, cube detail, SVG thumbnail) — one class

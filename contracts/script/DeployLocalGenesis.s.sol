@@ -40,6 +40,17 @@ contract LocalMockNormies {
         _traits[tokenId] = bytes8(uint64(tokenId));
     }
 
+    // Store REAL Normie art: the Script reads data/normie-raw-<id>.hex (cheatcodes aren't
+    // available in a deployed contract, so the bytes are passed in) and this just persists
+    // each id's real 200-byte bitmap, so Normie cubes render exactly like mainnet.
+    function mintWithDataBatch(address to, uint256[] calldata ids, bytes[] calldata raws) external {
+        for (uint256 i = 0; i < ids.length; i++) {
+            ownerOf[ids[i]] = to;
+            _rawImageData[ids[i]] = raws[i];
+            _traits[ids[i]] = bytes8(uint64(ids[i]));
+        }
+    }
+
     function getTokenRawImageData(uint256 tokenId) external view returns (bytes memory) {
         return _rawImageData[tokenId];
     }
@@ -59,27 +70,14 @@ contract LocalMockNormies {
     // Solid overlapping discs (low-frequency) so the mock silhouette has real solid
     // body — lots of cells with 5+ lit neighbours — which the glass-voxel layer
     // needs. tokenId varies the disc centres/radii.
+    // Cheap deterministic 200-byte (40x40 1-bit) placeholder bitmap. The old per-pixel disc
+    // computation cost ~10M gas/mint (blowing the block limit on a bigger dev world). This is
+    // mock Normie art anyway (real Normie art is native on mainnet), so a keccak fill is fine.
     function _sampleRawImageData(uint256 tokenId) private pure returns (bytes memory data) {
         data = new bytes(200);
-        uint256 h = uint256(keccak256(abi.encodePacked(tokenId)));
-        for (uint256 i = 0; i < 1600; i++) {
-            uint256 col = i % 40;
-            uint256 row = i / 40;
-            bool lit = false;
-            for (uint256 k = 0; k < 3; k++) {
-                uint256 cx = 9 + (h >> (k * 32)) % 22; // disc centre 9..30
-                uint256 cy = 9 + (h >> (k * 32 + 8)) % 22;
-                uint256 rr = 7 + (h >> (k * 32 + 16)) % 6; // radius 7..12
-                uint256 ddx = col > cx ? col - cx : cx - col;
-                uint256 ddy = row > cy ? row - cy : cy - row;
-                if (ddx * ddx + ddy * ddy <= rr * rr) {
-                    lit = true;
-                    break;
-                }
-            }
-            if (lit) {
-                data[i / 8] = bytes1(uint8(data[i / 8]) | uint8(1 << (7 - (i % 8))));
-            }
+        for (uint256 i = 0; i < 200; i += 32) {
+            bytes32 h = keccak256(abi.encodePacked(tokenId, i));
+            for (uint256 j = 0; j < 32 && i + j < 200; j++) data[i + j] = h[j];
         }
     }
 }
@@ -125,7 +123,7 @@ contract DeployLocalGenesis is Script {
     // Local multi-source allocation. A SMALL, balanced world so a single sample mint
     // visibly draws a MIX of collections (production uses caps 1679/901/655/410/328/123
     // summing to 4096, with real curated pools). Caps must sum to the cube supply.
-    uint32 internal constant NORMIE_CAP = 8;
+    uint32 internal constant NORMIE_CAP = 19; // = the real-art Normie snapshot ids we hold
     uint8 internal constant CC0_COUNT = 5;
 
     struct Deployment {
@@ -153,11 +151,14 @@ contract DeployLocalGenesis is Script {
     }
 
     function _ccCaps() private pure returns (uint32[CC0_COUNT] memory c) {
-        c[0] = 4; // Runners
-        c[1] = 3; // Skulls
-        c[2] = 2; // Pepes
-        c[3] = 2; // Nouns
-        c[4] = 1; // Kevin
+        // Sized to the REAL flattened payloads we hold in data/cc0/*.hex, so every pool
+        // source seeds real art: runner 0-7 (8), skull 8-15 (8), noun 16-19 (4),
+        // pepe 20-23 (4), kevin 24-27 (4) = 28 CC0 sources. + NORMIE_CAP = 80 slots.
+        c[0] = 8; // Runners
+        c[1] = 8; // Skulls
+        c[2] = 4; // Pepes
+        c[3] = 4; // Nouns
+        c[4] = 4; // Kevin
     }
 
     // First source token id for each CC0 pool (distinct ranges keep them separable).
@@ -337,13 +338,18 @@ contract DeployLocalGenesis is Script {
     function _setupAndMint(Deployment memory d, address initialOwner, uint256 sampleMints) private {
         // Normie snapshot pool: a few more than the Normie cap so the live pool never
         // empties before the allocation is hit.
-        uint256 normiePool = NORMIE_CAP + 2;
-        uint256[] memory normieIds = new uint256[](normiePool);
-        for (uint256 i = 0; i < normiePool; i++) {
-            vm.broadcast();
-            d.normies.mint(initialOwner, i);
-            normieIds[i] = i;
+        // Seed REAL Normie art: mint the real snapshot ids with their real 200-byte bitmaps
+        // (data/normie-raw-<id>.hex), so Normie cubes render exactly like they will on mainnet.
+        uint256[19] memory rn = _realNormieIds();
+        uint256[] memory normieIds = new uint256[](rn.length);
+        bytes[] memory raws = new bytes[](rn.length);
+        for (uint256 i = 0; i < rn.length; i++) {
+            normieIds[i] = rn[i];
+            raws[i] = vm.parseBytes(vm.readFile(string.concat("data/normie-raw-", vm.toString(rn[i]), ".hex")));
+            require(raws[i].length == 200, "normie raw wrong length");
         }
+        vm.broadcast();
+        d.normies.mintWithDataBatch(initialOwner, normieIds, raws);
         vm.broadcast();
         d.genesis.addSnapshotNormies(initialOwner, normieIds);
 
@@ -391,7 +397,7 @@ contract DeployLocalGenesis is Script {
         bytes[] memory payloads = new bytes[](cap);
         for (uint256 i = 0; i < cap; i++) {
             ids[i] = startId + i;
-            payloads[i] = _samplePayload(startId + i);
+            payloads[i] = _realCC0Payload(collectionId, i);
         }
         vm.broadcast();
         g.addSourcePool(collectionId, ids);
@@ -399,14 +405,18 @@ contract DeployLocalGenesis is Script {
         g.setSourcePayloadBatch(collectionId, ids, payloads);
     }
 
-    // Deterministic 400-byte 2-bit tonal payload (validate checks length + version);
-    // stands in for the off-chain nft-art-grid flattening for local dev.
-    function _samplePayload(uint256 sourceId) private pure returns (bytes memory p) {
-        p = new bytes(NonNormieArt.TONAL_BANDS_2BIT_BYTE_LENGTH);
-        bytes32 h = keccak256(abi.encode(sourceId));
-        for (uint256 i = 0; i < p.length; i++) {
-            p[i] = h[i % 32];
-        }
+    // Real 400-byte 2-bit tonal payload from data/cc0/*.hex (flattened off a mainnet fork by
+    // dev/cc0-proof/flatten.mjs). collectionId -> hex base: Runners 0, Skulls 8, Nouns 16,
+    // Pepes 20, Kevin 24 — so every seeded pool source renders REAL CC0 art from the start.
+    function _realCC0Payload(uint8 collectionId, uint256 idx) private view returns (bytes memory p) {
+        uint256 base = collectionId == 1 ? 0 : collectionId == 2 ? 8 : collectionId == 3 ? 20 : collectionId == 4 ? 16 : 24;
+        p = vm.parseBytes(vm.readFile(string.concat("data/cc0/", vm.toString(base + idx), ".hex")));
+        require(p.length == NonNormieArt.TONAL_BANDS_2BIT_BYTE_LENGTH, "cc0 payload wrong length");
+    }
+
+    // The real Normie token ids we hold on-chain raw art for (data/normie-raw-<id>.hex).
+    function _realNormieIds() private pure returns (uint256[19] memory ids) {
+        ids = [uint256(1), 42, 100, 250, 556, 777, 1250, 2222, 2810, 3333, 3470, 4014, 4444, 5555, 6722, 6726, 8437, 8888, 9921];
     }
 
     function _report(Deployment memory d, address seaDrop, uint256 sampleMints) private {
@@ -452,6 +462,7 @@ contract DeployLocalGenesis is Script {
         vm.serializeAddress(root, "cubeNft", address(d.cubes));
         vm.serializeAddress(root, "genesisMinter", address(d.genesis));
         vm.serializeAddress(root, "renderer", address(d.renderer));
+        vm.serializeAddress(root, "thumbnailRenderer", address(d.thumbnailRenderer));
         vm.serializeAddress(root, "rendererAssetStore", address(d.assetStore));
         vm.serializeAddress(root, "agentStatusRegistry", address(d.agentRegistry));
         vm.serializeAddress(root, "normies", address(d.normies));

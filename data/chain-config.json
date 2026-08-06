@@ -1,13 +1,51 @@
 {
-  "agentStatusRegistry": "0x9E6b222a71644484b6E9eb67bD8400128e0c3fb8",
-  "chainId": 1,
-  "cubeNft": "0x5f401c9cF95cB75bC8B28981D3d77b6513Ad652A",
+  "agentStatusRegistry": "0x7260D652Bf4d4B00AD09E472e2213D1Aa6478e41",
+  "attestationSigner": "0x635f8990D0b90cd9486DdedC8388bd7FA5580cD1",
+  "chainId": 11155111,
+  "cubeMintController": "0xaa7C739b8f36BfA653601BFAADf79E518C9eF66C",
+  "cubeNft": "0x629417E8E5478246c8979bA44c7CaD1fD4E83699",
+  "directRpc": false,
   "enabled": true,
-  "genesisMinter": "0xFafab2d458b595f3116F75Cd73a9B5d82e705D69",
-  "normieStorage": "0x1B976bAf51cF51F0e369C070d47FBc47A706e602",
-  "normies": "0x9Eb6E2025B64f340691e424b7fe7022fFDE12438",
-  "renderer": "0xfBA80Ad48B2002aA39268047ed31AbeBA0Ec7e13",
-  "rendererAssetStore": "0xB1cF93F953586f7B9C26B61Ac9342a18C96c27a1",
-  "rpcUrl": "http://127.0.0.1:8545",
-  "useSnapshot": true
+  "flatteningAttestation": "0xC5bE4595200C837EE8A0F250f5026e93370Ad25A",
+  "genesisMinter": "0xD446C64Ca1BF4b84BF2716761513031b48Dd9F1C",
+  "mockSeaDrop": "0x24e492d95fbfAC114CF0fa362bFF60076ab7000f",
+  "nonNormieStore": "0x4cFC5f9daae775A138D77e2E6F7385E78DfeFfAa",
+  "normieStorage": "0x25A6f37b46f597fA0a9B9D491c63B681fcDC02Ac",
+  "normies": "0x25A6f37b46f597fA0a9B9D491c63B681fcDC02Ac",
+  "renderer": "0xe35B752D0BF98f21d57C1Df393E811Fc6a15cde5",
+  "rendererAssetStore": "0x55801Fe0F10C984540A18A59F723adE0815Bca3A",
+  "rpcUrl": "",
+  "cc0Pool": [
+    {
+      "contract": "0x60d802c41485f01d8b818fb16d0d480a50d85939",
+      "startId": 1000,
+      "count": 8,
+      "name": "Chain Runners"
+    },
+    {
+      "contract": "0x31edb0fde622041bd135cd371f677e51fc561ec6",
+      "startId": 2000,
+      "count": 8,
+      "name": "1337 Skulls"
+    },
+    {
+      "contract": "0xc69655221249f7146ed8bbe24250059ae07e4826",
+      "startId": 3000,
+      "count": 4,
+      "name": "Baby Pepes"
+    },
+    {
+      "contract": "0xfed56eb1baeafae5813991ad33c1480f4c226af2",
+      "startId": 4000,
+      "count": 4,
+      "name": "Nouns"
+    },
+    {
+      "contract": "0xb66c48d1ec1b4022531f75ca75aa2f69b73ae33e",
+      "startId": 5000,
+      "count": 4,
+      "name": "OnChainKevin"
+    }
+  ],
+  "thumbnailRenderer": "0xf17ffd02228d9739190ded8a849ea7870d3c7156"
 }

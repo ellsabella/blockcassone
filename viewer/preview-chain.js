@@ -259,6 +259,14 @@ export function setTransactionSender(fn) { txSender = fn; }
 async function sendTx(cfg, from, to, data, label, value) {
   const tx = { from, to, data };
   if (value != null) tx.value = value; // hex quantity (e.g. '0x38d7ea4c68000'); omitted = 0
+  // Pre-flight: simulate via eth_call so a would-be revert surfaces its real reason HERE,
+  // instead of the wallet aborting with a cryptic "transaction gas limit too high" when its
+  // own gas estimate fails on a revert. Valid txs return and fall through to the real send.
+  try {
+    await rpcRaw(cfg, 'eth_call', [tx, 'latest']);
+  } catch (e) {
+    throw new Error(`${label || 'tx'} can't run: ${String(e?.message || e).replace(/execution reverted:?/i, '').trim() || 'it would revert on-chain'}`);
+  }
   const txHash = txSender
     ? await txSender(tx)
     : await rpcRaw(cfg, 'eth_sendTransaction', [tx]);
@@ -393,6 +401,25 @@ export async function cubeAnimationURI(cubeId) {
   return decodeString(await ethCall(cfg, cfg.renderer, '0x5209ec17' + word(cubeId)));
 }
 
+// A true 3D preview of a PROPOSED art change, BEFORE committing. There's no on-chain
+// preview-animation view, so we take the cube's REAL on-chain animation (the actual engine +
+// renderer chunks) and swap its window.BLOCKCASSONE_TOKEN blob: same seed/slot, but the
+// proposed tonal payload as an external source, so the engine renders the proposed art.
+// Returns a data:text/html;base64 URI for the 3D iframe. `payload` is the 400-byte tonal.
+export async function proposedAnimationURI(cubeId, { sourceContract, sourceTokenId, payload }) {
+  const base = await cubeAnimationURI(cubeId);
+  const html = decodeURIComponent(escape(atob(String(base).replace(/^data:text\/html;base64,/, '')))); // base64 → UTF-8
+  const grab = (re, dflt) => { const m = html.match(re); return m ? m[1] : dflt; };
+  const tokenId = grab(/BLOCKCASSONE_TOKEN=\{tokenId:(\d+)/, '0');
+  const slot = grab(/[,{]slot:(\d+)/, '0');
+  const seed = grab(/seed:'(0x[0-9a-fA-F]+)'/, '0x' + '0'.repeat(64));
+  const normieStorage = grab(/normieStorage:'(0x[0-9a-fA-F]+)'/, '0x0000000000000000000000000000000000000000');
+  let bin = ''; for (let i = 0; i < payload.length; i++) bin += String.fromCharCode(payload[i]);
+  const blob = `window.BLOCKCASSONE_TOKEN={tokenId:${tokenId},slot:${slot},sourceKind:2,sourceContract:'${sourceContract}',sourceTokenId:${sourceTokenId},normieStorage:'${normieStorage}',agentic:false,agentId:0,seed:'${seed}',raw:'',tonal:'${btoa(bin)}'};`;
+  const out = html.replace(/window\.BLOCKCASSONE_TOKEN=\{[\s\S]*?\};/, blob);
+  return 'data:text/html;base64,' + btoa(unescape(encodeURIComponent(out))); // UTF-8 → base64
+}
+
 // Cubes minted on the local chain. For dev, optionally filter by owner; the
 // returned cubes are the candidate targets to overwrite (cubeId + seed + slot).
 export async function loadOwnedCubes(owner) {
@@ -478,6 +505,23 @@ async function artStoreAddress(cfg) {
 export async function poolSources() {
   if (_poolCache) return _poolCache;
   const cfg = await loadConfig();
+
+  // Prefer the config-declared pool: each entry {contract,startId,count} expands to its
+  // token-id range. This needs no eth_getLogs, so it works on rate-limited RPCs (Alchemy's
+  // free tier caps getLogs at a 10-block range, which the full-history scan below blows past
+  // on a public chain). The deploy writes cc0Pool; older/local configs fall back to logs.
+  if (Array.isArray(cfg.cc0Pool) && cfg.cc0Pool.length) {
+    const out = [];
+    for (const p of cfg.cc0Pool) {
+      const start = Number(p.startId);
+      const count = Math.max(1, Number(p.count || 1));
+      const contract = String(p.contract || '').toLowerCase();
+      const name = p.name || '';
+      for (let i = 0; i < count; i++) out.push({ sourceContract: contract, sourceTokenId: String(start + i), sourceName: name });
+    }
+    return (_poolCache = out);
+  }
+
   const store = await artStoreAddress(cfg);
   const logs = await rpcNode(cfg, 'eth_getLogs', [{
     address: store, fromBlock: 'earliest', toBlock: 'latest',

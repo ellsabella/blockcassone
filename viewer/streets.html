@@ -44,6 +44,11 @@
     .card .act{margin-top:10px;display:flex;align-items:center;gap:8px;font-size:12px}
     .card .act .lead{font-weight:800} .card .act .fee{margin-left:auto;color:var(--dim);font-weight:700}
     .card.ready .act .lead{color:var(--gold)} .card.locked{opacity:.6} .card.locked .act .lead{color:var(--faint)}
+    .card.merged{border-color:var(--gold);cursor:default;box-shadow:0 0 0 1px rgba(255,207,106,.3),0 10px 30px rgba(255,207,106,.08);background:linear-gradient(180deg,rgba(255,207,106,.06),var(--panel))}
+    .card.merged .mbadge{color:var(--gold);font-weight:700;letter-spacing:.08em}
+    .mart{padding:8px 0;display:flex;justify-content:center}
+    .mart svg,.mart img{width:100%;max-width:200px;height:auto;border-radius:10px}
+    .m3d{width:100%;max-width:300px;aspect-ratio:1;border:0;border-radius:10px;display:block;margin:8px auto;background:#000}
     .legend{display:flex;gap:14px;justify-content:center;padding:2px 0 14px;color:var(--faint);font-size:10px}
     .legend i{display:inline-block;width:9px;height:9px;border-radius:3px;border:2px solid;margin-right:4px;vertical-align:-1px}
     .legend .me{border-color:var(--green)} .legend .rv{border-color:var(--red)} .legend .vc{border-color:#3a3a44;border-style:dashed}
@@ -96,7 +101,7 @@
       <div class="top">
         <a href="/viewer/index.html" class="back">‹ Big Cube</a>
         <h1>Streets</h1>
-        <button id="wallet-connect">Connect</button>
+        <div id="wallet-connect" data-wallet-widget></div>
       </div>
       <div class="tabs">
         <button class="on" data-mode="mine">My streets</button>
@@ -114,7 +119,8 @@
   <div class="scrim" id="scrim"></div>
   <div class="sheet" id="sheet"><div class="grab"></div><div class="body" id="sheetbody"></div></div>
   <div class="toast" id="toast"></div>
-  <script type="module" src="./streets.js?v=20260803-2"></script>
-  <script type="module" src="./nav-gate.js?v=20260803-2"></script>
+  <script src="/viewer/vendor/wallet-widget.js?v=20260806-1"></script>
+  <script type="module" src="./streets.js?v=20260806-1"></script>
+  <script type="module" src="./nav-gate.js?v=20260806-1"></script>
 </body>
 </html>

@@ -428,7 +428,7 @@
       box-shadow: 0 0 22px rgba(255, 58, 184, 0.24);
       pointer-events: auto;
     }
-    #svg-thumb.open { display: block; }
+    #svg-thumb.open { display: flex; flex-direction: column; }
     #svg-thumb-bar {
       font: 700 12px monospace;
       letter-spacing: 0.06em;
@@ -439,7 +439,9 @@
     #svg-thumb-img {
       display: block;
       width: 100%;
-      max-height: calc(100vh - 184px - min(480px, 40vw, 54vh));
+      flex: 1 1 auto;   /* fill the resizable panel so it grows in BOTH directions */
+      min-height: 0;
+      max-height: none;
       object-fit: contain;
       background: #05070a;
     }
@@ -686,8 +688,7 @@
   <div id="hud">
     <nav id="site-nav">
       <a href="/" class="nav-link">HOME</a>
-      <a href="/viewer/about.html" class="nav-link">ABOUT</a>
-      <a href="#" class="nav-link" id="nav-mycubes">MY CUBES</a>
+      <a href="/about.html" class="nav-link">ABOUT</a>
       <a href="/viewer/update.html" class="nav-link" data-gate="customize" style="display:none">UPDATE</a>
       <a href="/viewer/streets.html" class="nav-link" data-gate="streets" style="display:none">STREETS</a>
     </nav>
@@ -697,7 +698,7 @@
       <a href="/viewer/streets.html" class="legacy-hidden" style="text-decoration:none"><button title="Merge streets">Streets ▸</button></a>
       <input id="wallet-address" class="legacy-hidden" spellcheck="false" value="0x19BE634C0aA60DB9b43494D05Fd5a5f5d910aAeb" aria-label="Wallet address">
       <button id="wallet-load" class="legacy-hidden">Load</button>
-      <button id="wallet-connect">Connect Wallet</button>
+      <div id="wallet-connect" data-wallet-widget></div>
       <span id="wallet-status" class="legacy-hidden">wallet: not loaded</span>
     </div>
     <div id="mint-controls" style="display:none">
@@ -831,7 +832,8 @@
   <script src="/public/linestyles.js"></script>
   <script src="/public/planes.js"></script>
   <script src="/public/blocks.js"></script>
-  <script type="module" src="./main.js?v=20260803-2"></script>
-  <script type="module" src="./nav-gate.js?v=20260803-2"></script>
+  <script src="/viewer/vendor/wallet-widget.js?v=20260806-1"></script>
+  <script type="module" src="./main.js?v=20260806-1"></script>
+  <script type="module" src="./nav-gate.js?v=20260806-1"></script>
 </body>
 </html>

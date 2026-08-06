@@ -31,3 +31,7 @@ data/cc0/
 dev/cc0-proof/cube-*.html
 dev/cc0-proof/bundle.js
 dev/cc0-proof/out/
+
+# Auto-generated OpenSea free agent key (secret, self-refreshing)
+data/.opensea-key.json
+data/.rivals.json
