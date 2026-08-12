@@ -306,7 +306,8 @@ export default function App() {
             </div>
           ) : (
             <>
-              <h2>Congratulations! You are eligible.<br />Choose your candidates&hellip;</h2>
+              <h2 className="eligible-title">Congratulations! You are eligible.</h2>
+              <div className="eligible-sub">Choose your candidates&hellip;</div>
               <div className="entitle">
                 {[...counts.entries()].map(([name, n]) => <span className="hold" key={name}><b>{n}</b> {name}</span>)}
                 <span className="entitle-spots">→ <b>{cap}</b> guaranteed spot{cap > 1 ? 's' : ''}</span>
@@ -325,8 +326,6 @@ export default function App() {
                 })}
               </div>
 
-              <div className="disclaimer">You will be able to update the seed art for your cubes after the mint closes, from any wallet you own.</div>
-
               <div className="handle-block">
                 <div className="handle-note">Provide your X handle if you want to be added to the BLOCKS group chat before launch.</div>
                 <input
@@ -336,10 +335,8 @@ export default function App() {
                 />
               </div>
 
-              <div className="submitbar">
-                <span className="muted">{selected.size} / {cap} selected</span>
-                <button className="cta small" disabled={!selected.size} onClick={attest}>APPLY ▸</button>
-              </div>
+              <div className="selcount muted">{selected.size} / {cap} selected</div>
+              <button className="cta wide" disabled={!selected.size} onClick={attest}>SIGN TO REGISTER ▸</button>
             </>
           )}
           {status && <div className="status err">{status}</div>}
