@@ -204,14 +204,12 @@ export default function App() {
   const interestCTA = (note) => (
     <div className="interest">
       <div className="handle-note">{note}</div>
-      <div className="interest-row">
-        <input
-          className="handle-input" type="text" spellCheck={false} value={handle}
-          placeholder="@yourhandle (optional)" maxLength={CONFIG.interestHandleMax + 1}
-          onChange={e => setHandle(e.target.value)}
-        />
-        <button className="cta small" onClick={attestInterest}>APPLY ▸</button>
-      </div>
+      <input
+        className="handle-input wide" type="text" spellCheck={false} value={handle}
+        placeholder="@yourhandle (optional)" maxLength={CONFIG.interestHandleMax + 1}
+        onChange={e => setHandle(e.target.value)}
+      />
+      <button className="cta wide" onClick={attestInterest}>SIGN TO REGISTER ▸</button>
     </div>
   );
 
@@ -253,14 +251,9 @@ export default function App() {
       ) : done && done.kind === 'interest' ? (
         <div className="content done">
           <div className="check">✓</div>
-          <h2>You're on the interest list</h2>
-          <p className="muted">
-            Thanks for registering{done.handle ? ` (@${done.handle})` : ''}.{' '}
-            {(Number(done.heldSummary?.normies || 0) + Number(done.heldSummary?.other || 0)) > 0
-              ? 'As a holder of a qualifying asset you\'re eligible for the FCFS phase — '
-              : ''}
-            we'll announce FCFS + public mint details. Follow{' '}
-            <a href="https://x.com/bright_lightart" target="_blank" rel="noreferrer">@bright_lightart</a> for updates.
+          <h2 className="thanks-msg">thank you for registering</h2>
+          <p className="follow-line">
+            follow <a href="https://x.com/bright_lightart" target="_blank" rel="noreferrer">@bright_lightart</a> for updates
           </p>
           <button className="cta small close-btn" onClick={() => setFinished(true)}>CLOSE</button>
         </div>
@@ -286,31 +279,31 @@ export default function App() {
             <ConnectButton showBalance={false} chainStatus="none" accountStatus="avatar" />
           </div>
           {loading ? (
-            <>
-              <h2>Apply for Allowlist</h2>
+            <div className="apply-fcfs">
+              <h2 className="apply-title">Apply for Allowlist</h2>
               <div className="muted big">Reading your holdings + delegations…</div>
-            </>
+            </div>
           ) : holdings.length === 0 ? (
-            <>
-              <h2>Apply for Allowlist</h2>
+            <div className="apply-fcfs">
+              <h2 className="apply-title">Apply for Allowlist</h2>
               <div className="eligibility">
-                You are not eligible for the GTD phase.<br />
-                Sign a message to register for the FCFS phase.
+                <div className="elig-dim">You are not eligible for the GTD phase.</div>
+                <div className="elig-bright">Sign a message to register for the FCFS phase.</div>
               </div>
-              {interestCTA('Provide your X handle if you want to be added to the BLOCKS group chat before launch.')}
-            </>
+              {interestCTA('Optional — add your X handle if you want in to the group chat before launch.')}
+            </div>
           ) : cap === 0 ? (
-            <>
-              <h2>Apply for Allowlist</h2>
-              <div className="entitle">
+            <div className="apply-fcfs">
+              <h2 className="apply-title">Apply for Allowlist</h2>
+              <div className="entitle centered">
                 {[...counts.entries()].map(([name, n]) => <span className="hold" key={name}><b>{n}</b> {name}</span>)}
               </div>
               <div className="eligibility">
-                Your holdings don't reach a guaranteed spot yet ({entitlement.raw} of 1).<br />
-                Sign a message to register for the FCFS phase.
+                <div className="elig-dim">Your holdings don't reach a guaranteed GTD spot yet ({entitlement.raw} of 1).</div>
+                <div className="elig-bright">Sign a message to register for the FCFS phase.</div>
               </div>
-              {interestCTA('Provide your X handle if you want to be added to the BLOCKS group chat before launch.')}
-            </>
+              {interestCTA('Optional — add your X handle if you want in to the group chat before launch.')}
+            </div>
           ) : (
             <>
               <h2>Congratulations! You are eligible.<br />Choose your candidates&hellip;</h2>
