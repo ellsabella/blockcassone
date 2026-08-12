@@ -128,6 +128,8 @@ export default function App() {
         wallet: address, kind: 'gtd', vaults: message.vaults,
         sources: chosen.map(h => ({ collectionId: h.collectionId, tokenId: h.tokenId, contractAddr: h.contractAddr })),
         issuedAt: String(issuedAt), nonce, signature,
+        // Optional X handle for the pre-launch group chat (unsigned; outreach only).
+        handle: handle.trim().replace(/^@+/, '').slice(0, CONFIG.interestHandleMax),
         // Client-reported entitlement (unsigned) — review triage only; re-verified on-chain.
         entitlement: { normies: entitlement.normies, other: entitlement.other, spots: cap },
       };
@@ -201,14 +203,14 @@ export default function App() {
 
   const interestCTA = (note) => (
     <div className="interest">
-      <div className="muted">{note}</div>
+      <div className="handle-note">{note}</div>
       <div className="interest-row">
         <input
           className="handle-input" type="text" spellCheck={false} value={handle}
           placeholder="@yourhandle (optional)" maxLength={CONFIG.interestHandleMax + 1}
           onChange={e => setHandle(e.target.value)}
         />
-        <button className="cta small" onClick={attestInterest}>REGISTER INTEREST ▸</button>
+        <button className="cta small" onClick={attestInterest}>APPLY ▸</button>
       </div>
     </div>
   );
@@ -243,6 +245,7 @@ export default function App() {
         </div>
       ) : finished ? (
         <div className="finished">
+          <h1 className="blockword finished-title">BLOCKS</h1>
           <PlaneShow />
           <div className="thanks">thank you for registering</div>
           <div className="dims">1-D ---&gt; 2-D ---&gt; 3-D</div>
@@ -282,33 +285,40 @@ export default function App() {
             <div className="brand">THE BLOCK</div>
             <ConnectButton showBalance={false} chainStatus="none" accountStatus="avatar" />
           </div>
-          <h2>Choose your candidates</h2>
-
           {loading ? (
-            <div className="muted big">Reading your holdings + delegations…</div>
+            <>
+              <h2>Apply for Allowlist</h2>
+              <div className="muted big">Reading your holdings + delegations…</div>
+            </>
           ) : holdings.length === 0 ? (
             <>
-              <div className="muted big">No qualifying assets in this wallet or its delegations.</div>
-              {interestCTA('Register your interest to hear about the FCFS + public mint.')}
+              <h2>Apply for Allowlist</h2>
+              <div className="eligibility">
+                You are not eligible for the GTD phase.<br />
+                Sign a message to register for the FCFS phase.
+              </div>
+              {interestCTA('Provide your X handle if you want to be added to the BLOCKS group chat before launch.')}
             </>
           ) : cap === 0 ? (
             <>
+              <h2>Apply for Allowlist</h2>
               <div className="entitle">
                 {[...counts.entries()].map(([name, n]) => <span className="hold" key={name}><b>{n}</b> {name}</span>)}
               </div>
-              <div className="muted big">
-                That doesn't reach a guaranteed spot yet — a spot needs <b>1 Normie</b>, or <b>4 items</b> from the
-                other collections (each worth ¼ spot). Your {entitlement.other} other item{entitlement.other === 1 ? '' : 's'} = {entitlement.raw} spot.
+              <div className="eligibility">
+                Your holdings don't reach a guaranteed spot yet ({entitlement.raw} of 1).<br />
+                Sign a message to register for the FCFS phase.
               </div>
-              {interestCTA('You still qualify for the FCFS phase — register your interest to be added.')}
+              {interestCTA('Provide your X handle if you want to be added to the BLOCKS group chat before launch.')}
             </>
           ) : (
             <>
+              <h2>Congratulations! You are eligible.<br />Choose your candidates&hellip;</h2>
               <div className="entitle">
                 {[...counts.entries()].map(([name, n]) => <span className="hold" key={name}><b>{n}</b> {name}</span>)}
                 <span className="entitle-spots">→ <b>{cap}</b> guaranteed spot{cap > 1 ? 's' : ''}</span>
               </div>
-              <div className="weighting">1 Normie = 1 spot · each other item = ¼ spot · max {CONFIG.gtdCapPerWallet}. Pick up to {cap}.</div>
+              <div className="weighting">Normie / Kevin / Noun = 1 spot · Chain Runner = ½ · 1337 Skull = ½ · Baby Pepe = ¼ · max {CONFIG.gtdCapPerWallet}. Pick up to {cap}.</div>
 
               <div className={'art-grid' + (selected.size >= cap ? ' full' : '')}>
                 {holdings.map(h => {
@@ -322,9 +332,20 @@ export default function App() {
                 })}
               </div>
 
+              <div className="disclaimer">You will be able to update the seed art for your cubes after the mint closes, from any wallet you own.</div>
+
+              <div className="handle-block">
+                <div className="handle-note">Provide your X handle if you want to be added to the BLOCKS group chat before launch.</div>
+                <input
+                  className="handle-input" type="text" spellCheck={false} value={handle}
+                  placeholder="@yourhandle (optional)" maxLength={CONFIG.interestHandleMax + 1}
+                  onChange={e => setHandle(e.target.value)}
+                />
+              </div>
+
               <div className="submitbar">
                 <span className="muted">{selected.size} / {cap} selected</span>
-                <button className="cta small" disabled={!selected.size} onClick={attest}>SUBMIT ▸</button>
+                <button className="cta small" disabled={!selected.size} onClick={attest}>APPLY ▸</button>
               </div>
             </>
           )}

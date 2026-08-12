@@ -1,12 +1,12 @@
 // Blockcassone — Guaranteed Allowlist configuration + the delegate-registry ABI.
 
 export const CONFIG = {
-  // GTD entitlement: weighted spots, floored, then hard-capped per wallet.
-  //   1 Normie          = 1 spot     (Normies are the expensive collection)
-  //   each other item    = 0.25 spot  (4 CC0 items = 1 spot)
-  // e.g. 1 Normie + 5 others = floor(1 + 1.25) = 2 · 1 Normie + 9 others = floor(3.25) = 3.
-  gtdCapPerWallet: 3,
-  spotWeights: { normie: 1, other: 0.25 },
+  // GTD entitlement: per-collection weighted spots (reflecting floor-price differences),
+  // summed, floored, then hard-capped per wallet. Keyed by collectionId (see collections[]):
+  //   Normie(0) / Noun(4) / OnChainKevin(5) = 1 spot
+  //   Chain Runner(1) = ½ · 1337 Skull(2) = ½ · Baby Pepe(3) = ¼
+  gtdCapPerWallet: 5,
+  spotWeights: { 0: 1, 1: 0.5, 2: 0.5, 3: 0.25, 4: 1, 5: 1 },
 
   // WalletConnect Cloud project id (free at cloud.reown.com / walletconnect.com).
   // Injected wallets (MetaMask, Phantom, Rabby…) work without it; WalletConnect +
@@ -64,11 +64,15 @@ export const CONFIG = {
   statusUrl: '/api/allowlist-status',   // GET ?wallet=0x… → { registered }
 };
 
-// Weighted GTD entitlement from a holdings list ([{ collectionId }]). collectionId 0 = Normie.
+// Per-collection weighted GTD entitlement from a holdings list ([{ collectionId }]).
 export function entitlementFor(holdings) {
-  let normies = 0, other = 0;
-  for (const h of holdings) (h.collectionId === 0 ? normies++ : other++);
-  const raw = normies * CONFIG.spotWeights.normie + other * CONFIG.spotWeights.other;
+  let raw = 0, normies = 0, other = 0;
+  for (const h of holdings) {
+    raw += (CONFIG.spotWeights[h.collectionId] ?? 0.25);
+    if (h.collectionId === 0) normies++; else other++;
+  }
+  // round to avoid 0.1+0.2 float drift before flooring
+  raw = Math.round(raw * 100) / 100;
   return { normies, other, raw, spots: Math.min(CONFIG.gtdCapPerWallet, Math.floor(raw)) };
 }
 
