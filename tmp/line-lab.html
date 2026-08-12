@@ -40,10 +40,11 @@
     <button data-axis="1">green (y)</button>
     <button data-axis="2">blue (z)</button>
   </span>
+  <span>slot:</span><input id="slot" type="number" min="-1" max="4095" value="-1" title="-1 = manual axis; 0..4095 = Hilbert geometry drives main/side colours + placement" style="width:64px;background:#16161a;color:#9adf9a;border:1px solid #444;font:700 12px 'Courier New',monospace;padding:4px 6px">
   <span>shape:</span>
   <select id="shape"><option value="0">blocks</option><option value="1">ring</option><option value="2">glyph</option></select>
   <span>lines:</span>
-  <select id="contour"><option value="sil">silhouette (on/off)</option><option value="tonal">tonal contours (bands)</option></select>
+  <select id="contour"><option value="sil">silhouette (on/off)</option><option value="tonal" selected>tonal contours (bands)</option></select>
   <button id="resetView">reset view</button>
   <button id="reset">reset params</button>
   <span class="sub">scroll = zoom-to-cursor · drag = pan · dbl-click = reset view. zoom <span id="zoomread">1.0×</span></span>
@@ -71,6 +72,7 @@
       <button data-tab="walkers">Walkers</button>
       <button data-tab="forest">Forest</button>
       <button data-tab="banner">Banner</button>
+      <button data-tab="depth">3D depth</button>
     </div>
     <div id="forest-note" style="display:none;color:#c8a;font-size:10px;margin-bottom:4px">Normie-only layer — non-Normie / customized cubes never grow forest.</div>
     <div id="banner-note" style="display:none;align-items:center;gap:8px;margin-bottom:4px">
@@ -81,7 +83,7 @@
       <label style="color:#aab;font-size:11px">glass blend (the brightness lever)</label>
       <select id="glassBlend">
         <option value="screen">screen</option>
-        <option value="plus-lighter">plus-lighter (true additive)</option>
+        <option value="plus-lighter" selected>plus-lighter (true additive)</option>
         <option value="lighten">lighten</option>
         <option value="normal">normal (over — dim)</option>
       </select>
@@ -94,6 +96,7 @@
     <div id="rows_walkers" style="display:none"></div>
     <div id="rows_forest" style="display:none"></div>
     <div id="rows_banner" style="display:none"></div>
+    <div id="rows_depth" style="display:none"></div>
     </div><!-- /rows-scroll -->
     <div class="grp">PORTABLE OUTPUT (40-grid units · scale(25))</div>
     <textarea id="dump" readonly></textarea>
@@ -180,14 +183,46 @@ function lightColor(px,py,L,R2,wb){
 function densityOf(c,r){ const x=hashCell(7,c,r)%1000; if(x<=900){const t=x*1000/900; return 65+(t*t/1000)*255/1000;} return 320+(x-900)*320/100; }
 // Dense body fill (matches the HTML): every "body" cell (>= convMin lit neighbours)
 // becomes a glass cube, optionally thinned by a coverage gate. No sparse scatter.
+// Curated per-cube light arrangements: red upper-left, green low, blue right — each
+// jittered within its band by the seed, so every cube gets a different-but-balanced
+// colour impact on the glass. Ports to .sol as seed -> 9 lerps. lightSeed=0 = manual.
+function seededLights(seed){
+  const h=k=>h32((seed*2654435761)^(k*40503))/4294967296, L=(a,b,t)=>a+(b-a)*t;
+  return [
+    [L(4,20,h(1)),  L(4,20,h(2)),  L(-10,20,h(3)), 1,0,0],   // red
+    [L(12,28,h(4)), L(28,40,h(5)), L(-15,10,h(6)), 0,1,0],   // green
+    [L(24,40,h(7)), L(8,24,h(8)),  L(-15,20,h(9)), 0,0,1],   // blue
+  ];
+}
 function glassCells(g,p){
   const lit=(c,r)=> (c<0||c>39||r<0||r>39)?0:g[r*40+c];
   const L=lightPositions(p.lightRot,p.lightSpread), R2=p.lightR*p.lightR, cells=[];
+  // AUTO-DENSITY: count body cells and bump coverage to hit ~targetVox, so small/sparse
+  // source images don't come out thin (fewer voxels → higher coverage automatically).
+  let cov=p.coverage;
+  if(p.autoDensity>=1){
+    let body=0;
+    for(let r=0;r<40;r++)for(let c=0;c<40;c++){ if(!lit(c,r))continue;
+      let n=0; for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(dr||dc) n+=lit(c+dc,r+dr); }
+      if(n>=p.convMin) body++; }
+    cov = body>0 ? Math.min(100, Math.round(p.targetVox*100/body)) : 100;
+  }
   for(let r=0;r<40;r++)for(let c=0;c<40;c++){ if(!lit(c,r))continue;
     let n=0; for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){ if(dr||dc) n+=lit(c+dc,r+dr); }
     if(n < p.convMin) continue;                              // body cell?
-    if(p.coverage < 100 && hashCell(p.seed,c,r)%100 >= p.coverage) continue;
-    const [R,G,B]=lightColor(c+0.5,r+0.5,L,R2,p.whiteBloom); cells.push({c,r,d:densityOf(c,r),R,G,B}); }
+    if(cov < 100 && hashCell(p.seed,c,r)%100 >= cov) continue;
+    const px=c+0.5, py=r+0.5;
+    // nearest light: its "catch" intensity (0..1) AND the screen direction to it, so
+    // each voxel can highlight the FACE turned toward the light — top-lit where a light
+    // sits above it, side-lit where a light sits beside it (planes in space).
+    let bestA=-1, blx=L[0][0], bly=L[0][1];
+    for(const l of L){ const aa=lightA(px,py,l[0],l[1],R2); if(aa>bestA){bestA=aa; blx=l[0]; bly=l[1];} }
+    const I=bestA/10000;
+    let ddx=blx-px, ddy=bly-py; const dl=Math.hypot(ddx,ddy)||1; ddx/=dl; ddy/=dl;
+    const [R,G,B]=lightColor(px,py,L,R2,p.whiteBloom);
+    // nb = how many of the 8 neighbours are filled (interior vs surface); rand = per-cell
+    // variety. These drive the HTML-style break-up so solid runs don't read as one slab.
+    cells.push({c,r,d:densityOf(c,r),R,G,B,I,dx:ddx,dy:ddy,nb:n,rand:(hashCell(p.seed+9,c,r)%1000)/1000}); }
   return cells;
 }
 
@@ -242,23 +277,60 @@ function walkerPathD(paths){
   return paths.map(pts=>'M'+pts[0][0]+' '+pts[0][1]+pts.slice(1).map(([x,y])=>'L'+x+' '+y).join('')).join('');
 }
 
-const FRAME_PATH = 'M0 0H40 M0 0V40 M40 0V40';
-const FRAME_SEGS = [[0,0,1,0],[0,0,0,1],[1,0,1,1]];          // plane [0,1] for WebGL
-// edge orbs: 4 corners + 3 slots per border side (grid multiples of 5/40)
+// Hero-plane frame = the 3 filled Hilbert path-edges as a ∪ (bottom + left + right); the
+// top is the OPEN edge. The art always sits bottom-on-the-middle-edge so the character is
+// upright, so the Hilbert is drawn rotated to this canonical view.
+const FRAME_PATH = 'M0 40H40 M0 0V40 M40 0V40';
+const FRAME_SEGS = [[0,1,1,1],[0,0,0,1],[1,0,1,1]];          // bottom, left, right (WebGL)
+// edge orbs: 4 corners + 3 slots on each FILLED ∪ side (bottom + left + right). The top is
+// the open edge, so no slots there — otherwise they float in space on a missing line.
 const ORBS = [[0,0],[40,0],[40,40],[0,40],
-  [10,0],[20,0],[30,0],  [0,10],[0,20],[0,30],  [40,10],[40,20],[40,30]]; // grid coords
+  [10,40],[20,40],[30,40],  [0,10],[0,20],[0,30],  [40,10],[40,20],[40,30]]; // grid coords
 const ORBS_UV = ORBS.map(([x,y])=>[x/40,y/40]);
 
 let AXIS=0, SHAPE=0, GRID=buildGrid(0);
-let TONAL=GRID.slice(); let CONTOUR='sil';
+let TONAL=GRID.slice(); let CONTOUR='tonal';
 // figure line source: 1-bit silhouette or tonal band-boundaries (the fix under test)
 function figureSegs(){ return CONTOUR==='tonal' ? bandSegs(TONAL,true) : edges(GRID); }
 function figurePath(){ return CONTOUR==='tonal' ? bandPath(TONAL,true) : svgPath(GRID); }
-let glassBlend='screen'; // additive compositing is what makes glass read bright over black
+// Project the figure segments onto a quad by BILINEAR interpolation of its 4 corners
+// (uv order Q00=top-left, Q10=top-right, Q11=bottom-right, Q01=bottom-left). Unlike an
+// affine matrix this handles the receding TRAPEZOID — the back edge is shorter than the
+// front, so the art narrows into the distance instead of shearing into a stripe.
+function figureToQuad(Q00,Q10,Q11,Q01){
+  const bl=(u,v)=>{ const a=(1-u)*(1-v), b=u*(1-v), c=u*v, d=(1-u)*v;
+    return [a*Q00[0]+b*Q10[0]+c*Q11[0]+d*Q01[0], a*Q00[1]+b*Q10[1]+c*Q11[1]+d*Q01[1]]; };
+  let path='';
+  for(const [u0,v0,u1,v1] of figureSegs()){
+    const p0=bl(u0,v0), p1=bl(u1,v1);
+    path+=`M${p0[0].toFixed(2)} ${p0[1].toFixed(2)}L${p1[0].toFixed(2)} ${p1[1].toFixed(2)}`;
+  }
+  return path;
+}
+let glassBlend='plus-lighter'; // additive compositing is what makes glass read bright over black
 let view={z:1,cx:0.5,cy:0.5};
 const PAD_N=0.14, VS_N=1+2*PAD_N; // blank margin around the grid so edge lines/orbs aren't clipped
 const HEX=['#ff0000','#00ff00','#0000ff'];
-const FRAME_HEX=['#1aff38','#ff19a6','#ff19a6']; // paired: red->green, else pink (== _borderColor)
+// Frame colour by the PLANE'S ART AXIS — never the same colour as that plane's normie
+// lines: red(0)->green, green(1)->pink, blue(2)->green. (green/pink only; green can't
+// frame green.) Applied per plane: hero uses FRAME_HEX[AXIS], sides FRAME_HEX[(AXIS+1)%3].
+const FRAME_HEX=['#1aff38','#ff19a6','#1aff38'];
+
+// On-chain Hilbert octree descent (CubeHilbertGeometry) ported EXACTLY: a slot 0..4095 ->
+// mainAxis (unique/hero plane = b) and sideAxis (doubled/side planes = c). 0=x/red,1=y/green,
+// 2=z/blue. Drives the hero + side plane colours so the 2D matches the 3D token per cube.
+function slotAxes(slot){
+  let a=0,b=1,c=2;
+  for(let i=0;i<4;i++){
+    const d=Math.floor(slot/Math.pow(8,3-i))%8;
+    if(d===3||d===4){ /* identity */ }
+    else if(d===1||d===2||d===5||d===6){ const na=c,nb=a,nc=b; a=na;b=nb;c=nc; }
+    else { const na=b,nb=c,nc=a; a=na;b=nb;c=nc; }   // d in {0,7}
+  }
+  return {main:b, side:c};
+}
+let SIDEAXIS=1;   // doubled-axis (side planes) hue index — from the slot, or (AXIS+1)%3 manual
+let SLOT=-1;      // -1 = manual axis; >=0 = driven by slotAxes(SLOT)
 
 // ================= WEBGL target =================
 const gl=document.getElementById('gl').getContext('webgl2',{premultipliedAlpha:false,alpha:false});
@@ -386,32 +458,34 @@ const POINT_SCHEMA=[
   ['pCoreOp','orb core α',0,1,0.01],
   ['pCoreBlur','orb core blur',0,0.3,0.005],
 ];
+// Three RGB lights in XYZ + independent opacity per face orientation. x,y are on the
+// 40-grid face; z is depth (+ toward viewer, − behind the plane) — z is what makes a
+// light hit front vs. side vs. top faces. Everything else stays fixed in GLASS_DEF.
 const GLASS_SCHEMA=[
-  ['convMin','body neigh ≥',1,8,1],
-  ['coverage','coverage %',0,100,2],
-  ['seed','coverage seed',1,40,1],
-  ['inset','cell inset',0,0.4,0.01],
-  ['size','cell size',0.2,1,0.01],
-  ['lightRot','light rotation° (6 pts)',0,360,60],
-  ['lightSpread','light spread',2,32,1],
-  ['lightR','light radius',6,40,1],
-  ['colorGain','colour gain',1,4,0.1],
-  ['saturate','saturation',1,3,0.05],
-  ['whiteBloom','light whiten',0,1,0.05],
-  ['fillBase','fill α base',0,1,0.02],
-  ['fillScale','fill α scale',0,2,0.05],
-  ['fillCap','fill α cap',0.1,1,0.02],
-  ['whiten','whiten %',0,1,0.02],
-  ['rimW','rim width',0,0.3,0.004],
-  ['rimLight','rim lighten',0,1,0.02],
-  ['rimOp','rim α x',0,4,0.1],
-  ['glowS1','glow σ tight',0.02,0.6,0.005],
-  ['glowG1','glow gain tight',1,12,0.5],
-  ['glowS2','glow σ wide',0.05,1.2,0.01],
-  ['glowG2','glow gain wide',1,10,0.5],
-  ['sparkleThr','sparkle thresh',0,1,0.02],
-  ['sparkleR','sparkle r',0,0.2,0.004],
-  ['sparkleOp','sparkle α',0,1,0.02],
+  // — RED light (x,y,z) —
+  ['l1x','R light x',0,40,1],['l1y','R light y',0,40,1],['l1z','R light z',-30,30,1],
+  // — GREEN light —
+  ['l2x','G light x',0,40,1],['l2y','G light y',0,40,1],['l2z','G light z',-30,30,1],
+  // — BLUE light —
+  ['l3x','B light x',0,40,1],['l3y','B light y',0,40,1],['l3z','B light z',-30,30,1],
+  ['lightReach','light reach',4,60,1],
+  ['lightPow','light power',0.2,5,0.1],
+  // — opacity per face orientation —
+  ['frontOp','front α',0,1,0.02],
+  ['topOp','top α',0,1,0.02],
+  ['botOp','bottom α',0,1,0.02],
+  ['leftOp','left α',0,1,0.02],
+  ['rightOp','right α',0,1,0.02],
+  // — material + geometry —
+  ['colorGain','colour gain',0.5,6,0.1],
+  ['glow','bloom',0,0.4,0.01],
+  ['breakUp','break-up (surface only)',0,1,0.02],
+  ['ext','voxel depth',0,4,0.1],
+  ['persp','perspective (VP behind)',0,0.5,0.01],
+  ['size','voxel size',0.2,1,0.02],
+  ['coverage','density %',0,100,2],
+  ['autoDensity','auto-density 0/1',0,1,1],
+  ['targetVox','target voxels',30,300,5],
 ];
 const WALKER_SCHEMA=[
   ['walkAxis','side axis 0/1',0,1,1],
@@ -430,13 +504,15 @@ const WALKER_SCHEMA=[
   ['beadW','bobble w',0,0.4,0.005],
   ['beadStep','bobble spacing',0.25,3,0.05],
   ['beadOp','bobble α',0,1,0.02],
+  ['depth','3D depth (into cube)',0,6,0.1],
 ];
 // defaults
 const NORMIE_DEF={glowSrcW:0.146,tightSigma:0.11,tightGain:10.5,tightAlpha:2.7,wideSigma:0.1,wideGain:1,wideAlpha:0.1,colorCoreW:0.105,colorCoreOp:0.95,whiteW:0.04,whiteOp:0.9,whiteBlur:0.015,beadW:0.245,beadOp:0.88,beadStep:1,whiteBeadW:0.1,whiteBeadOp:0.89};
 const FRAME_DEF ={glowSrcW:0.345,tightSigma:0.11,tightGain:1,tightAlpha:1.35,wideSigma:0.1,wideGain:1,wideAlpha:0.8,colorCoreW:0.3,colorCoreOp:1,whiteW:0.075,whiteOp:0.86,whiteBlur:0.03,beadW:0.02,beadOp:0,beadStep:1.25,whiteBeadW:0.01,whiteBeadOp:0};
 const POINT_DEF ={pR:0.42,pSigma:0.11,pGain:3,pAlpha:1.05,pCoreR:0.23,pCoreOp:0.44,pCoreBlur:0.035};
-const GLASS_DEF ={convMin:5,coverage:38,seed:20,inset:0.05,size:0.8,lightRot:120,lightSpread:16,lightR:16,colorGain:2.6,saturate:3,whiteBloom:0.15,fillBase:0.58,fillScale:0.55,fillCap:1,whiten:0.1,rimW:0.012,rimLight:1,rimOp:1.6,glowS1:0.02,glowG1:1,glowS2:0.05,glowG2:1,sparkleThr:0.92,sparkleR:0,sparkleOp:0};
-const WALKER_DEF={walkAxis:0,frontWalks:11,sideWalks:23,straightLen:16,steps:10,turnBias:0.4,seed:3,coreW:0.03,coreOp:0.44,glowW:0.11,glowSigma:0.02,glowGain:4.5,glowOp:0.54,beadW:0.09,beadStep:0.8,beadOp:0.82};
+const GLASS_DEF ={convMin:5,coverage:68,seed:20,inset:0.05,size:0.86,lightRot:120,lightSpread:16,lightR:16,colorGain:2.8,saturate:3,whiteBloom:0.15,fillBase:0.58,fillScale:0.55,fillCap:1,whiten:0.1,rimW:0.012,rimLight:1,rimOp:1.6,glowS1:0.02,glowG1:1,glowS2:0.05,glowG2:1,sparkleThr:0.92,sparkleR:0,sparkleOp:0,planeMode:1,tileOp:0.62,visPow:1.4,glow:0.4,sheenOp:0,glintThr:0.7,glintOp:0.85,faceLit:1.4,frontOp:0,ext:1.2,extDx:0.55,extDy:-0.55,topLit:1.55,sideLit:0.45,
+  l1x:17,l1y:36,l1z:13, l2x:39,l2y:6,l2z:-18, l3x:0,l3y:0,l3z:30, lightReach:60,lightPow:5, topOp:0,botOp:0,leftOp:0,rightOp:0, persp:0.05, breakUp:0.68, lightSeed:0, autoDensity:1, targetVox:130};
+const WALKER_DEF={walkAxis:0,frontWalks:12,sideWalks:15,straightLen:16,steps:10,turnBias:0.4,seed:3,coreW:0.03,coreOp:0.44,glowW:0.11,glowSigma:0.02,glowGain:4.5,glowOp:0.54,beadW:0.09,beadStep:0.8,beadOp:0.82,depth:2};
 // Forest = inward-branching strand trees + particle clouds, Normie-only, in the
 // figure's plane colour. Mirrors the contract _forestLayer (trunk -> hub ->
 // branches -> tip/canopy clouds) so tuned values port straight across.
@@ -487,15 +563,55 @@ const BANNER_SCHEMA=[
   ['seed','seed (scrub)',0,999,1],
   ['glow','glow blur',0,0.4,0.01],
   ['op','opacity',0,1,0.02],
+  ['depth','3D depth (into cube)',0,8,0.1],
+  ['size','glyph size',0.3,2.5,0.05],
 ];
-const BANNER_DEF={seed:7,glow:0.2,op:0.74};
+const BANNER_DEF={seed:7,glow:0.27,op:0.74,depth:3.9,size:1};
+// 2.5D DEPTH-BEHIND: the flat front face stays as-is (facing the viewer); we add
+// receding layers BEHIND it — a wireframe box, ghost copies of the figure, and a
+// dim voxel back-copy — all produced by a single scale-about-vanishing-point per
+// layer (p' = VP + (p−VP)·s). Pure affine → ports straight to the .sol renderer
+// as `translate(VP·(1−s)) scale(s)`. depthT = how far back the farthest ghost sits
+// (0..1 of the front→back span); backScale = size of the back face at t=1.
+const DEPTH_SCHEMA=[
+  ['cube3d','REAL 3D cube 0/1',0,1,1],
+  ['yaw','camera yaw°',-70,70,1],
+  ['pitch','camera pitch°',-70,70,1],
+  ['camScale','camera scale',6,26,0.5],
+  ['figW','face line w',0.1,1.6,0.05],
+  ['figCore','face white core',0,0.4,0.02],
+  ['edgeW','cube edge w',0.1,1.6,0.05],
+  ['c3glow','cube glow σ',0.02,0.5,0.01],
+  ['c3gain','cube glow gain',1,16,0.5],
+  ['c3alpha','cube glow α',0.2,3,0.1],
+  ['ghosts','figure ghosts',0,8,1],
+  ['depthT','ghost depth (t)',0.1,1,0.02],
+  ['backScale','back-face scale',0.2,0.95,0.01],
+  ['vpx','vanish x',0,40,0.5],
+  ['vpy','vanish y',0,40,0.5],
+  ['ghostOp','ghost α (near)',0,1,0.02],
+  ['fog','fog falloff (pow)',0.4,3,0.1],
+  ['ghostW','ghost line w',0.02,0.4,0.005],
+  ['boxOp','wire box α',0,1,0.02],
+  ['boxW','wire box w',0.02,0.5,0.005],
+  ['connectors','depth connectors 0/1',0,1,1],
+  ['voxBack','voxel back-copy α',0,1,0.02],
+  ['glow','distance glow σ',0,0.4,0.01],
+  ['sideOp','side-plane art α',0,1,0.02],
+  ['sideW','side line width ×',0.2,2,0.05],
+  ['sideGlow','side glow width ×',0,1.5,0.05],
+  ['hotOp','hilbert hot-section α',0,1,0.02],
+  ['hotW','hilbert hot-section w',0,1.5,0.05],
+];
+const DEPTH_DEF={cube3d:0,yaw:24,pitch:18,camScale:15,figW:0.5,figCore:0,edgeW:0.55,c3glow:0.14,c3gain:5,c3alpha:1.4,ghosts:0,depthT:0.54,backScale:0.72,vpx:20,vpy:20,ghostOp:0,fog:1.1,ghostW:0.135,boxOp:0.8,boxW:0.11,connectors:1,voxBack:0,glow:0.22,sideOp:0.76,sideW:0.45,sideGlow:0.5,hotOp:0.66,hotW:0.3};
 const G={ normie:{schema:LINE_SCHEMA, state:{...NORMIE_DEF}, def:NORMIE_DEF},
           frame :{schema:LINE_SCHEMA, state:{...FRAME_DEF},  def:FRAME_DEF},
           points:{schema:POINT_SCHEMA,state:{...POINT_DEF},  def:POINT_DEF},
           glass :{schema:GLASS_SCHEMA,state:{...GLASS_DEF},  def:GLASS_DEF},
           walkers:{schema:WALKER_SCHEMA,state:{...WALKER_DEF}, def:WALKER_DEF},
           forest:{schema:FOREST_SCHEMA,state:{...FOREST_DEF}, def:FOREST_DEF},
-          banner:{schema:BANNER_SCHEMA,state:{...BANNER_DEF}, def:BANNER_DEF} };
+          banner:{schema:BANNER_SCHEMA,state:{...BANNER_DEF}, def:BANNER_DEF},
+          depth :{schema:DEPTH_SCHEMA,state:{...DEPTH_DEF},  def:DEPTH_DEF} };
 
 const amplify=(gain,alpha)=>{ const g=(+gain).toFixed(2),a=(+alpha).toFixed(2); return `${g} 0 0 0 0  0 ${g} 0 0 0  0 0 ${g} 0 0  0 0 0 ${a} 0`; };
 // neon LINE layer -> {defs, body}. Hue-preserving (works for any stroke colour).
@@ -517,14 +633,42 @@ function neon(ref, hue, p, sfx){
     (p.whiteBeadW>0?`<use href="${ref}" stroke="#fff" stroke-width="${p.whiteBeadW}" stroke-dasharray="0 ${p.beadStep}" opacity="${p.whiteBeadOp}"${wfilt}/>`:'');
   return {defs, body};
 }
+// Same neon layering as neon() (glow + colour core + white core) but for an explicit path
+// `d` (generated geometry like the side planes), reusing an existing glow filter id `nf`.
+// `ws` scales all widths (side lines are on smaller receding faces, so usually thinner).
+function neonPath(d, hue, p, nf, ws, gws){
+  ws=ws==null?1:ws; gws=gws==null?1:gws;   // gws scales ONLY the coloured glow width
+  return `<path d="${d}" stroke="${hue}" stroke-width="${(p.glowSrcW*ws*gws).toFixed(3)}" filter="url(#${nf})"/>`+
+    (p.colorCoreW>0?`<path d="${d}" stroke="${hue}" stroke-width="${(p.colorCoreW*ws).toFixed(3)}" opacity="${p.colorCoreOp}"/>`:'')+
+    (p.whiteW>0?`<path d="${d}" stroke="#fff" stroke-width="${(p.whiteW*ws).toFixed(3)}" opacity="${p.whiteOp}"/>`:'');
+}
 // edge-point orbs (white, additive glow + fuzzy core)
-function orbs(p, sfx){
+// Edge-point orbs, seed-derived to match CubeFrameLayer: 4 corners always + a per-side
+// count of 2..6 on each of the 3 filled ∪ sides (bottom/left/right), at sub-slots (bit+1)*5
+// along the edge, reservoir-selected. (h32 stands in for the on-chain keccak — seed-
+// deterministic with the same 2..6 distribution; the .sol port uses keccak for byte-parity.)
+function seededOrbs(seed){
+  seed=seed>>>0;
+  const pts=[[0,0],[40,0],[40,40],[0,40]];
+  const sideAt=[ b=>[(b+1)*5,40], b=>[0,(b+1)*5], b=>[40,(b+1)*5] ];  // bottom, left, right
+  const canon=[23,34,45];
+  for(let e=0;e<3;e++){
+    const count=2 + (h32(seed^(canon[e]*2654435761>>>0))>>>0)%5;
+    let placed=0;
+    for(let i=0;i<7 && placed<count;i++){
+      if((h32(seed^(canon[e]*40503)^(i*104729))>>>0)%(7-i) < count-placed){ pts.push(sideAt[e](i)); placed++; }
+    }
+  }
+  return pts;
+}
+function orbs(p, sfx, pts){
+  pts=pts||ORBS;
   const pf=`pf${sfx}`, pw=`pw${sfx}`;
   let defs=`<filter id="${pf}" x="-300%" y="-300%" width="700%" height="700%" color-interpolation-filters="sRGB">`+
     `<feGaussianBlur stdDeviation="${p.pSigma}" result="b"/>`+
     `<feColorMatrix in="b" type="matrix" values="${amplify(p.pGain,p.pAlpha)}"/></filter>`;
   if(p.pCoreBlur>0) defs+=`<filter id="${pw}" x="-300%" y="-300%" width="700%" height="700%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="${p.pCoreBlur}"/></filter>`;
-  const C=(r)=>ORBS.map(([x,y])=>`<circle cx="${x}" cy="${y}" r="${r}"/>`).join('');
+  const C=(r)=>pts.map(([x,y])=>`<circle cx="${x}" cy="${y}" r="${r}"/>`).join('');
   const cfilt=p.pCoreBlur>0?` filter="url(#${pw})"`:'';
   const body=`<g fill="#fff" filter="url(#${pf})">${C(p.pR)}</g>`+
     (p.pCoreR>0?`<g fill="#fff" opacity="${p.pCoreOp}"${cfilt}>${C(p.pCoreR)}</g>`:'');
@@ -533,25 +677,82 @@ function orbs(p, sfx){
 // glass voxels: translucent light-field rects + brighter rim + sparkle, under a
 // 2-tier blur glow (ports _glassLayer). Grid units; ports x25 to the .sol.
 function buildGlass(cells,p){
-  const defs=`<filter id="gGlass" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">`+
-    `<feGaussianBlur in="SourceGraphic" stdDeviation="${p.glowS2}" result="m"/>`+
-    `<feColorMatrix in="m" type="matrix" values="${p.glowG2} 0 0 0 0 0 ${p.glowG2} 0 0 0 0 0 ${p.glowG2} 0 0 0 0 0 .62 0" result="mc"/>`+
-    `<feGaussianBlur in="SourceGraphic" stdDeviation="${p.glowS1}" result="t"/>`+
-    `<feColorMatrix in="t" type="matrix" values="${p.glowG1} 0 0 0 0 0 ${p.glowG1} 0 0 0 0 0 ${p.glowG1} 0 0 0 0 0 1 0" result="tc"/>`+
-    `<feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`;
+  const defs=`<filter id="gGlass" x="-60%" y="-60%" width="220%" height="220%" color-interpolation-filters="sRGB">`+
+    `<feGaussianBlur stdDeviation="${p.glow}" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`+
+    // specular glint core (the square-on light hotspot)
+    `<radialGradient id="gGlint"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset="0.35" stop-color="#fff6c0" stop-opacity="0.6"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>`;
   const clamp=v=>Math.max(0,Math.min(255,Math.round(v)));
   const rim=v=>clamp(v+(255-v)*p.rimLight);
   // saturate (bold hue) -> colour gain (brightness) -> optional whiten
   function col3(R,G,B){ const l=0.299*R+0.587*G+0.114*B, s=p.saturate, w=p.whiten;
     const r=l+(R-l)*s, g=l+(G-l)*s, b=l+(B-l)*s;
     return [clamp(r*p.colorGain*(1-w)+255*w), clamp(g*p.colorGain*(1-w)+255*w), clamp(b*p.colorGain*(1-w)+255*w)]; }
+  // ---- GLASS = translucent light-catching planes (the real model) ----
+  // Each voxel is a flat, very transparent tile, additively composited (screen) so it
+  // is INVISIBLE over black and only shows where the light field accumulates. Opacity ∝
+  // light^visPow (far tiles vanish); a shared directional sheen gives the light-catch
+  // edge; the brightest cells flare to a white specular glint. All under the glass glow.
+  if(p.planeMode>=1){
+    const cl=rgb=>rgb.map(v=>clamp(v));
+    // The three RGB lights in 3D. z is depth (+ toward viewer, − behind the plane), which
+    // is what decides whether a light lands on the FRONT, a SIDE, or the TOP of a voxel.
+    const LI=p.lightSeed>0 ? seededLights(p.lightSeed)
+      : [[p.l1x,p.l1y,p.l1z,1,0,0],[p.l2x,p.l2y,p.l2z,0,1,0],[p.l3x,p.l3y,p.l3z,0,0,1]];
+    const R2=p.lightReach*p.lightReach, gain=p.colorGain;
+    // Lambert illumination of a face (position + outward normal) by the three lights.
+    const faceCol=(fx,fy,fz,nx,ny,nz)=>{ let R=0,Gc=0,Bc=0;
+      for(const L of LI){ const dx=L[0]-fx,dy=L[1]-fy,dz=L[2]-fz, d2=dx*dx+dy*dy+dz*dz, d=Math.sqrt(d2)||1;
+        const lam=Math.max(0,(dx*nx+dy*ny+dz*nz)/d), k=lam*R2/(R2+d2)*p.lightPow;
+        R+=k*L[3]; Gc+=k*L[4]; Bc+=k*L[5]; }
+      return cl([R*gain*255,Gc*gain*255,Bc*gain*255]); };
+    // Voxels share the CUBE'S vanishing point (the depth panel's vp) so their recession
+    // lines up with the cube edges — one-point perspective, VP dead-ahead and behind.
+    const dep=(typeof G!=='undefined'&&G.depth)?G.depth.state:{vpx:20,vpy:20};
+    const X=v=>v.toFixed(2), half=p.ext*0.5;
+    let body=`<g filter="url(#gGlass)" style="mix-blend-mode:${glassBlend}">`;
+    for(const {c,r,nb,rand} of cells){
+      const cx=c+0.5, cy=r+0.5;
+      const ex=(dep.vpx-cx)*p.persp, ey=(dep.vpy-cy)*p.persp;
+      // BREAK-UP (== HTML interiorMult × variety): suppress deep-interior cells (many
+      // filled neighbours) so only surface/edge voxels stay bright, and give each a
+      // random multiplier — long solid runs dissolve into separated blocks.
+      const am=Math.max(0, (1 - p.breakUp*Math.pow((nb||0)/8, 1.3)) * (0.4+(rand||0)*0.6));
+      const x0=c+p.inset, y0=r+p.inset, x1=x0+p.size, y1=y0+p.size;
+      body+=`<rect x="${x0.toFixed(3)}" y="${y0.toFixed(3)}" width="${p.size}" height="${p.size}" fill="rgb(${faceCol(cx,cy,0,0,0,1)})" fill-opacity="${(p.frontOp*am).toFixed(3)}"/>`;
+      if(p.ext>0){
+        // VERTICAL face — top (recede up) or bottom (recede down)
+        const up=ey<0, vy=up?y0:y1, vop=(up?p.topOp:p.botOp)*am;
+        const vc=faceCol(cx, up?r:r+1, -half, 0, up?-1:1, 0);
+        body+=`<polygon points="${X(x0)},${X(vy)} ${X(x1)},${X(vy)} ${X(x1+ex)},${X(vy+ey)} ${X(x0+ex)},${X(vy+ey)}" fill="rgb(${vc})" fill-opacity="${vop.toFixed(3)}"/>`;
+        // HORIZONTAL face — left (recede left) or right (recede right)
+        const lft=ex<0, hx=lft?x0:x1, hop=(lft?p.leftOp:p.rightOp)*am;
+        const hc=faceCol(lft?c:c+1, cy, -half, lft?-1:1, 0, 0);
+        body+=`<polygon points="${X(hx)},${X(y0)} ${X(hx)},${X(y1)} ${X(hx+ex)},${X(y1+ey)} ${X(hx+ex)},${X(y0+ey)}" fill="rgb(${hc})" fill-opacity="${hop.toFixed(3)}"/>`;
+      }
+    }
+    return {defs, body:body+`</g>`};
+  }
   const bm = glassBlend!=='normal' ? ` style="mix-blend-mode:${glassBlend}"` : '';
+  const ex=(p.ext||0)*(p.extDx||0), ey=(p.ext||0)*(p.extDy||0);   // depth-extrusion vector (grid units)
+  const face=(rgb,k)=>rgb.map(v=>clamp(v*k));                     // shade a block face by a light factor
+  const X=v=>v.toFixed(2);
   let body=`<g filter="url(#gGlass)" stroke-width="${p.rimW}"${bm}>`;
-  for(const {c,r,d,R,G,B} of cells){
+  // 3D voxels: extrude each body cell into a little block lit on one side (top = lit,
+  // right = shadow, front = the RGB light-field colour). Draw back-to-front — for an
+  // up-right extrusion the back cells are upper-right (small r, large c).
+  const list = p.ext>0 ? cells.slice().sort((a,b)=>(a.r-a.c)-(b.r-b.c)) : cells;
+  for(const {c,r,d,R,G,B} of list){
     const [Rl,Gl,Bl]=col3(R,G,B);
     const a=p.fillBase + d/1000*p.fillScale;
     const fo=Math.min(p.fillCap, a).toFixed(3), so=Math.min(1, a*p.rimOp).toFixed(3);
-    body+=`<rect x="${(c+p.inset).toFixed(3)}" y="${(r+p.inset).toFixed(3)}" width="${p.size}" height="${p.size}" fill="rgb(${Rl},${Gl},${Bl})" fill-opacity="${fo}" stroke="rgb(${rim(Rl)},${rim(Gl)},${rim(Bl)})" stroke-opacity="${so}"/>`;
+    const x0=c+p.inset, y0=r+p.inset, x1=x0+p.size, y1=y0+p.size;
+    if(p.ext>0){
+      const [tR,tG,tB]=face([Rl,Gl,Bl],p.topLit);   // lit top face
+      const [sR,sG,sB]=face([Rl,Gl,Bl],p.sideLit);  // shadowed side face
+      body+=`<polygon points="${X(x0)},${X(y0)} ${X(x1)},${X(y0)} ${X(x1+ex)},${X(y0+ey)} ${X(x0+ex)},${X(y0+ey)}" fill="rgb(${tR},${tG},${tB})" fill-opacity="${fo}"/>`;
+      body+=`<polygon points="${X(x1)},${X(y0)} ${X(x1)},${X(y1)} ${X(x1+ex)},${X(y1+ey)} ${X(x1+ex)},${X(y0+ey)}" fill="rgb(${sR},${sG},${sB})" fill-opacity="${fo}"/>`;
+    }
+    body+=`<rect x="${x0.toFixed(3)}" y="${y0.toFixed(3)}" width="${p.size}" height="${p.size}" fill="rgb(${Rl},${Gl},${Bl})" fill-opacity="${fo}" stroke="rgb(${rim(Rl)},${rim(Gl)},${rim(Bl)})" stroke-opacity="${so}"/>`;
     if(d>p.sparkleThr*1000 && p.sparkleR>0) body+=`<circle cx="${(c+0.32).toFixed(2)}" cy="${(r+0.32).toFixed(2)}" r="${p.sparkleR}" fill="#fff" opacity="${p.sparkleOp}"/>`;
   }
   return {defs, body:body+`</g>`};
@@ -568,26 +769,42 @@ function buildBanner(p){
   const n=text.length; if(!n) return {defs:'', body:''};
   const s=p.seed|0;
   const rnd=k=>h32((s*2654435761) ^ (k*40503))/4294967296; // deterministic [0,1) per key
-  const vertical = rnd(1) < 0.5;
-  const band = rnd(2) < 0.5 ? [0.08,0.30] : [0.70,0.92];    // near-start or near-end edge
-  const perp = (band[0] + rnd(3)*(band[1]-band[0])) * 40;   // grid units within the band
-  // Fill the whole side edge-to-edge: N chars evenly span the 40-grid, glyph:cell ratio
-  // 0.78 to match the cube HTML banner. So count+size follow the CA length automatically.
-  const SPAN=40;
-  const step=SPAN/n, fontSize=step*0.78, alongStart=step/2;
+  // Like the HTML: the banner is a strip anchored on a front-face edge that runs INTO the
+  // cube toward the shared vanishing point. glyph 0 sits nearest/biggest on the face; each
+  // later glyph recedes toward the VP and shrinks (perspective) — the "#0505" into depth.
+  const dep=(typeof G!=='undefined'&&G.depth)?G.depth.state:{vpx:20,vpy:20};
+  const persp=(typeof G!=='undefined'&&G.glass)?(G.glass.state.persp||0.16):0.16;
+  const baseFS=(40/n*0.9)*(p.size||1);
   const defs=`<filter id="bGlow" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB">`+
     `<feGaussianBlur stdDeviation="${p.glow}" result="b"/>`+
     `<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`;
+  // THREE banners — one per cube plane, each running along a different axis: Y (vertical
+  // on the right, reference-style), X (horizontal across the top), Z (into depth toward the
+  // shared VP). Each is a line A→B in the projected face; `rec` = perspective shrink 0..1.
+  // (Deterministic per-plane placement/orientation to match the HTML is wired at port time.)
+  // Two banners (Y vertical, X horizontal); the into-depth one reads poorly, dropped.
+  // Placement SEED-DERIVED like the on-chain _hexBanner (seed -> near-start or near-end edge
+  // band), so each cube's banners sit differently — deterministic per cube.
+  const bs=((SLOT>=0?SLOT:(p.seed||0))>>>0);
+  const brnd=k=>h32((bs*2654435761)^(k*40503))/4294967296;
+  const vx = brnd(1)<0.5 ? 4+brnd(2)*8 : 28+brnd(3)*8;   // vertical banner: left or right edge band
+  const hy = brnd(4)<0.5 ? 4+brnd(5)*7 : 29+brnd(6)*7;   // horizontal banner: top or bottom edge band
+  const banners=[
+    [vx,4, vx,36, 0.18],   // Y — vertical, seed-placed
+    [5,hy, 35,hy, 0.12],   // X — horizontal, seed-placed
+  ];
   let t='';
-  for(let i=0;i<n;i++){
-    const along=alongStart+i*step;
-    const x=(vertical?perp:along).toFixed(3), y=(vertical?along:perp).toFixed(3);
-    t+=`<text x="${x}" y="${y}">${text[i]}</text>`;
+  for(const [Ax,Ay,Bx,By,rec] of banners){
+    for(let i=0;i<n;i++){
+      const u=i/Math.max(1,n-1);
+      const x=(Ax+(Bx-Ax)*u).toFixed(2), y=(Ay+(By-Ay)*u).toFixed(2);
+      t+=`<text x="${x}" y="${y}" font-size="${(baseFS*(1-rec*u)).toFixed(3)}">${text[i]}</text>`;
+    }
   }
-  const body=`<g font-family="NormiesFont, monospace" font-weight="700" font-size="${fontSize.toFixed(3)}" `+
+  const body=`<g font-family="NormiesFont, monospace" font-weight="700" `+
     `text-anchor="middle" dominant-baseline="middle" fill="#fff" fill-opacity="${p.op}" `+
     `stroke="none" filter="url(#bGlow)">${t}</g>`;
-  return {defs, body, meta:{vertical, perpPct:(perp/40*100), n, step, fontSize}};
+  return {defs, body, meta:{n, banners:3}};
 }
 
 // stone walkers: thin core (primary axis hue) + bobbly beads + soft glow, with
@@ -600,9 +817,16 @@ function walkerStrokes(d, hue, p){
 }
 function buildWalkers(tagged, p){
   if(!tagged.length) return {defs:'', body:''};
+  // Put each walk at a depth INTO the cube (perspective toward the shared VP), so the
+  // walks sit in 3D — near ones large, far ones small — instead of flat on the front face.
+  const dep=(typeof G!=='undefined'&&G.depth)?G.depth.state:{vpx:20,vpy:20};
+  const persp=(typeof G!=='undefined'&&G.glass)?(G.glass.state.persp||0.16):0.16;
+  let wi=0;
+  const proj=pts=>{ const f=Math.min(0.85, ((h32((wi++)*2654435761+7)%1000)/1000)*(p.depth||0)*persp);
+    return pts.map(([x,y])=>[x+(dep.vpx-x)*f, y+(dep.vpy-y)*f]); };
   // each walker is MONO-coloured by its origin plane's axis (front = figure axis,
   // sides = the doubled axis). Group by axis -> one mono layer per colour.
-  const byAxis={}; for(const t of tagged){ (byAxis[t.axis]=byAxis[t.axis]||[]).push(t.pts); }
+  const byAxis={}; for(const t of tagged){ (byAxis[t.axis]=byAxis[t.axis]||[]).push(proj(t.pts)); }
   const defs=`<filter id="wkGlow" x="-60%" y="-60%" width="220%" height="220%" color-interpolation-filters="sRGB">`+
     `<feGaussianBlur in="SourceGraphic" stdDeviation="${p.glowSigma}" result="b"/>`+
     `<feColorMatrix in="b" type="matrix" values="${p.glowGain} 0 0 0 0 0 ${p.glowGain} 0 0 0 0 0 ${p.glowGain} 0 0 0 0 0 1 0"/></filter>`;
@@ -734,22 +958,172 @@ function buildForest(p){
 }
 
 function viewBoxStr(){ const w=1000*VS_N/view.z; return `${(view.cx*1000-w/2).toFixed(2)} ${(view.cy*1000-w/2).toFixed(2)} ${w.toFixed(2)} ${w.toFixed(2)}`; }
+// ---- 2.5D depth-behind: receding wireframe box + figure ghosts + voxel back-copy ----
+// Every layer is a scale-about-vanishing-point (affine), drawn BEHIND the flat front
+// face. Colour follows the cube: ghosts/vox in the figure (unique-axis) hue, the box
+// in the frame hue. All in 40-grid units (inside the outer scale(25)), so values port
+// to the .sol renderer unchanged.
+function buildDepth(p){
+  if((p.ghosts|0)<=0 && p.boxOp<=0 && p.voxBack<=0) return {defs:'',body:'',hot:''};
+  let hot='';   // Hilbert hot-sections — returned separately so they render ON TOP of the frame
+  const vpx=p.vpx, vpy=p.vpy, hue=HEX[AXIS], fhue=FRAME_HEX[AXIS];
+  // transform that scales the plane about the vanishing point by s
+  const T=s=>`translate(${(vpx*(1-s)).toFixed(3)} ${(vpy*(1-s)).toFixed(3)}) scale(${s.toFixed(4)})`;
+  const defs = p.glow>0
+    ? `<filter id="dGlow" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB">`+
+      `<feGaussianBlur stdDeviation="${p.glow}" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`
+    : '';
+  const gf = p.glow>0 ? ' filter="url(#dGlow)"' : '';
+  let body='';
+  // (a) farthest: dim voxel/body silhouette at the back face
+  if(p.voxBack>0){
+    body+=`<g transform="${T(p.backScale)}" opacity="${p.voxBack.toFixed(3)}"${gf}>`+
+      `<use href="#o" stroke="${hue}" stroke-width="${(p.ghostW*0.8).toFixed(3)}" fill="none"/></g>`;
+  }
+  // (b) figure ghosts receding front->back (draw far first so nearer sit on top)
+  const n=p.ghosts|0;
+  for(let k=n;k>=1;k--){
+    const t=(k/(n+1))*p.depthT;                                  // 0..depthT
+    const s=1-(1-p.backScale)*(t/Math.max(1e-6,p.depthT));       // lerp 1 -> backScale
+    const op=(p.ghostOp*Math.pow(Math.max(0,1-t),p.fog)).toFixed(3);
+    body+=`<g transform="${T(s)}" opacity="${op}"${gf}>`+
+      `<use href="#o" stroke="${hue}" stroke-width="${p.ghostW.toFixed(3)}" fill="none"/></g>`;
+  }
+  // Shared cube corners for the depth: front square + receded back (toward VP by backScale).
+  const F=[[0,0],[40,0],[40,40],[0,40]];                       // TL, TR, BR, BL
+  const B=F.map(([x,y])=>[vpx+(x-vpx)*p.backScale, vpy+(y-vpy)*p.backScale]); // bTL,bTR,bBR,bBL
+  // affine that maps the 40-grid art onto a projected quad A=(0,0) B=(40,0) D=(0,40).
+  const aff=(A,Bp,D)=>{ const a=((Bp[0]-A[0])/40).toFixed(5),b=((Bp[1]-A[1])/40).toFixed(5),
+      c=((D[0]-A[0])/40).toFixed(5),d=((D[1]-A[1])/40).toFixed(5);
+    return `matrix(${a} ${b} ${c} ${d} ${A[0].toFixed(3)} ${A[1].toFixed(3)})`; };
+
+  // (b2) SIDE-PLANE normie art: the figure contour on the two receding side faces, mapped by
+  // a per-face affine and oriented by each plane's Hilbert corners — bottom on the TOP receder
+  // (its middle path-edge). Because the shared edge flips orientation, they come out UPSIDE
+  // DOWN vs the hero. LEFT plane {0,1,2,3}=[bBL,bTL,TL,BL] → affine40(bBL,BL,bTL); RIGHT plane
+  // {4,5,6,7}=[BR,TR,bTR,bBR] → affine40(BR,bBR,TR).  (affine40(proj[d0],proj[d3],proj[d1]).)
+  if(p.sideOp>0){
+    const sh=HEX[SIDEAXIS];                          // the doubled-axis hue (both side planes)
+    const np=(typeof G!=='undefined')?G.normie.state:{glowSrcW:0.15,colorCoreW:0.1,colorCoreOp:0.9,whiteW:0.04,whiteOp:0.9};
+    // corners in art-uv order [Q00,Q10,Q11,Q01] = [proj(d0),proj(d3),proj(d2),proj(d1)].
+    // LEFT  {0,1,2,3} → proj=[bBL,bTL,TL,BL]  → [bBL, BL, TL, bTL]
+    // RIGHT {4,5,6,7} → proj=[BR,TR,bTR,bBR]  → [BR, bBR, bTR, TR]
+    const dL=figureToQuad(B[3], F[3], F[0], B[0]);
+    const dR=figureToQuad(F[2], B[2], B[1], F[1]);
+    // full normie neon aesthetic (reuses the front figure's glow filter #nfN), thinner via sideW
+    body+=`<g opacity="${p.sideOp.toFixed(3)}" fill="none">`+
+      neonPath(dL,sh,np,'nfN',p.sideW,p.sideGlow)+neonPath(dR,sh,np,'nfN',p.sideW,p.sideGlow)+`</g>`;
+  }
+
+  // (c) HILBERT wireframe (the depth, PINK). The Hilbert line threads the cube edges: up a
+  // back side → forward along a TOP edge → the front ∪ (green, frm) → back along the other
+  // TOP edge → down the other back side. Depth part = the TWO top receders + the TWO back
+  // sides only; back top & bottom and the bottom receders are OPEN. Orbs on the back corners.
+  if(p.boxOp>0){
+    const edge=(a,b)=>`M${a[0].toFixed(2)} ${a[1].toFixed(2)}L${b[0].toFixed(2)} ${b[1].toFixed(2)}`;
+    const d=edge(F[0],B[0])+edge(F[1],B[1])   // top receders: TL→bTL, TR→bTR
+           +edge(B[0],B[3])+edge(B[1],B[2]);  // back sides:   bTL→bBL, bTR→bBR
+    // side-plane frame colour (pink when the side art is green), and the SAME fuzzy neon as
+    // the front frame — the back edges now inherit the glow (#nfF) instead of reading sharp.
+    const fh=FRAME_HEX[SIDEAXIS];
+    body+=`<g opacity="${p.boxOp.toFixed(3)}">`+
+      `<path d="${d}" stroke="${fh}" stroke-width="${(p.boxW*2.4).toFixed(3)}" fill="none" filter="url(#nfF)"/>`+  // fuzzy glow
+      `<path d="${d}" stroke="${fh}" stroke-width="${p.boxW.toFixed(3)}" fill="none" opacity="0.95"/>`+           // colour core
+      `<path d="${d}" stroke="#fff" stroke-width="${(p.boxW*0.3).toFixed(3)}" fill="none" opacity="0.85"/></g>`;   // white core
+    let pts='';   // orbs on the 4 back corners — softened with the front-orb glow filter (#pfP), not sharp
+    for(const [x,y] of B) pts+=`<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${(p.boxW*1.7).toFixed(3)}"/>`;
+    body+=`<g fill="#fff" opacity="${Math.min(1,p.boxOp*1.1).toFixed(3)}" filter="url(#pfP)">${pts}</g>`;
+    // HOT SECTIONS: bright, thicker yellow-white flares along the whole Hilbert outline
+    // (front ∪ + receding edges) via an irregular dash so it lights up in patches, like
+    // the reference — glowing (#nfF) over the base neon.
+    if(p.hotOp>0){
+      const dash="5 6 9 7 4 5 11 8";   // longer, irregular hot patches (bigger like the reference)
+      const hoff=((SLOT>=0?SLOT*7:13)%47);   // seed-derived dash offset → flare positions vary per cube
+      hot=`<g fill="none" stroke-linecap="round" opacity="${p.hotOp.toFixed(3)}" stroke-dasharray="${dash}" stroke-dashoffset="${hoff}">`+
+        `<g stroke="#fff2a0" filter="url(#nfF)"><use href="#f" stroke-width="${p.hotW}"/><path d="${d}" stroke-width="${p.hotW}"/></g>`+       // yellow glow
+        `<g stroke="#fffbe6"><use href="#f" stroke-width="${(p.hotW*0.4).toFixed(3)}"/><path d="${d}" stroke-width="${(p.hotW*0.4).toFixed(3)}"/></g></g>`;  // bright white core
+    }
+  }
+  return {defs, body, hot};
+}
+
+// ================= REAL 3-plane Hilbert cube (order-1 motif) =================
+// The 8 corners of the base Hilbert cube in curve order (each step flips ONE axis
+// — the Gray-code Hamiltonian path that generateHilbert3D(1) produces). Three
+// consecutive 4-corner windows are the cube's art planes — identical to the
+// on-chain buildPlanes offsets [[0,1,2,3],[2,3,4,5],[4,5,6,7]].
+const CUBE_V=[[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,1,1],[1,1,1],[1,0,1],[0,0,1]];
+const CUBE_PLANES=[[0,1,2,3],[2,3,4,5],[4,5,6,7]];
+const planeAxisOf=ids=>{ const vs=ids.map(i=>CUBE_V[i]);
+  for(let a=0;a<3;a++) if(vs.every(v=>v[a]===vs[0][a])) return a; return 0; };
+// orthographic camera: centre the unit cube, yaw about vertical, pitch about
+// horizontal, drop depth. Returns 40-grid screen coords (+ depth for sorting).
+function project3(v,cam){
+  const x=v[0]-0.5,y=v[1]-0.5,z=v[2]-0.5;
+  const yr=cam.yaw*Math.PI/180, pr=cam.pitch*Math.PI/180;
+  const cy=Math.cos(yr),sy=Math.sin(yr), x1=x*cy+z*sy, z1=-x*sy+z*cy;
+  const cp=Math.cos(pr),sp=Math.sin(pr), y2=y*cp-z1*sp, z2=y*sp+z1*cp;
+  return {x:20+x1*cam.camScale, y:20-y2*cam.camScale, depth:z2};
+}
+// affine that maps the flat 40-grid (art space) onto the projected parallelogram
+// A=(0,0) B=(40,0) D=(0,40). Orthographic projection of a planar square is a
+// parallelogram → exact affine, so every tuned art layer maps by one matrix().
+function affine40(A,B,D){
+  const a=((B.x-A.x)/40).toFixed(5),b=((B.y-A.y)/40).toFixed(5),
+        c=((D.x-A.x)/40).toFixed(5),d=((D.y-A.y)/40).toFixed(5);
+  return `matrix(${a} ${b} ${c} ${d} ${A.x.toFixed(3)} ${A.y.toFixed(3)})`;
+}
+// Render the real 3-plane cube: each plane's figure contour mapped onto its
+// projected quad in that plane's axis hue, plus the pink/green cube-edge frame,
+// depth-sorted back-to-front. (Voxels + banner onto the faces come next.)
+function buildCube3D(cam){
+  const P=CUBE_V.map(v=>project3(v,cam));
+  const planes=CUBE_PLANES.map(ids=>({ids, axis:planeAxisOf(ids),
+      depth:ids.reduce((s,i)=>s+P[i].depth,0)/4})).sort((a,b)=>a.depth-b.depth);
+  const defs=`<filter id="c3g" x="-70%" y="-70%" width="240%" height="240%" color-interpolation-filters="sRGB">`+
+    `<feGaussianBlur stdDeviation="${cam.c3glow}" result="b"/>`+
+    `<feColorMatrix in="b" type="matrix" values="${amplify(cam.c3gain,cam.c3alpha)}" result="c"/>`+
+    `<feMerge><feMergeNode in="c"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`;
+  let body='';
+  // (a) face art — figure contour per plane, in the plane's axis hue
+  for(const pl of planes){
+    const A=P[pl.ids[0]],B=P[pl.ids[1]],D=P[pl.ids[3]], hue=HEX[pl.axis];
+    body+=`<g transform="${affine40(A,B,D)}">`+
+      `<use href="#o" stroke="${hue}" stroke-width="${cam.figW}" filter="url(#c3g)"/>`+
+      (cam.figCore>0?`<use href="#o" stroke="#fff" stroke-width="${cam.figCore}" opacity="0.85"/>`:'')+
+      `</g>`;
+  }
+  // (b) cube-edge frame — each plane's quad outline in its paired frame hue
+  for(const pl of planes){
+    const c4=pl.ids.map(i=>P[i]);
+    const d='M'+c4.map(p=>`${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join('L')+'Z';
+    body+=`<path d="${d}" stroke="${FRAME_HEX[pl.axis]}" stroke-width="${cam.edgeW}" fill="none" filter="url(#c3g)"/>`+
+      `<path d="${d}" stroke="#fff" stroke-width="${(cam.edgeW*0.22).toFixed(3)}" fill="none" opacity="0.8"/>`;
+  }
+  return {defs,body};
+}
+
 let svgEl=null;
 function buildSVG(){
   const fig=neon('#o', HEX[AXIS], G.normie.state, 'N');
   const frm=neon('#f', FRAME_HEX[AXIS], G.frame.state, 'F');
-  const orb=orbs(G.points.state, 'P');
+  const orb=orbs(G.points.state, 'P', seededOrbs(SLOT>=0?SLOT:(G.glass.state.seed||20)));
   const cells=glassCells(GRID, G.glass.state);
   const glass=buildGlass(cells, G.glass.state);
   const wkAxisHex=HEX[[0,1,2].filter(a=>a!==AXIS)[(G.walkers.state.walkAxis|0)%2]];
   const walk=buildWalkers(walkerPaths(GRID, G.walkers.state), G.walkers.state);
   const forest=buildForest(G.forest.state);
   const banner=buildBanner(G.banner.state);
+  const depth=buildDepth(G.depth.state);
+  const use3d=G.depth.state.cube3d>=1;
+  const cube3d=use3d?buildCube3D(G.depth.state):{defs:'',body:''};
+  // forest layer parked while we focus on the hilbert wireframe + 3D voxels.
+  const flatBody=`${depth.body}${fig.body}${walk.body}${glass.body}${frm.body}${depth.hot||''}${orb.body}${banner.body}`;
   const svg=
    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBoxStr()}">`+
      `<rect x="-2000" y="-2000" width="6000" height="6000" fill="#050507"/>`+
-     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}${walk.defs}${forest.defs}${banner.defs}<path id="o" d="${figurePath()}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
-     `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${forest.body}${fig.body}${walk.body}${glass.body}${frm.body}${orb.body}${banner.body}</g>`+
+     `<defs>${fig.defs}${frm.defs}${orb.defs}${glass.defs}${walk.defs}${banner.defs}${use3d?cube3d.defs:depth.defs}<path id="o" d="${figurePath()}"/><path id="f" d="${FRAME_PATH}"/></defs>`+
+     `<g transform="scale(25)" fill="none" stroke-linecap="round" stroke-linejoin="round">${use3d?cube3d.body:flatBody}</g>`+
    `</svg>`;
   document.getElementById('svgwrap').innerHTML=svg;
   svgEl=document.querySelector('#svgwrap svg');
@@ -758,9 +1132,10 @@ function buildSVG(){
     `axis=${['x','y','z'][AXIS]}  figure=${HEX[AXIS]}  frame=${FRAME_HEX[AXIS]}\n\n`+
     `[NORMIE] ${ps(G.normie.state)}\n\n[FRAME] ${ps(G.frame.state)}\n\n[POINTS] ${ps(G.points.state)}\n\n`+
     `[GLASS] blend=${glassBlend}  ${ps(G.glass.state)}  (${cells.length} cells)\n\n`+
+    `[DEPTH/3D] ${ps(G.depth.state)}\n\n`+
     `[WALKERS] figure=${HEX[AXIS]} (front) walker=${wkAxisHex} (sides, majority)  ${ps(G.walkers.state)}\n\n`+
     `[FOREST] (Normie-only) unique=${HEX[AXIS]} doubled=${HEX[[0,1,2].filter(a=>a!==AXIS)[(G.forest.state.sideAxis|0)%2]]} (1:2 by walker rule)  ${ps(G.forest.state)}\n\n`+
-    `[BANNER] CA="${(document.getElementById('bannerText')?.value||'')}" (data) ${banner.meta?`chars=${banner.meta.n} size=${banner.meta.fontSize.toFixed(3)} step=${banner.meta.step.toFixed(3)} (fills side-to-side)`:''} placement=${banner.meta?(banner.meta.vertical?'vertical':'horizontal'):'-'} @ ${banner.meta?banner.meta.perpPct.toFixed(1):'-'}% edge-band  ${ps(G.banner.state)}\n\n`+
+    `[BANNER] CA="${(document.getElementById('bannerText')?.value||'')}" (data) ${banner.meta?`banners=${banner.meta.banners||1} chars=${banner.meta.n}`:''}  ${ps(G.banner.state)}\n\n`+
     `--- figure defs ---\n${fig.defs}\n--- figure body ---\n${fig.body}\n\n`+
     `--- frame defs ---\n${frm.defs}\n--- frame body ---\n${frm.body}\n\n`+
     `--- orb defs ---\n${orb.defs}\n--- orb body ---\n${orb.body}\n\n`+
@@ -795,7 +1170,7 @@ function makeRows(grpName){
     cont.appendChild(row);
   });
 }
-['normie','frame','points','glass','walkers','forest','banner'].forEach(makeRows);
+['normie','frame','points','glass','walkers','forest','banner','depth'].forEach(makeRows);
 document.querySelector('.controls').addEventListener('input',e=>{
   const grp=e.target.dataset.grp, k=e.target.dataset.k; if(!grp)return;
   G[grp].state[k]=parseFloat(e.target.value); document.getElementById(`v_${grp}_${k}`).textContent=G[grp].state[k]; buildSVG();
@@ -803,14 +1178,24 @@ document.querySelector('.controls').addEventListener('input',e=>{
 });
 document.getElementById('tabs').addEventListener('click',e=>{ const t=e.target.dataset.tab; if(!t)return;
   [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
-  ['normie','frame','points','glass','walkers','forest','banner'].forEach(g=>document.getElementById('rows_'+g).style.display=(g===t?'':'none'));
+  ['normie','frame','points','glass','walkers','forest','banner','depth'].forEach(g=>document.getElementById('rows_'+g).style.display=(g===t?'':'none'));
   document.getElementById('glass-blend-row').style.display=(t==='glass'?'flex':'none');
   document.getElementById('forest-note').style.display=(t==='forest'?'':'none');
   document.getElementById('banner-note').style.display=(t==='banner'?'flex':'none'); });
 document.getElementById('glassBlend').addEventListener('change',e=>{ glassBlend=e.target.value; buildSVG(); });
 document.getElementById('bannerText').addEventListener('input',()=>buildSVG());
 document.getElementById('axis').addEventListener('click',e=>{ const a=e.target.dataset.axis; if(a==null)return;
-  AXIS=+a; [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.axis===a)); drawGL(); buildSVG(); });
+  AXIS=+a; SLOT=-1; SIDEAXIS=(AXIS+1)%3;   // manual axis pick — leave slot mode
+  const si=document.getElementById('slot'); if(si) si.value=-1;
+  [...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b.dataset.axis===a)); drawGL(); buildSVG(); });
+// SLOT input: drive main/side axes (and therefore colours) from the real Hilbert geometry.
+document.getElementById('slot').addEventListener('input',e=>{
+  SLOT=Math.floor(+e.target.value);
+  if(SLOT>=0){ const ax=slotAxes(SLOT); AXIS=ax.main; SIDEAXIS=ax.side;
+    [...document.getElementById('axis').children].forEach(b=>b.classList.toggle('on',+b.dataset.axis===AXIS)); }
+  else { SIDEAXIS=(AXIS+1)%3; }
+  drawGL(); buildSVG();
+});
 document.getElementById('shape').addEventListener('change',e=>{ const val=e.target.value;
   if(val.slice(0,4)==='cc0:'){ const s=CC0_SAMPLES[+val.slice(4)]; TONAL=unpackPayload(s.payload); GRID=tonalToBits(TONAL); }
   else { SHAPE=+val; GRID=buildGrid(SHAPE); TONAL=GRID.slice(); }
@@ -821,7 +1206,7 @@ if(window.CC0_SAMPLES&&CC0_SAMPLES.length){ const sel=document.getElementById('s
   CC0_SAMPLES.forEach((s,i)=>{ const o=document.createElement('option'); o.value='cc0:'+i; o.textContent=s.name; og.appendChild(o); });
   sel.appendChild(og); }
 document.getElementById('reset').addEventListener('click',()=>{
-  for(const g of ['normie','frame','points','glass','walkers','forest','banner']){ G[g].state={...G[g].def};
+  for(const g of ['normie','frame','points','glass','walkers','forest','banner','depth']){ G[g].state={...G[g].def};
     G[g].schema.forEach(([k])=>{ const el=document.querySelector(`[data-grp="${g}"][data-k="${k}"]`); if(el){el.value=G[g].state[k]; document.getElementById(`v_${g}_${k}`).textContent=G[g].state[k];} }); }
   buildSVG(); });
 document.getElementById('resetView').addEventListener('click',()=>{ view={z:1,cx:0.5,cy:0.5}; updateView(); });
