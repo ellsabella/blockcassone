@@ -6,6 +6,7 @@
 import { loadChainMintRecords } from './chain-cubes.js';
 import {
   moveCube, mergeStreet, quoteMove, quoteMerge, cubeThumbnailSVG, cubeAnimationURI,
+  thumbnailAtSlotSVG, movedAnimationURI,
   contractFlags, setTransactionSender,
 } from './preview-chain.js';
 import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js?v=20260806-1';
@@ -24,7 +25,7 @@ function glyph(seed){const s=(typeof seed==='string'?parseInt(String(seed).slice
 
 const els = {};
 const S = { mode:'mine', me:null, flags:null, recs:[], bySlot:new Map(), merged:new Set(),
-  myStreets:[], myCubes:[], detail:null, staged:null, moveCube:null, filters:new Set(), thumbCache:new Map() };
+  myStreets:[], myCubes:[], detail:null, staged:null, moveCube:null, moveTarget:null, previewTok:0, filters:new Set(), thumbCache:new Map() };
 
 // ---------- boot ----------
 (async function init(){
@@ -127,6 +128,15 @@ async function loadThumbs(s){
   for (const p of s.plots){ if (!p || S.thumbCache.has(p.cubeId)) continue;
     try{ const svg=await cubeThumbnailSVG(p.cubeId); S.thumbCache.set(p.cubeId,svg); if(S.detail===s) renderDetail(); }catch{} }
 }
+// Lazily fetch each cube's REAL on-chain thumbnail into S.thumbCache, then re-render once so
+// the finder strip + pick-cube popup show the same art as the detail sheet (the `glyph` is only
+// a placeholder shown while loading). Cached → each cube is fetched at most once.
+async function ensureCubeThumbs(cubes, onLoaded){
+  let any=false;
+  for(const c of cubes){ const id=c&&c.cubeId; if(id==null||S.thumbCache.has(id)) continue;
+    try{ S.thumbCache.set(id, await cubeThumbnailSVG(id)); any=true; }catch{} }
+  if(any && onLoaded) onLoaded();
+}
 function renderDetail(){
   const s=S.detail,c=count(s),m=analyze(s);
   els.sheetbody.innerHTML=`
@@ -169,9 +179,9 @@ function onPlot(i){ const s=S.detail,p=s.plots[i];
 // ---------- stage: merge / fill / evict → confirm ----------
 function stageMerge(){ S.staged={type:'merge'}; renderDetail();
   quoteMerge({street:S.detail.sid}).then(q=>{ if(S.staged&&S.staged.type==='merge'){ S.staged.fee=q.fee; renderDetail(); } }).catch(()=>{}); }
-function startFill(i){ const s=S.detail; pickCube('Move which cube here?', s, cube=>{ S.staged={type:'fill',slotIdx:i,incoming:cube,slot:s.base+i}; renderDetail();
+function startFill(i){ const s=S.detail; pickCube('Move which cube here?', s, s.base+i, false, cube=>{ S.staged={type:'fill',slotIdx:i,incoming:cube,slot:s.base+i}; renderDetail();
   quoteMove({cubeId:cube.cubeId,newSlot:s.base+i}).then(q=>{ if(S.staged&&S.staged.incoming===cube){ S.staged.fee=q.fee; renderDetail(); } }).catch(()=>{}); }); }
-function startEvict(i){ const s=S.detail; pickCube('Which of your cubes swaps in?', s, cube=>{ S.staged={type:'evict',slotIdx:i,incoming:cube,slot:s.base+i}; renderDetail();
+function startEvict(i){ const s=S.detail; pickCube('Which of your cubes swaps in?', s, s.base+i, true, cube=>{ S.staged={type:'evict',slotIdx:i,incoming:cube,slot:s.base+i}; renderDetail();
   quoteMove({cubeId:cube.cubeId,newSlot:s.base+i}).then(q=>{ if(S.staged&&S.staged.incoming===cube){ Object.assign(S.staged,{fee:q.fee,victim:q.victim,victimShare:q.victimShare,houseShare:q.houseShare}); renderDetail(); } }).catch(()=>{}); }); }
 
 function stagedHTML(){ if(!S.staged) return ''; const st=S.staged,s=S.detail;
@@ -209,29 +219,88 @@ async function commitStaged(){ const st=S.staged,s=S.detail,owner=walletAccount(
 }
 
 // ---------- pick-cube (nested in the sheet) ----------
-function pickCube(title, street, cb){
-  const avail=S.myCubes.filter(c=>Math.floor(c.slot/8)!==street.sid); // a cube from ELSEWHERE swaps in
+function pickCube(title, street, slot, displacement, cb){
+  const avail=S.myCubes.filter(c=>Math.floor(c.slot/8)!==street.sid); // a cube from ELSEWHERE moves in
   if(!avail.length){ toast('you have no cube elsewhere to move in',true); return; }
-  const grid=avail.map(c=>`<div class="pcube" data-id="${c.cubeId}">${glyph(c.seed)}<span class="lab">#${c.cubeId} ${c.biome.emoji}</span></div>`).join('');
   const back=els.sheetbody.innerHTML;
-  els.sheetbody.innerHTML=`<div class="dhd"><span class="t">${esc(title)}</span><button class="close">✕</button></div>
-    <div style="color:var(--faint);font-size:11px;padding:0 0 8px">a cube you hold elsewhere swaps in; the displaced owner takes its old slot</div>
-    <div class="cubegrid">${grid}</div>`;
-  els.sheetbody.querySelector('.close').onclick=()=>{ els.sheetbody.innerHTML=back; renderDetail(); };
-  els.sheetbody.querySelectorAll('.pcube').forEach(el=>el.onclick=()=>{ const cube=avail.find(c=>c.cubeId==el.dataset.id); renderDetail(); cb(cube); });
+  // Only the DISPLACEMENT (evict) case involves a swap; filling a vacant plot does not.
+  const sub=displacement
+    ? 'the cube you pick swaps in; the rival you displace takes your cube&rsquo;s old slot'
+    : 'pick one of your cubes to move into this vacant plot';
+  let feeTxt='quoting…';
+  function paint(){
+    const grid=avail.map(c=>`<div class="pcube" data-id="${c.cubeId}">${S.thumbCache.get(c.cubeId)||glyph(c.seed)}<span class="lab">#${c.cubeId} ${c.biome.emoji}</span></div>`).join('');
+    els.sheetbody.innerHTML=`<div class="dhd"><span class="t">${esc(title)}</span><button class="close">✕</button></div>
+      <div style="color:var(--faint);font-size:11px;padding:0 0 6px">${sub}</div>
+      <div style="font-size:11px;padding:0 0 8px">est. fee <b>${feeTxt}</b> <span style="color:var(--faint)">· exact shown on confirm</span></div>
+      <div class="cubegrid">${grid}</div>`;
+    els.sheetbody.querySelector('.close').onclick=()=>{ els.sheetbody.innerHTML=back; renderDetail(); };
+    els.sheetbody.querySelectorAll('.pcube').forEach(el=>el.onclick=()=>{ const cube=avail.find(c=>c.cubeId==el.dataset.id); renderDetail(); cb(cube); });
+  }
+  paint();
+  ensureCubeThumbs(avail, ()=>{ if(els.sheetbody.querySelector('.cubegrid')) paint(); }); // real art, not the glyph
+  // Representative fee for THIS slot (the move fee is slot/biome-driven; the exact per-cube
+  // quote appears in the staged confirm). Shown in all cases — fill and evict alike.
+  quoteMove({cubeId:avail[0].cubeId,newSlot:slot})
+    .then(q=>{ feeTxt='≈ '+fmtEth(q.fee); if(els.sheetbody.querySelector('.cubegrid')) paint(); })
+    .catch(()=>{ feeTxt='~'+fmtEth(1e15); if(els.sheetbody.querySelector('.cubegrid')) paint(); });
 }
 
 // ---------- MOVE A CUBE finder ----------
 function renderMove(){
   if(!S.me){ els.view.innerHTML=`<div class="empty">connect a wallet first</div>`; return; }
   els.view.innerHTML=`<div class="barrow">1 · pick a cube to move</div>
-    <div class="strip" id="mstrip">${S.myCubes.map(c=>`<div class="thumb ${S.moveCube&&S.moveCube.cubeId===c.cubeId?'sel':''}" data-id="${c.cubeId}">${glyph(c.seed)}<span class="id">#${c.cubeId}</span></div>`).join('')||'<span class="empty">no cubes in this wallet</span>'}</div>
+    <div class="strip" id="mstrip">${S.myCubes.map(c=>`<div class="thumb ${S.moveCube&&S.moveCube.cubeId===c.cubeId?'sel':''}" data-id="${c.cubeId}">${S.thumbCache.get(c.cubeId)||glyph(c.seed)}<span class="id">#${c.cubeId}</span></div>`).join('')||'<span class="empty">no cubes in this wallet</span>'}</div>
+    <div class="mprev" id="mprev"></div>
     <div class="barrow">2 · where to? filter the world</div>
     <div class="chips">${['near my streets','low population','affordable','🌊 water','🏔️ mountain','🧊 ice','🌿 grass','🏜️ desert','🌲 forest'].map(f=>`<div class="fchip ${S.filters.has(f)?'on':''}" data-f="${f}">${f}</div>`).join('')}</div>
     <div class="cands" id="cands"></div>`;
-  els.view.querySelectorAll('#mstrip .thumb').forEach(el=>el.onclick=()=>{ S.moveCube=S.myCubes.find(c=>c.cubeId==el.dataset.id); renderMove(); });
+  els.view.querySelectorAll('#mstrip .thumb').forEach(el=>el.onclick=()=>{ S.moveCube=S.myCubes.find(c=>c.cubeId==el.dataset.id); S.moveTarget=null; renderMove(); });
   els.view.querySelectorAll('.fchip').forEach(el=>el.onclick=()=>{ const f=el.dataset.f; S.filters.has(f)?S.filters.delete(f):S.filters.add(f); renderMove(); });
+  ensureCubeThumbs(S.myCubes, ()=>{ if($('mstrip')) renderMove(); }); // swap real art into the strip
   renderCands();
+  renderMovePreview();
+}
+// Side-by-side 2D+3D of the picked cube; when a target slot is chosen it re-renders at THAT slot
+// (post-move colours/geometry) and reveals a Confirm button. `previewTok` guards stale async.
+function renderMovePreview(){
+  const box=$('mprev'); if(!box) return;
+  const c=S.moveCube;
+  if(!c){ box.innerHTML=''; return; }
+  const t=S.moveTarget; // { slot, sid, biome } or null
+  const label=t ? `<b>after → street ${t.sid}</b> ${t.biome.emoji} ${t.biome.name}`
+                : `<b>now</b> · street ${Math.floor(c.slot/8)} ${c.biome.emoji}`;
+  box.innerHTML=`
+    <div class="mpv">
+      <div class="mppane"><span class="mptag">2D${t?' · after move':''}</span><div class="mpfill" id="mp2d"><div class="mpnote">…</div></div></div>
+      <div class="mppane"><span class="mptag">3D${t?' · after move':''}</span><div class="mpfill" id="mp3d"><div class="mpnote">loading…</div></div></div>
+    </div>
+    <div class="mpbar"><span class="mplabel">${label}</span>${
+      t ? `<button class="act primary" id="mpconfirm">Confirm move → <b id="mpfee">quoting…</b></button>`
+        : `<span class="mphint">tap a slot below to preview the move</span>`}</div>`;
+  const tk=++S.previewTok, slot=t?t.slot:c.slot;
+  (async()=>{ try{ const svg=(!t&&S.thumbCache.get(c.cubeId))?S.thumbCache.get(c.cubeId):await thumbnailAtSlotSVG(c.cubeId,slot);
+    if(tk===S.previewTok){ const n=$('mp2d'); if(n) n.innerHTML=svg; } }
+    catch{ if(tk===S.previewTok){ const n=$('mp2d'); if(n) n.innerHTML='<div class="mpnote">2D preview unavailable</div>'; } } })();
+  (async()=>{ try{ const uri=t?await movedAnimationURI(c.cubeId,t.slot):await cubeAnimationURI(c.cubeId);
+    if(tk===S.previewTok){ const n=$('mp3d'); if(n) n.innerHTML=`<iframe title="3D preview" src="${uri}"></iframe>`; } }
+    catch{ if(tk===S.previewTok){ const n=$('mp3d'); if(n) n.innerHTML='<div class="mpnote">3D preview unavailable</div>'; } } })();
+  if(t){
+    $('mpconfirm').onclick=confirmMove;
+    quoteMove({cubeId:c.cubeId,newSlot:t.slot})
+      .then(q=>{ if(S.moveTarget) S.moveTarget.fee=q.fee; const n=$('mpfee'); if(n&&tk===S.previewTok) n.textContent=fmtEth(q.fee); })
+      .catch(()=>{ const n=$('mpfee'); if(n&&tk===S.previewTok) n.textContent='~'+fmtEth(1e15); });
+  }
+}
+async function confirmMove(){
+  const c=S.moveCube, t=S.moveTarget; if(!c||!t) return;
+  if(!(S.flags?S.flags.movesEnabled:true)) return toast('moving is paused on-chain',true);
+  const owner=walletAccount()||S.me, btn=$('mpconfirm');
+  if(btn){ btn.disabled=true; btn.textContent='confirming…'; }
+  try{
+    await moveCube({cubeId:c.cubeId,owner,newSlot:t.slot});
+    toast('✓ Moved'); S.moveTarget=null; await loadWorld(); setTab('mine'); setTimeout(loadWorld,2500);
+  }catch(e){ toast('move failed: '+msg(e),true); if(btn){ btn.disabled=false; renderMovePreview(); } }
 }
 function renderCands(){
   const F=S.filters, mine=new Set(S.myStreets.map(s=>s.sid));
@@ -250,9 +319,16 @@ function renderCands(){
   }
   const grid=$('cands'); if(!grid) return;
   grid.innerHTML = out.length ? out.map(candHTML).join('') : `<div class="empty" style="grid-column:1/-1">no open slots match — loosen the filters</div>`;
-  grid.querySelectorAll('.cand').forEach(el=>el.onclick=()=>{ if(!S.moveCube){toast('pick a cube first',true);return;} moveToSlot(+el.dataset.slot); });
+  grid.querySelectorAll('.cand').forEach(el=>el.onclick=()=>{
+    if(!S.moveCube){toast('pick a cube first',true);return;}
+    const slot=+el.dataset.slot, sid=Math.floor(slot/8);
+    S.moveTarget={slot, sid, biome:biomeForStreet(sid)};           // preview first; confirm in the pane
+    grid.querySelectorAll('.cand').forEach(x=>x.classList.toggle('sel', +x.dataset.slot===slot));
+    renderMovePreview();
+    $('mprev')?.scrollIntoView({behavior:'smooth', block:'nearest'});
+  });
 }
-function candHTML(c){ return `<div class="cand" data-slot="${c.slot}"><div class="art">+</div>
+function candHTML(c){ return `<div class="cand${S.moveTarget&&S.moveTarget.slot===c.slot?' sel':''}" data-slot="${c.slot}"><div class="art">+</div>
   <div class="meta"><div class="b">${c.biome.emoji} ${c.biome.name}</div><div>vacant · pop ${c.pop}/8</div><div class="fee">~${fmtEth(1e15)}</div></div></div>`;}
 async function moveToSlot(slot){
   if(!(S.flags?S.flags.movesEnabled:true)) return toast('moving is paused on-chain',true);

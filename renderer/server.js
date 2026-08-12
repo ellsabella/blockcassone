@@ -6,6 +6,12 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 
+// The viewer fans out many concurrent /api/chain-rpc eth_calls (thumbnails, previews), all
+// proxied through Node's built-in fetch (undici) on one shared global dispatcher. That trips
+// undici's default 10-listener "possible EventEmitter memory leak" warning on its socket pool —
+// legitimate concurrency, not a leak. Raise the ceiling so the console stays clean.
+require('events').EventEmitter.defaultMaxListeners = 100;
+
 const ROOT      = __dirname;                        // renderer/
 const REPO_ROOT = path.resolve(__dirname, '..');    // blockcassone/
 const PORT      = parseInt(process.env.PORT || '3000', 10);
@@ -44,7 +50,7 @@ loadDotEnv(ENV_PATH);
 
 // Route prefixes that should resolve from the repo root (outside renderer/).
 // Everything else resolves from renderer/.
-const REPO_PREFIXES = ['/viewer/', '/core/', '/public/', '/schema/', '/renderer/', '/data/', '/dist/'];
+const REPO_PREFIXES = ['/viewer/', '/core/', '/public/', '/schema/', '/renderer/', '/data/', '/dist/', '/tmp/'];
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

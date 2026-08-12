@@ -120,20 +120,22 @@ contract CubeRendererV2Test is Test {
         // #00ff00 (matches the WebGL cube + the line-lab neon tuning); the figure
         // uses the additive-screen #nfN filter, fill="none" hoisted to the group.
         assertTrue(_contains(svg, '<use href="#o" stroke="#00ff00" stroke-width=".146" filter="url(#nfN)"'));
-        // Frame border traces the motif's unique-plane sides (slot 1734 -> TRB,
-        // open left) as separate subpaths.
-        assertTrue(_contains(svg, '<path d="M100 85H1100M1100 85V1085M100 1085H1100"'));
+        // Frame border is the fixed open-top ∪ (bottom + left + right, top open) so it stays
+        // continuous with the depth wireframe that always recedes over the top.
+        assertTrue(_contains(svg, '<path d="M100 1085H1100M100 85V1085M1100 85V1085"'));
         assertTrue(_contains(svg, '<path id="l" d='));
         // edge-point orbs: additive white-glow group at r=10 (soft core group r=6).
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="10"'));
         assertTrue(_contains(svg, '<filter id="nfN"'));
-        // forest strand layer: thin cores (per walker-rule colour) + turbulence
-        // tip-clouds. The wide blurred glow pass was dropped; strands are now a
-        // single thin core group (sw .7) in the #g filter, and clouds fill the
-        // per-colour gradient (#cg unique / #cg2 doubled) through the #pc filter.
-        assertTrue(_contains(svg, 'stroke-width=".7" opacity=".3" filter="url(#g)"'));
-        assertTrue(_contains(svg, 'filter="url(#pc)"'));
-        assertTrue(_contains(svg, 'fill="url(#cg') && _contains(svg, ')" filter="url(#pc)"'));
+        // 2.5D depth layers (the new line-only look): the receding side-plane group,
+        // the depth wireframe edges (top receders + back sides), and the yellow hot
+        // sections dashed along the whole Hilbert outline.
+        assertTrue(_contains(svg, 'opacity="0.76" fill="none"'));
+        assertTrue(_contains(svg, 'M100 85L240 225M1100 85L960 225M240 225L240 945M960 225L960 945'));
+        assertTrue(_contains(svg, 'stroke-dasharray="125 150 225 175 100 125 275 200"'));
+        // Glass + forest are removed from the 2D thumbnail.
+        assertFalse(_contains(svg, 'url(#gGlass)'));
+        assertFalse(_contains(svg, 'filter="url(#pc)"'));
         assertTrue(_contains(svg, '<use href="#l" stroke="#00ff00"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));

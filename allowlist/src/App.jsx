@@ -3,6 +3,7 @@ import { useAccount, usePublicClient, useSignTypedData } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { CONFIG, entitlementFor } from './config.js';
 import { resolveHoldings } from './lib.js';
+import { turnstileToken } from './turnstile.js';
 
 const keyOf = h => `${h.collectionId}:${h.tokenId}`;
 
@@ -130,6 +131,8 @@ export default function App() {
         // Client-reported entitlement (unsigned) — review triage only; re-verified on-chain.
         entitlement: { normies: entitlement.normies, other: entitlement.other, spots: cap },
       };
+      try { payload.turnstileToken = await turnstileToken(); }
+      catch { setStatus('Bot check failed — please try again.'); return; }
       setStatus('Submitting…');
       // The backend appends the signed request to the collected dataset (the source of
       // truth for review). A local mirror guards against the backend being unreachable.
@@ -173,6 +176,8 @@ export default function App() {
         // Client-reported holdings (unsigned) — triage only; FCFS eligibility re-verified on-chain.
         heldSummary: { normies: entitlement.normies, other: entitlement.other },
       };
+      try { payload.turnstileToken = await turnstileToken(); }
+      catch { setStatus('Bot check failed — please try again.'); return; }
       setStatus('Submitting…');
       let backendUnreachable = false;
       try {

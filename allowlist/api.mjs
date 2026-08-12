@@ -67,6 +67,13 @@ export function createApiHandler(env) {
     ? path.resolve(env.SUBMISSIONS_FILE)
     : path.join(REPO_ROOT, 'allowlist-submissions.jsonl');
 
+  // Cloudflare Turnstile — OFF until TURNSTILE_SECRET is set, so the site behaves exactly as today
+  // until you configure keys. When set, /api/allowlist-submit requires a valid token (stops bot
+  // registrations + interest spam). The read proxies are additionally gated only if
+  // TURNSTILE_GATE_PROXIES is truthy (they're already IP-rate-limited + Cloudflare-fronted).
+  const turnstileSecret = env.TURNSTILE_SECRET || '';
+  const gateProxies = /^(1|true|yes|on)$/i.test(env.TURNSTILE_GATE_PROXIES || '');
+
   const submitLimited = makeLimiter(SUBMIT_MAX_PER_WINDOW);
   const alchemyLimited = makeLimiter(ALCHEMY_MAX_PER_WINDOW);
   const rpcLimited = makeLimiter(RPC_MAX_PER_WINDOW);
@@ -110,6 +117,22 @@ export function createApiHandler(env) {
     return signer.toLowerCase() === String(p.wallet).toLowerCase();
   }
 
+  // Verify a Cloudflare Turnstile token against siteverify. Passes (no-op) when the secret is
+  // unset. Tokens are single-use, so the client fetches a fresh one per protected request.
+  async function verifyTurnstile(token, ip) {
+    if (!turnstileSecret) return true;
+    if (typeof token !== 'string' || !token) return false;
+    try {
+      const form = new URLSearchParams({ secret: turnstileSecret, response: token });
+      if (ip) form.set('remoteip', ip);
+      const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+        method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form,
+      });
+      const j = await r.json().catch(() => ({}));
+      return j.success === true;
+    } catch { return false; }
+  }
+
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname;
@@ -119,6 +142,7 @@ export function createApiHandler(env) {
     if (p === '/api/alchemy-nft' || p.startsWith('/api/alchemy-nft/')) {
       if (!alchemyKey) return json(res, 500, { error: 'Missing ALCHEMY_KEY / Alchemy ETH_RPC_URL' }), true;
       if (alchemyLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
+      if (gateProxies && !(await verifyTurnstile(req.headers['cf-turnstile-token'], clientIp(req)))) return json(res, 403, { error: 'captcha failed' }), true;
       const rest = req.url.slice('/api/alchemy-nft'.length);
       if (rest.split('?')[0] !== ALCHEMY_ALLOWED_PATH) return json(res, 403, { error: 'endpoint not allowed' }), true;
       const now = Date.now();
@@ -140,6 +164,7 @@ export function createApiHandler(env) {
     if (p === '/api/mainnet-rpc') {
       if (!rpc) return json(res, 500, { error: 'Missing ETH_RPC_URL' }), true;
       if (rpcLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
+      if (gateProxies && !(await verifyTurnstile(req.headers['cf-turnstile-token'], clientIp(req)))) return json(res, 403, { error: 'captcha failed' }), true;
       let body;
       try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad body' }), true; }
       let parsed;
@@ -168,6 +193,7 @@ export function createApiHandler(env) {
       if (submitLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
       let payload;
       try { payload = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'bad body' }), true; }
+      if (!(await verifyTurnstile(payload.turnstileToken, clientIp(req)))) return json(res, 403, { error: 'captcha failed' }), true;
       const wallet = String(payload.wallet || '');
       if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) return json(res, 400, { error: 'bad wallet' }), true;
       if (typeof payload.signature !== 'string' || !payload.signature.startsWith('0x'))

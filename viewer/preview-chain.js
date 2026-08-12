@@ -49,7 +49,12 @@ async function ethCall(cfg, to, data) {
 }
 
 async function thumbnailRendererAddress(cfg) {
-  if (!cfg.renderer) throw new Error('chain-config.json has no "renderer" address — deploy the contracts and point it at the local CubeRendererV2.');
+  // Prefer the CURRENT thumbnail renderer from chain-config (updated on each render redeploy) so
+  // every client 2D thumbnail uses the SAME renderer as the server's /api/thumbnail. Falling back
+  // to V2.thumbnailRenderer() reads V2's IMMUTABLE pointer, which lags behind a render-only
+  // redeploy and would show stale art.
+  if (cfg.thumbnailRenderer && /^0x[0-9a-fA-F]{40}$/.test(cfg.thumbnailRenderer)) return cfg.thumbnailRenderer;
+  if (!cfg.renderer) throw new Error('chain-config.json has no "thumbnailRenderer"/"renderer" address — deploy the render stack.');
   if (!thumbAddrPromise) {
     thumbAddrPromise = ethCall(cfg, cfg.renderer, '0x' + THUMBNAIL_RENDERER_SELECTOR)
       .then(r => '0x' + String(r).replace(/^0x/, '').slice(-40))
@@ -385,11 +390,30 @@ function decodeString(ret) {
   return new TextDecoder().decode(bytes);
 }
 
-// The on-chain thumbnail SVG of an existing cube (the owned-cubes row).
+// The on-chain thumbnail SVG of an existing cube — from the CURRENT thumbnail renderer (same as
+// /api/thumbnail), so every UI shows identical art.
 export async function cubeThumbnailSVG(cubeId) {
   const cfg = await loadConfig();
-  if (!cfg.renderer) throw new Error('chain-config.json has no "renderer" address');
-  return decodeString(await ethCall(cfg, cfg.renderer, '0x' + THUMBNAIL_SVG_SELECTOR + word(cubeId)));
+  const to = await thumbnailRendererAddress(cfg);
+  return decodeString(await ethCall(cfg, to, '0x' + THUMBNAIL_SVG_SELECTOR + word(cubeId)));
+}
+
+// The SAME cube rendered as if it sat at `slot` — a stateless MOVE preview (colours/geometry
+// follow the slot; art is the cube's real on-chain art). thumbnailSVGAtSlot(uint256,uint32).
+export async function thumbnailAtSlotSVG(cubeId, slot) {
+  const cfg = await loadConfig();
+  const to = await thumbnailRendererAddress(cfg);
+  return decodeString(await ethCall(cfg, to, '0xed957641' + word(cubeId) + word(slot)));
+}
+
+// A true 3D preview of the cube at a DIFFERENT slot (a proposed MOVE): reuse the cube's real
+// on-chain animation and rewrite only the slot in its token blob, so the engine repositions +
+// recolours it at the target slot. Works for every source kind.
+export async function movedAnimationURI(cubeId, newSlot) {
+  const base = await cubeAnimationURI(cubeId);
+  const html = decodeURIComponent(escape(atob(String(base).replace(/^data:text\/html;base64,/, ''))));
+  const out = html.replace(/(BLOCKCASSONE_TOKEN=\{[^}]*?slot:)\d+/, `$1${Number(newSlot)}`);
+  return 'data:text/html;base64,' + btoa(unescape(encodeURIComponent(out)));
 }
 
 // The cube's full on-chain animation (data:text/html;base64 …) — the real 3D that any cube
@@ -536,6 +560,34 @@ export async function poolSources() {
     if (!seen.has(k)) { seen.add(k); out.push({ sourceContract, sourceTokenId }); }
   }
   return (_poolCache = out);
+}
+
+// The on-chain sourceKey preimage: keccak256(abi.encode(chainId, contract, tokenId)),
+// byte-identical to CubeNFT.sourceKey. Returns 64-hex (no 0x).
+function sourceClaimKey(cfg, sourceContract, sourceTokenId) {
+  const chainId = Number(cfg.chainId || 1);
+  const preimage = word(chainId) + addrWord(sourceContract) + word(sourceTokenId);
+  return keccak256(hexToBytes(preimage));
+}
+
+// True if a pool source is already claimed by a cube (CubeNFT.cubeForSourceKey != 0).
+export async function isPoolSourceClaimed(sourceContract, sourceTokenId) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft) return false;
+  const key = sourceClaimKey(cfg, sourceContract, sourceTokenId);
+  const ret = await ethCall(cfg, cfg.cubeNft, '0xdd597020' + key); // cubeForSourceKey(bytes32)
+  return !/^0x0*$/.test(String(ret || '0x0')); // nonzero cubeId => claimed
+}
+
+// poolSources() minus any already claimed on-chain — the "spin the wheel" should only ever
+// offer sources a cube can actually take. Uniqueness is still enforced on commit; this just
+// stops the UI proposing a source that would revert with SourceAlreadyClaimed.
+export async function unclaimedPoolSources() {
+  const all = await poolSources();
+  const claimed = await Promise.all(
+    all.map(s => isPoolSourceClaimed(s.sourceContract, s.sourceTokenId).catch(() => false))
+  );
+  return all.filter((_, i) => !claimed[i]);
 }
 
 // The committed 400-byte tonal payload of a pool source (Uint8Array; empty if none).

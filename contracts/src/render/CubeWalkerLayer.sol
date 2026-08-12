@@ -16,8 +16,13 @@ contract CubeWalkerLayer {
     using Strings for uint256;
     using StrBuf for bytes;
 
-    uint256 private constant WK_FRONT = 11;    // mid-body walks (figure colour)
-    uint256 private constant WK_SIDE = 23;     // edge-entry walks (side colour)
+    // Walk counts track the 3D stone walker (materials/stone-walker.js: ~40 walks per
+    // plane for a base normie). The hero plane -> WK_FRONT (figure colour); the doubled
+    // side planes -> WK_SIDE (side colour). Both seed their start cells from the body, so
+    // the number + origins line up with the 3D token; the 2D path shape stays an
+    // approximation of the 3D voxel walk (can't be identical in 2D).
+    uint256 private constant WK_FRONT = 40;    // hero-plane walks (figure colour)
+    uint256 private constant WK_SIDE = 40;     // side-plane walks (side colour)
     uint256 private constant WK_STRAIGHT = 16; // max straight steps before touring
     uint256 private constant WK_STEPS = 10;    // tour steps
     uint256 private constant WK_TURN = 40;     // % chance to turn each tour step

@@ -16,8 +16,9 @@ import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 /// Drawn in raw 1200-space, so all widths/radii/blur are in viewBox px
 /// (= the lab's 40-grid units x 25).
 ///
-/// The border (hilbert) hue is paired against the cube's plane colour:
-/// axis 0 red -> green, else -> pink. The white core supplies the hot centre.
+/// The border (hilbert) hue is paired against the cube's plane colour, never the
+/// same as that plane's normie art: green(1) -> pink, red(0)/blue(2) -> green.
+/// The white core supplies the hot centre.
 contract CubeFrameLayer {
     using Strings for uint256;
 
@@ -73,21 +74,19 @@ contract CubeFrameLayer {
     }
 
     function _borderHue(uint256 axis) private pure returns (string memory) {
-        // axis 0 (red figure) -> green border; else -> pink.
-        return axis == 0 ? "#1aff38" : "#ff19a6";
+        // Frame hue is never the same colour as that plane's normie art:
+        // green(1) figure -> pink border; red(0)/blue(2) figure -> green border.
+        return axis == 1 ? "#ff19a6" : "#1aff38";
     }
 
-    // --- border: the unique plane's 3 sides as full-length segments ---
-    function _borderPath(uint256 layout) private pure returns (string memory) {
-        return string.concat(_sidePath(layout, 0), _sidePath(layout, 1), _sidePath(layout, 2));
-    }
-
-    function _sidePath(uint256 layout, uint256 edge) private pure returns (string memory) {
-        uint256 e3 = (layout >> (edge * 3)) & 7;
-        if ((e3 & 1) != 0) {
-            return (e3 & 2) != 0 ? "M100 85H1100" : "M100 1085H1100";
-        }
-        return (e3 & 2) != 0 ? "M1100 85V1085" : "M100 85V1085";
+    // --- border: the front plane's 3 sides as a fixed ∪ opening at the TOP ---
+    // The 2.5D depth wireframe always recedes over the top edge (the Hilbert path exits the
+    // front plane there), so the front frame is normalised to bottom + left + right with the
+    // top OPEN — regardless of the motif's 3D orientation. Matches the fixed FRAME_PATH in
+    // tmp/line-lab.html and keeps the wireframe continuous with the depth receders. (`layout`
+    // no longer steers the screen orientation; kept in the signature for interface stability.)
+    function _borderPath(uint256) private pure returns (string memory) {
+        return "M100 1085H1100M100 85V1085M1100 85V1085";
     }
 
     // --- shared edge-point plan (orbs + ownership) ----------------------------
@@ -116,19 +115,24 @@ contract CubeFrameLayer {
         }
     }
 
-    function _coord(uint256 layout, uint256 edge, uint256 bit)
+    // Edge-point placement on the fixed open-top ∪: canonical edge 0=bottom, 1=left, 2=right
+    // (matches _borderPath + tmp/line-lab.html). The seed still selects WHICH sub-slots get an
+    // orb (via _sidePlan); only the screen side is normalised. `layout` is unused now.
+    function _coord(uint256, uint256 edge, uint256 bit)
         private
         pure
         returns (uint256 x, uint256 y)
     {
         uint256 d = (bit + 1) * 125;
-        uint256 e3 = (layout >> (edge * 3)) & 7;
-        if ((e3 & 1) != 0) {
-            y = (e3 & 2) != 0 ? 85 : 1085;
-            x = (e3 & 4) != 0 ? 100 + d : 1100 - d;
+        if (edge == 0) {
+            x = 100 + d;
+            y = 1085; // bottom
+        } else if (edge == 1) {
+            x = 100; // left
+            y = 85 + d;
         } else {
-            x = (e3 & 2) != 0 ? 1100 : 100;
-            y = (e3 & 4) != 0 ? 1085 - d : 85 + d;
+            x = 1100; // right
+            y = 85 + d;
         }
     }
 }

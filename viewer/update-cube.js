@@ -10,7 +10,7 @@ import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
 import {
   previewThumbnailSVG, cubeThumbnailSVG, cubeAnimationURI, proposedAnimationURI, loadOwnedCubes,
   customizeCube, rebaseToPoolSource, contractFlags, setTransactionSender,
-  poolSources, poolSourcePayload,
+  poolSources, unclaimedPoolSources, poolSourcePayload,
 } from './preview-chain.js';
 import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js?v=20260806-1';
 
@@ -117,9 +117,13 @@ async function spin() {
   const c = state.cube; if (!c) return;
   toast('spinning…');
   try {
-    const sources = await poolSources();
-    if (!sources.length) { toast('no CC0 pool art committed on this deploy yet', true); return; }
-    // Pick a random source, avoiding an immediate repeat of the current proposal.
+    const sources = await unclaimedPoolSources();
+    if (!sources.length) {
+      const total = (await poolSources()).length;
+      toast(total ? 'every CC0 pool source is already taken — none left to spin' : 'no CC0 pool art committed on this deploy yet', true);
+      return;
+    }
+    // Pick a random UNCLAIMED source, avoiding an immediate repeat of the current proposal.
     let pick, tries = 0;
     do { pick = sources[(Math.random() * sources.length) | 0]; tries++; }
     while (state.proposal && state.proposal.kind === 'cc0'

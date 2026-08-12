@@ -87,6 +87,17 @@ const worldMapAxisEl = document.getElementById('world-map-axis');
 const ownerInventoryEl = document.getElementById('owner-inventory');
 const ownerInventoryTitleEl = document.getElementById('owner-inventory-title');
 const ownerInventoryListEl = document.getElementById('owner-inventory-list');
+const ownerInventoryMineEl = document.getElementById('owner-inventory-mine');
+// "Show mine" → focus the connected wallet's own cubes (easy to get lost otherwise).
+if (ownerInventoryMineEl) {
+  ownerInventoryMineEl.addEventListener('click', () => {
+    const me = loadedWalletAddress();
+    if (!me) return;
+    ownerFocusEnabled = true;
+    setOwnerFocusAddress(me);
+    rebuildScene();
+  });
+}
 
 const logLines = [];
 function log(msg) {
@@ -823,14 +834,29 @@ function updateOwnerInventory(ownerLabel) {
   if (!ownerInventoryEl || !ownerInventoryListEl) return;
   ownerInventoryListEl.replaceChildren();
   if (!ownerFocusEnabled || !ownerFocusAddress) {
-    ownerInventoryEl.classList.remove('open');
+    ownerInventoryEl.classList.remove('open', 'mine');
     ownerInventoryEl.setAttribute('aria-hidden', 'true');
+    if (ownerInventoryMineEl) ownerInventoryMineEl.hidden = true;
     return;
   }
   const cubes = ownerFocusedCubes();
   if (ownerInventoryTitleEl) {
-    ownerInventoryTitleEl.textContent = `${ownerLabel || shortAddress(ownerFocusAddress)} (${cubes.length})`;
+    const eyebrow = document.createElement('span');
+    eyebrow.className = 'oi-eyebrow';
+    eyebrow.textContent = 'Owner';
+    const idEl = document.createElement('span');
+    idEl.className = 'oi-id';
+    idEl.textContent = ownerLabel || shortAddress(ownerFocusAddress);
+    const countEl = document.createElement('span');
+    countEl.className = 'oi-count';
+    countEl.textContent = `(${cubes.length})`;
+    ownerInventoryTitleEl.replaceChildren(eyebrow, idEl, countEl);
   }
+  // Viewing OUR OWN cubes? Turn the panel green + hide the "Show mine" button.
+  const me = loadedWalletAddress();
+  const isMine = !!me && !!ownerFocusAddress && me.toLowerCase() === ownerFocusAddress.toLowerCase();
+  ownerInventoryEl.classList.toggle('mine', isMine);
+  if (ownerInventoryMineEl) ownerInventoryMineEl.hidden = isMine || !me;
   for (const cube of cubes) {
     const button = document.createElement('button');
     button.className = 'owner-inventory-item';

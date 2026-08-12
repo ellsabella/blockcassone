@@ -360,6 +360,20 @@ contract DeployLocalGenesis is Script {
             _seedCC0(d.genesis, uint8(i + 1), starts[i], caps[i]);
         }
 
+        // --- Allowlist "pick art" reservation (MUST be before finalize) -------------------
+        // Bake a test wallet's guaranteed chosen artwork: reserve a real snapshot Normie so the
+        // allowlist mint path (reserved-first) is exercised end-to-end. Reserving pulls it out of
+        // the public draw so it can't collide. CC0 sources reserve identically (STORED + payload).
+        address testWallet = vm.envOr("BLOCKCASSONE_TEST_WALLET", initialOwner);
+        {
+            uint8[] memory rc = new uint8[](1);
+            uint256[] memory rs = new uint256[](1);
+            rc[0] = 0;      // collection 0 = Normie
+            rs[0] = 5555;   // a real snapshot Normie (art from data/normie-raw-5555.hex)
+            vm.broadcast();
+            d.genesis.reserveSources(testWallet, rc, rs);
+        }
+
         vm.broadcast();
         d.genesis.finalizeSnapshot();
 
@@ -386,6 +400,21 @@ contract DeployLocalGenesis is Script {
             vm.broadcast();
             d.cubes.transferFrom(sampleRecipient, DEV_ATTESTATION_SIGNER, 1);
         }
+
+        // --- E2E: exercise BOTH mint paths to the TEST wallet via the real SeaDrop faucet ---
+        // Done LAST so cube #1 stays the sample recipient's (the split-owner transfer above
+        // assumes it). The test wallet's two cubes are minted after everything else.
+        // (a) ALLOWLIST: the reserved wallet mints its chosen art. mintSeaDrop assigns
+        //     reservations first (fromRes=1), so fromPhase=0 and it works in the Allowlist phase.
+        vm.broadcast();
+        d.genesis.setPhase(GenesisMinterBase.Phase.Allowlist);
+        vm.broadcast();
+        MockSeaDrop(d.mockSeaDrop).mintPublic(address(d.cubes), testWallet, 1);
+        // (b) PUBLIC: a random-pool draw to the same wallet. Ends in the Public phase (live).
+        vm.broadcast();
+        d.genesis.setPhase(GenesisMinterBase.Phase.Public);
+        vm.broadcast();
+        MockSeaDrop(d.mockSeaDrop).mintPublic(address(d.cubes), testWallet, 1);
     }
 
     // Populate one STORED collection's draw pool + commit its sample payloads (one

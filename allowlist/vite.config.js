@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => {
     preview: { port: 5173 },
     // WalletConnect project id comes from the repo-root .env at build time (client value,
     // safe to embed) so it's a one-line .env change, not a source edit. See DEPLOY.md.
-    define: { 'import.meta.env.VITE_WC_PROJECT_ID': JSON.stringify(env.WALLETCONNECT_PROJECT_ID || '') },
+    define: {
+      'import.meta.env.VITE_WC_PROJECT_ID': JSON.stringify(env.WALLETCONNECT_PROJECT_ID || ''),
+      'import.meta.env.VITE_TURNSTILE_SITE_KEY': JSON.stringify(env.TURNSTILE_SITE_KEY || ''),
+    },
   };
 });
