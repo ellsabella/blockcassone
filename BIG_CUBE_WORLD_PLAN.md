@@ -28,13 +28,13 @@ edge-point identity. This is the crux that makes move/merge coherent.
 ## World mechanics
 
 ### 1. Plot allocation (shared streets)
-- 4096 cubes ÷ 512 streets = 8/street; with **≤3 per wallet per street**, a full
-  street draws from ~3 wallets → **streets are shared**.
-- A wallet's holdings are kept **together** (a contiguous run of streets), ≤3 per
-  street. Example: 4 cubes → 3 on street A + 1 on street B.
+- 4096 cubes ÷ 512 streets = 8/street; with **≤5 per wallet per street**, a full
+  street draws from ~2 wallets → **streets are shared**.
+- A wallet's holdings are kept **together** (a contiguous run of streets), ≤5 per
+  street. Example: 6 cubes → 5 on street A + 1 on street B.
 - Vacancy appears only in the **unminted tail** if the 4096 cap isn't filled.
-- Replaces today's `slot = mintedCount`. Candidate algorithm: per-street fill
-  cursor + per-(wallet,street) ≤3 cap. *(allocation algorithm still to finalize)*
+- BUILT: `GenesisMinterBase._allocateSlot` (anchor-then-wrap, per-street fill
+  cursor + per-(wallet,street) ≤5 cap).
 
 ### 2. Environment (biome) — street-level, rarity-weighted
 - One environment per **street**; all 8 plots share it.

@@ -902,6 +902,103 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
         emit CustomizesEnabledUpdated(enabled);
     }
 
+    // ---- Marketplace / drop-page metadata -------------------------------------
+    // The read surface OpenSea's drop page + indexers expect from a SeaDrop token
+    // (the ISeaDropTokenContractMetadata subset that applies to us): maxSupply,
+    // contractURI (ERC-7572), and ERC-2981 royalties. SeaDrop itself never calls
+    // these — payment/limit enforcement reads getMintStats — but without them the
+    // hosted drop page can't show supply or royalties.
+
+    string private _contractURIValue;
+    address private _royaltyReceiver;
+    uint96 private _royaltyBps; // basis points out of 10_000
+    uint256 private _totalSupplyCount; // live token count (mints - burns)
+    bytes32 private _provenanceHashValue;
+
+    event ContractURIUpdated(string newContractURI); // ERC-7572
+    event RoyaltyInfoUpdated(address receiver, uint256 bps);
+    event ProvenanceHashUpdated(bytes32 previousHash, bytes32 newHash);
+
+    error InvalidRoyaltyBps(uint256 bps);
+    error ProvenanceHashFrozen();
+
+    /// @notice Tokens currently in existence (mints minus burns — merge burns its
+    ///         street's plot tokens). Indexers probe this on every ERC721A-style
+    ///         drop token, so expose it even though OZ ERC721 doesn't.
+    function totalSupply() external view returns (uint256) {
+        return _totalSupplyCount;
+    }
+
+    /// @dev Maintain the live count on every mint/burn (OZ v5 transfer hook).
+    function _update(address to, uint256 tokenId, address auth)
+        internal
+        override
+        returns (address from)
+    {
+        from = super._update(to, tokenId, auth);
+        if (from == address(0)) _totalSupplyCount++;
+        if (to == address(0)) _totalSupplyCount--;
+    }
+
+    /// @notice Token art is fully on-chain (tokenURI builds data: URIs) — there is
+    ///         no base URI. Exposed because SeaDrop tooling reads it.
+    function baseURI() external pure returns (string memory) {
+        return "";
+    }
+
+    function provenanceHash() external view returns (bytes32) {
+        return _provenanceHashValue;
+    }
+
+    /// @notice SeaDrop convention: the provenance hash commits to the art/pool
+    ///         ordering pre-drop and freezes once the first token exists.
+    function setProvenanceHash(bytes32 newProvenanceHash) external onlyOwner {
+        if (_nextCubeId != 1) revert ProvenanceHashFrozen();
+        emit ProvenanceHashUpdated(_provenanceHashValue, newProvenanceHash);
+        _provenanceHashValue = newProvenanceHash;
+    }
+
+    function royaltyAddress() external view returns (address) {
+        return _royaltyReceiver;
+    }
+
+    function royaltyBasisPoints() external view returns (uint256) {
+        return _royaltyBps;
+    }
+
+    /// @notice Genesis drop cap (the SeaDrop maxSupply). Post-mint external cubes
+    ///         also live on this contract, so `totalSupply`-style counts can exceed
+    ///         this; the DROP is bounded by it (see getMintStats).
+    function maxSupply() external view returns (uint256) {
+        return totalSlots;
+    }
+
+    function contractURI() external view returns (string memory) {
+        return _contractURIValue;
+    }
+
+    function setContractURI(string calldata newContractURI) external onlyOwner {
+        _contractURIValue = newContractURI;
+        emit ContractURIUpdated(newContractURI);
+    }
+
+    /// @notice ERC-2981 default royalty for every token.
+    function setDefaultRoyalty(address receiver, uint96 bps) external onlyOwner {
+        if (bps > 10_000) revert InvalidRoyaltyBps(bps);
+        _royaltyReceiver = receiver;
+        _royaltyBps = bps;
+        emit RoyaltyInfoUpdated(receiver, bps);
+    }
+
+    /// @notice ERC-2981: royalty for a sale of any token at `salePrice`.
+    function royaltyInfo(uint256, uint256 salePrice)
+        external
+        view
+        returns (address receiver, uint256 royaltyAmount)
+    {
+        return (_royaltyReceiver, (salePrice * _royaltyBps) / 10_000);
+    }
+
     // ---- SeaDrop (OpenSea) genesis-mint integration --------------------------
     // The token is the SeaDrop-facing ERC-721. Deploy wiring: owner (admin) sets
     // `genesisMinter` + `updateAllowedSeaDrop([seaDrop])`, points the minter's
@@ -1026,6 +1123,7 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     {
         return interfaceId == type(INonFungibleSeaDropToken).interfaceId
             || interfaceId == bytes4(0x49064906) // ERC-4906 (MetadataUpdate)
+            || interfaceId == bytes4(0x2a55205a) // ERC-2981 (royaltyInfo)
             || super.supportsInterface(interfaceId);
     }
 

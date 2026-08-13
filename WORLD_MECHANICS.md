@@ -51,15 +51,15 @@ replacing the old `slot = mintedCount`. Rule:
   one-per-street across the world.
 - **Once every street has ≥ 1 mint, allocation "wraps"** and new wallets backfill
   the **lowest non-full street**.
-- In both phases a wallet **packs ≤ 3 plots per street** and **spills forward** to
+- In both phases a wallet **packs ≤ 5 plots per street** and **spills forward** to
   the next street, so its holdings stay a **contiguous run** and a full street
-  ends up **shared by ~3 wallets**.
+  ends up **shared by ~2 wallets**.
 
 Result: early mint is spread wide; later mint densifies; vacancy lands only at
 the very start/tail.
 
-**State** (all on `NormieGenesisMinter`):
-- `PLOTS_PER_STREET = 8`, `MAX_PER_WALLET_PER_STREET = 3` (constants)
+**State** (all on `GenesisMinterBase`):
+- `PLOTS_PER_STREET = 8`, `MAX_PER_WALLET_PER_STREET = 5` (constants)
 - `seedCursor` — lowest street that may still have zero mints (anchor phase)
 - `frontierStreet` — lowest non-full street (wrap target)
 - `streetFill(street) → uint8` — plots used per street
@@ -67,7 +67,7 @@ the very start/tail.
   current street in its run (1-based; 0 = unset) and its count there
 
 **Properties / invariants:**
-- ≤ 3 plots per (wallet, street); per-wallet holdings are a contiguous street run
+- ≤ 5 plots per (wallet, street); per-wallet holdings are a contiguous street run
   (within a single transaction — see caveat).
 - O(1) amortized: seed/frontier cursors and the per-wallet pointer only move
   forward.

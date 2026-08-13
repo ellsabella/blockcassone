@@ -150,6 +150,76 @@ contract CubeSeaDropTest is Test {
         assertTrue(cubes.supportsInterface(type(INonFungibleSeaDropToken).interfaceId));
     }
 
+    // ---- Drop-page / marketplace metadata surface -----------------------------
+
+    function testMaxSupplyMatchesGenesisCap() public view {
+        assertEq(cubes.maxSupply(), 8); // == totalSlots, what getMintStats reports too
+    }
+
+    function testContractURISetAndRead() public {
+        assertEq(bytes(cubes.contractURI()).length, 0);
+        vm.prank(OWNER);
+        cubes.setContractURI("ipfs://contract-meta");
+        assertEq(cubes.contractURI(), "ipfs://contract-meta");
+    }
+
+    function testRoyaltyInfoERC2981() public {
+        vm.prank(OWNER);
+        cubes.setDefaultRoyalty(PAYOUT, 500); // 5%
+        (address receiver, uint256 amount) = cubes.royaltyInfo(1, 1 ether);
+        assertEq(receiver, PAYOUT);
+        assertEq(amount, 0.05 ether);
+        assertTrue(cubes.supportsInterface(bytes4(0x2a55205a)));
+    }
+
+    function testRoyaltyBpsCapped() public {
+        vm.prank(OWNER);
+        vm.expectRevert(abi.encodeWithSelector(CubeNFT.InvalidRoyaltyBps.selector, 10_001));
+        cubes.setDefaultRoyalty(PAYOUT, 10_001);
+    }
+
+    function testMetadataSettersAreOwnerOnly() public {
+        vm.expectRevert();
+        cubes.setContractURI("x");
+        vm.expectRevert();
+        cubes.setDefaultRoyalty(address(this), 100);
+        vm.expectRevert();
+        cubes.setProvenanceHash(bytes32(uint256(1)));
+    }
+
+    function testTotalSupplyTracksMints() public {
+        assertEq(cubes.totalSupply(), 0);
+        vm.deal(ALICE, 1 ether);
+        vm.prank(ALICE);
+        seaDrop.mintPublic{ value: 0.02 ether }(address(cubes), ALICE, 2);
+        assertEq(cubes.totalSupply(), 2);
+    }
+
+    function testBaseURIIsEmptyOnChainArt() public view {
+        assertEq(bytes(cubes.baseURI()).length, 0);
+    }
+
+    function testProvenanceHashSetsThenFreezesOnFirstMint() public {
+        vm.prank(OWNER);
+        cubes.setProvenanceHash(bytes32(uint256(0xBEEF)));
+        assertEq(cubes.provenanceHash(), bytes32(uint256(0xBEEF)));
+
+        vm.deal(ALICE, 1 ether);
+        vm.prank(ALICE);
+        seaDrop.mintPublic{ value: 0.01 ether }(address(cubes), ALICE, 1);
+
+        vm.prank(OWNER);
+        vm.expectRevert(CubeNFT.ProvenanceHashFrozen.selector);
+        cubes.setProvenanceHash(bytes32(uint256(0xDEAD)));
+    }
+
+    function testRoyaltyGetters() public {
+        vm.prank(OWNER);
+        cubes.setDefaultRoyalty(PAYOUT, 250);
+        assertEq(cubes.royaltyAddress(), PAYOUT);
+        assertEq(cubes.royaltyBasisPoints(), 250);
+    }
+
     function testForwarderRequiresAllowedSeaDrop() public {
         vm.prank(OWNER);
         vm.expectRevert(abi.encodeWithSelector(CubeNFT.OnlyAllowedSeaDrop.selector, address(0xBAD)));

@@ -119,8 +119,12 @@ contract PostMintMechanicsVerificationTest is Test {
         vm.prank(ALICE);
         cubes.moveCube(c2, 40);
 
+        uint256 supplyBefore = cubes.totalSupply();
         vm.prank(ALICE);
         uint256 streetId = cubes.mergeStreet(0);
+
+        // Merge burned the 5 on-street plots and minted 1 street token.
+        assertEq(cubes.totalSupply(), supplyBefore - 5 + 1);
 
         // Only the cubes still on street 0 are merged into it.
         (, uint8 occ, uint256[8] memory plots) = cubes.streetPlots(streetId);

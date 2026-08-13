@@ -21,6 +21,7 @@ abstract contract GenesisMinterBase is Ownable {
 
     error EmptySnapshot();
     error DuplicateNormie(uint256 normieId);
+    error GtdWindowActive(uint64 gtdEndTime);
     error InvalidQuantity();
     error InvalidAgentBindingList();
     error InvalidSeaDrop(address seaDrop);
@@ -36,6 +37,7 @@ abstract contract GenesisMinterBase is Ownable {
     event SnapshotAgentBindingUpdated(uint256 indexed normieId, uint256 agentId);
     event SnapshotFinalized(uint256 normieCount, uint32 totalSlots, bytes32 publicSeed);
     event PhaseUpdated(Phase oldPhase, Phase newPhase);
+    event GtdEndTimeUpdated(uint64 oldEnd, uint64 newEnd);
     event SeaDropUpdated(address indexed oldSeaDrop, address indexed newSeaDrop);
     event GenesisCubeMinted(
         uint256 indexed cubeId,
@@ -54,6 +56,12 @@ abstract contract GenesisMinterBase is Ownable {
     bool public finalized;
     uint256 public mintedCount;
 
+    // On-chain GTD (guaranteed) window: until this timestamp passes, `mintSeaDrop`
+    // serves RESERVATIONS ONLY — any non-reserved quantity reverts, no matter what
+    // the SeaDrop stage config or a merkle leaf's cap says. 0 = no window (draws
+    // gate on `phase` alone). Mirror it with the SeaDrop GTD stage's endTime.
+    uint64 public gtdEndTime;
+
     mapping(uint256 normieId => bool registered) public normieRegistered;
     mapping(uint256 normieId => bool claimed) public normieClaimed;
     mapping(uint256 normieId => uint256 indexPlusOne) public publicIndexPlusOne;
@@ -68,10 +76,11 @@ abstract contract GenesisMinterBase is Ownable {
     // Slots are no longer the global mint order. A new wallet anchors the lowest
     // street that has no mints yet (spreading wallets one-per-street across the
     // world); once every street has >= 1 mint we wrap and new wallets backfill the
-    // lowest non-full street. Either way a wallet packs <= 3 plots per street and
-    // spills forward to the next street, so its holdings stay a contiguous run and
-    // a full street ends up shared by ~3 wallets. Maintained in O(1) via a seed
-    // cursor (phase A) + a frontier (phase B / wrap) + a per-wallet pointer.
+    // lowest non-full street. Either way a wallet packs <= MAX_PER_WALLET_PER_STREET
+    // plots per street and spills forward to the next street, so its holdings stay a
+    // contiguous run and a full street ends up shared by ~2 wallets. Maintained in
+    // O(1) via a seed cursor (phase A) + a frontier (phase B / wrap) + a per-wallet
+    // pointer.
     uint32 public constant PLOTS_PER_STREET = 8;
     uint32 public constant MAX_PER_WALLET_PER_STREET = 5;
 
@@ -141,6 +150,15 @@ abstract contract GenesisMinterBase is Ownable {
         emit PhaseUpdated(oldPhase, newPhase);
     }
 
+    /// @notice Set the GTD window close (unix seconds). While `block.timestamp <=
+    ///         gtdEndTime`, only reserved (chosen) art can mint — the random draw is
+    ///         hard-blocked on-chain. Set it to the SeaDrop GTD stage's endTime before
+    ///         opening the drop; the window then closes itself, no mid-mint tx needed.
+    function setGtdEndTime(uint64 newEnd) external onlyOwner {
+        emit GtdEndTimeUpdated(gtdEndTime, newEnd);
+        gtdEndTime = newEnd;
+    }
+
     function setSeaDrop(address newSeaDrop) external onlyOwner {
         if (newSeaDrop == address(0)) revert InvalidSeaDrop(newSeaDrop);
         address oldSeaDrop = seaDrop;
@@ -163,17 +181,19 @@ abstract contract GenesisMinterBase is Ownable {
         uint256 fromPhase = quantity - fromRes;
 
         if (fromPhase > 0) {
-            if (phase == Phase.Public) {
-                // All-or-nothing for the paid SeaDrop path. SeaDrop charges the buyer
-                // for the FULL quantity up front, so a partial fill (pool drained, or
-                // the supply cap can't cover it) must revert rather than mint fewer.
-                uint256 available = _publicAvailable();
-                uint256 capRemaining = mintedCount < totalSlots ? totalSlots - mintedCount : 0;
-                if (capRemaining < available) available = capRemaining;
-                if (available < fromPhase) revert IncompletePublicFill(fromPhase, available);
-            } else {
-                revert MintClosed();
-            }
+            if (phase != Phase.Public) revert MintClosed();
+            // While the GTD window is open, ONLY reserved art mints. This is the
+            // on-chain backstop for the "you get the art you chose" promise: even a
+            // mis-capped GTD merkle leaf (cap > reservations) or a mis-windowed
+            // FCFS/public stage cannot leak a random draw into the guaranteed phase.
+            if (block.timestamp <= gtdEndTime) revert GtdWindowActive(gtdEndTime);
+            // All-or-nothing for the paid SeaDrop path. SeaDrop charges the buyer
+            // for the FULL quantity up front, so a partial fill (pool drained, or
+            // the supply cap can't cover it) must revert rather than mint fewer.
+            uint256 available = _publicAvailable();
+            uint256 capRemaining = mintedCount < totalSlots ? totalSlots - mintedCount : 0;
+            if (capRemaining < available) available = capRemaining;
+            if (available < fromPhase) revert IncompletePublicFill(fromPhase, available);
         }
 
         cubeIds = new uint256[](quantity);
@@ -193,10 +213,9 @@ abstract contract GenesisMinterBase is Ownable {
         return cubeIds;
     }
 
-    function mintPublic(uint256 quantity) external returns (uint256[] memory cubeIds) {
-        return _mintPublic(msg.sender, quantity);
-    }
-
+    // NOTE: there is deliberately NO unauthenticated mint entrypoint. The only public
+    // path is SeaDrop -> token -> `mintSeaDrop` (payment + limits enforced by SeaDrop);
+    // `mintPublicFor` below is the owner's ops/dev escape hatch.
     function mintPublicFor(address minter, uint256 quantity)
         external
         onlyOwner

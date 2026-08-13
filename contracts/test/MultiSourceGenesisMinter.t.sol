@@ -384,6 +384,84 @@ contract MultiSourceGenesisMinterTest is Test {
         g.releaseReservations(w);
     }
 
+    // ---- On-chain GTD window (gtdEndTime) ------------------------------------
+    // The chosen-art promise, enforced by the contract: while the window is open,
+    // ONLY reservations mint — no merkle mis-cap or stage mis-window can leak a
+    // random draw — and nobody (owner included) can release reservations.
+
+    function testGtdWindowBlocksRandomDrawEvenInPublicPhase() public {
+        (MultiSourceGenesisMinter g, CubeNFT cubes,) = _reservedWorld();
+        uint64 gtdEnd = uint64(block.timestamp + 1000);
+        vm.prank(OWNER);
+        g.setGtdEndTime(gtdEnd);
+
+        // A wallet with no reservations gets nothing during the window, even though
+        // the on-chain phase is already Public.
+        vm.prank(SEADROP);
+        vm.expectRevert(abi.encodeWithSelector(GenesisMinterBase.GtdWindowActive.selector, gtdEnd));
+        g.mintSeaDrop(PUB, 1);
+
+        // A GTD winner asking for MORE than their reservations (a mis-capped merkle
+        // leaf) reverts too — the surplus cannot become a random draw.
+        vm.prank(SEADROP);
+        vm.expectRevert(abi.encodeWithSelector(GenesisMinterBase.GtdWindowActive.selector, gtdEnd));
+        g.mintSeaDrop(ALICE, 2);
+
+        // Exactly the reservation mints fine, and it is the chosen art.
+        vm.prank(SEADROP);
+        uint256[] memory ids = g.mintSeaDrop(ALICE, 1);
+        assertEq(cubes.cubeData(ids[0]).sourceTokenId, 200);
+    }
+
+    function testGtdWindowClosesItselfNoOwnerTx() public {
+        (MultiSourceGenesisMinter g,,) = _reservedWorld();
+        uint64 gtdEnd = uint64(block.timestamp + 1000);
+        vm.prank(OWNER);
+        g.setGtdEndTime(gtdEnd);
+
+        // No owner interaction: once chain time passes the window, draws just work.
+        vm.warp(gtdEnd + 1);
+        vm.prank(SEADROP);
+        uint256[] memory ids = g.mintSeaDrop(PUB, 1);
+        assertEq(ids.length, 1);
+    }
+
+    function testReleaseRevertsWhileGtdWindowOpenEvenForOwner() public {
+        (MultiSourceGenesisMinter g,,) = _reservedWorld();
+        uint64 gtdEnd = uint64(block.timestamp + 1000);
+        vm.prank(OWNER);
+        g.setGtdEndTime(gtdEnd);
+
+        address[] memory w = new address[](1); w[0] = ALICE;
+        vm.prank(OWNER);
+        vm.expectRevert(abi.encodeWithSelector(GenesisMinterBase.GtdWindowActive.selector, gtdEnd));
+        g.releaseReservations(w);
+    }
+
+    function testReleaseIsPermissionlessAfterGtdWindow() public {
+        (MultiSourceGenesisMinter g,,) = _reservedWorld();
+        uint64 gtdEnd = uint64(block.timestamp + 1000);
+        vm.prank(OWNER);
+        g.setGtdEndTime(gtdEnd);
+        vm.warp(gtdEnd + 1);
+
+        // Any keeper can return the no-show's reservation to the pool.
+        address[] memory w = new address[](1); w[0] = ALICE;
+        vm.prank(address(0xBEEF));
+        g.releaseReservations(w);
+        assertEq(g.reservedCount(1), 0);
+        assertEq(g.poolRemaining(1), 5);
+    }
+
+    function testReleaseStaysOwnerOnlyWithoutGtdWindow() public {
+        (MultiSourceGenesisMinter g,,) = _reservedWorld();
+        // gtdEndTime unset (0): the legacy phase-driven mode keeps release owner-only.
+        address[] memory w = new address[](1); w[0] = ALICE;
+        vm.prank(address(0xBEEF));
+        vm.expectRevert();
+        g.releaseReservations(w);
+    }
+
     function testReserveRejectsUncommittedStoredSource() public {
         (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3);
         uint256[] memory rp = new uint256[](5);

@@ -26,7 +26,7 @@ Important current direction:
 - Non-Normie flattened art payloads are prototype/future-update infrastructure,
   not the genesis production mint path.
 - Placement is **mutable world state**: slots are assigned at mint by the
-  allocator in `NormieGenesisMinter` (anchor-then-wrap, ≤3/wallet/street), and
+  allocator in `GenesisMinterBase` (anchor-then-wrap, ≤5/wallet/street), and
   holders can relocate (`moveCube`) or merge whole streets (`mergeStreet`)
   post-mint. `moveCube` also **displaces** — into an occupied slot in a street the
   mover owns ≥5/8 of, force-swapping the occupant and paying them a biome-rarity
@@ -34,18 +34,15 @@ Important current direction:
   `lib/CubeEnv.sol`); see [`FEES_AND_DISPLACEMENT_SPEC.md`](../../FEES_AND_DISPLACEMENT_SPEC.md).
   Plot, street, neighbourhood, region, and environment are all derived from the
   slot. See [`WORLD_MECHANICS.md`](../../WORLD_MECHANICS.md) for the full reference.
-- Production source policy has shifted to a Normie-only genesis mint. Allowlist
-  wallets mint their snapshot Normies, then the public phase mints unclaimed
-  snapshot Normie sources until the `4096` cube supply cap is reached.
-- CC0 and owned-art sources move to a post-mint update flow.
+- Production genesis is a **multi-source SeaDrop drop** (`MultiSourceGenesisMinter`):
+  6 collections with a locked allocation of the 4096 supply. GTD holders get their
+  CHOSEN art via on-chain reservations (consumed first by the SeaDrop hook, protected
+  by the `gtdEndTime` window); FCFS + public mints draw randomly from the combined
+  pool. The old Merkle-snapshot "mint your Normies" allowlist was removed.
+- Brainrot and other owned-art sources are post-mint update flow only.
 
 World mechanics (allocation, environment, population, merge, move) are **built
-into `CubeNFT` + `NormieGenesisMinter` + `lib/CubeEnv.sol`**, not a separate
-world contract. Likely future contracts:
-
-- `NormieSnapshotRegistry.sol`: snapshot-root and matched Normie consumption.
-- `SourceAssignment.sol`: allowlist/public Normie source assignment helpers.
-- Future update registry/contracts: approved CC0 and owner-verified update payloads.
-- `RendererAssetStore.sol`: shared renderer chunks and assets.
+into `CubeNFT` + `GenesisMinterBase`/`MultiSourceGenesisMinter` + `lib/CubeEnv.sol`**,
+not a separate world contract.
 - `RendererRegistry.sol`: renderer versioning and optional owner pinning.
 - `BehaviorRegistry.sol`: compact behavior state if visual evolution needs token-level state.

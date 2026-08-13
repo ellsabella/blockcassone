@@ -9,9 +9,14 @@
 > (source-keyed, no per-mint duplication), and production deploy
 > (`contracts/script/DeployGenesis.s.sol`) are BUILT + tested. For the live launch steps
 > see **[LAUNCH_RUNBOOK.md](LAUNCH_RUNBOOK.md)**; for current architecture see the
-> `launch_mint_architecture` + `cc0_source_art_onchain` memories. The **allowlist /
-> public / snapshot / SeaDrop-compatibility / metadata / agent-registry / renderer**
-> sections below are still accurate; the "genesis is Normie-only" framing is not.
+> `launch_mint_architecture` + `cc0_source_art_onchain` memories. The
+> **SeaDrop-compatibility / metadata / agent-registry / renderer** sections below are
+> still accurate. The **allowlist/snapshot sections are SUPERSEDED**: the Merkle-snapshot
+> "mint your Normies" path (`selectAllowlistNormies`, `NormieSnapshotRegistry`) was
+> removed from the contract — GTD now uses on-chain **reservations** (chosen art,
+> protected by the `gtdEndTime` window) and FCFS gating uses **SeaDrop's own allowlist
+> stage** (one combined merkle tree via `allowlist/merkle.mjs`). The "genesis is
+> Normie-only" framing is also outdated.
 
 ## Objective
 

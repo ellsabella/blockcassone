@@ -217,14 +217,25 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
     event ReservationsReleased(address indexed wallet, uint256 count);
     error CannotReleaseDuringAllowlist();
 
-    /// @notice Return each wallet's UNMINTED reservations to the draw pool (owner). Run
-    ///         after the GTD (Allowlist) window closes so guaranteed-but-unclaimed art
-    ///         isn't stranded — reserved sources were pulled from the pool, so without
-    ///         this the collection under-fills. Reserved→pool keeps `pool + reserved ==
-    ///         cap` invariant. Blocked while `phase == Allowlist` so a live GTD can't be
-    ///         rugged mid-mint. Idempotent per wallet (only the unminted tail is released).
-    function releaseReservations(address[] calldata wallets) external onlyOwner {
+    /// @notice Return each wallet's UNMINTED reservations to the draw pool. Run after
+    ///         the GTD window closes so guaranteed-but-unclaimed art isn't stranded —
+    ///         reserved sources were pulled from the pool, so without this the
+    ///         collection under-fills (and near sellout the public tail reverts
+    ///         `IncompletePublicFill`). Reserved→pool keeps `pool + reserved == cap`.
+    ///         Access: while the GTD window (`gtdEndTime`) is open NOBODY — owner
+    ///         included — can release (the chosen-art promise is untouchable); once it
+    ///         passes, ANYONE can (so a keeper/bot handles it with no owner tx during a
+    ///         fast-moving mint — see allowlist/release-keeper.mjs). With no window
+    ///         configured (gtdEndTime 0: dev/legacy phase-driven drops) it stays
+    ///         owner-only, still blocked during `phase == Allowlist`. Idempotent per
+    ///         wallet (only the unminted tail is released).
+    function releaseReservations(address[] calldata wallets) external {
         if (phase == Phase.Allowlist) revert CannotReleaseDuringAllowlist();
+        if (gtdEndTime == 0) {
+            _checkOwner();
+        } else if (block.timestamp <= gtdEndTime) {
+            revert GtdWindowActive(gtdEndTime);
+        }
         for (uint256 w = 0; w < wallets.length; w++) {
             address wallet = wallets[w];
             Reservation[] storage res = _reservations[wallet];
