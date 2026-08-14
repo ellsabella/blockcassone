@@ -74,6 +74,10 @@ export function createApiHandler(env) {
   const turnstileSecret = env.TURNSTILE_SECRET || '';
   const gateProxies = /^(1|true|yes|on)$/i.test(env.TURNSTILE_GATE_PROXIES || '');
 
+  // Hard kill-switch: set REGISTRATION_CLOSED=1 to seal the allowlist. /api/allowlist-submit then
+  // rejects every POST (bots included) regardless of signature/captcha; reads (status/admin) stay up.
+  const registrationClosed = /^(1|true|yes|on)$/i.test(env.REGISTRATION_CLOSED || '');
+
   const submitLimited = makeLimiter(SUBMIT_MAX_PER_WINDOW);
   const alchemyLimited = makeLimiter(ALCHEMY_MAX_PER_WINDOW);
   const rpcLimited = makeLimiter(RPC_MAX_PER_WINDOW);
@@ -190,6 +194,7 @@ export function createApiHandler(env) {
     // ---- allowlist submit (public, signed) — GTD art request OR register-interest ----
     if (p === '/api/allowlist-submit') {
       if (req.method !== 'POST') return json(res, 405, { error: 'POST only' }), true;
+      if (registrationClosed) return json(res, 403, { error: 'registration closed', closed: true }), true;
       if (submitLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
       let payload;
       try { payload = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'bad body' }), true; }
