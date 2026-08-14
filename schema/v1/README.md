@@ -1,6 +1,6 @@
-# Blockcassone Canonical Schema v1
+# TheBLOCK Canonical Schema v1
 
-This directory defines the canonical data model: what a Blockcassone artwork is,
+This directory defines the canonical data model: what a TheBLOCK artwork is,
 independent of how it looks or where it runs.
 
 ## Two-Layer Model

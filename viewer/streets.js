@@ -34,7 +34,7 @@ const S = { mode:'mine', me:null, flags:null, recs:[], bySlot:new Map(), merged:
   S.flags=flags;
   if (flags && !flags.movesEnabled && !flags.mergesEnabled){ $('app').style.display='none'; $('gate').style.display='flex'; return; }
   let cfg={}; try{ cfg=await (await fetch('/data/chain-config.json',{cache:'no-store'})).json(); }catch{}
-  mountConnectButton($('wallet-connect'), { chainId:cfg.chainId, rpcUrl:cfg.rpcUrl, chainName:'Blockcassone', onChange:onWallet });
+  mountConnectButton($('wallet-connect'), { chainId:cfg.chainId, rpcUrl:cfg.rpcUrl, chainName:'TheBLOCK', onChange:onWallet });
   wireStatic();
   renderMine();
 })();

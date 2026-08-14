@@ -35,7 +35,7 @@ const state = { owned: [], cube: null, proposal: null, holding: false,
   let cfg = {};
   try { cfg = await (await fetch('/data/chain-config.json', { cache: 'no-store' })).json(); } catch {}
   mountConnectButton($('wallet-connect'), {
-    chainId: cfg.chainId, rpcUrl: cfg.rpcUrl, chainName: 'Blockcassone', onChange: onWallet,
+    chainId: cfg.chainId, rpcUrl: cfg.rpcUrl, chainName: 'TheBLOCK', onChange: onWallet,
   });
   wireStatic();
   render();

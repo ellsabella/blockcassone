@@ -1,4 +1,4 @@
-// Blockcassone viewer — dev tool for previewing artwork.
+// TheBLOCK viewer — dev tool for previewing artwork.
 
 import { mat4, identity, v3Normalize, vec3, multiply, invert } from '../renderer/src/math.js';
 import { createBox, createWireframeBox, createMeshGL }         from '../renderer/src/geometry.js';
@@ -131,7 +131,7 @@ window.addEventListener('resize', () => {
   if (cubeDetailWidthPx && window.innerWidth > 860) applyCubeDetailWidth(cubeDetailWidthPx);
 });
 
-// ---------- Blockcassone data layer ----------
+// ---------- TheBLOCK data layer ----------
 // These come from globals defined by the /public/*.js script tags.
 const HILBERT_ORDER = 5;
 const STREET_SIZE = 8;

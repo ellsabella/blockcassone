@@ -33,7 +33,7 @@ const types = {
   ],
 };
 const domain = {
-  name: 'BlockcassoneFlattening',
+  name: 'TheBLOCKFlattening',
   version: '1',
   chainId: Number(cfg.chainId || 31337),
   verifyingContract: cfg.flatteningAttestation,

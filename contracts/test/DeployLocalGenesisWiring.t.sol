@@ -83,7 +83,7 @@ contract DeployLocalGenesisWiringTest is Test {
         normies = new WiringMockNormies();
         runners = new WiringMockCC0("Chain Runners");
         skulls = new WiringMockCC0("1337 skulls");
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 6, ADMIN);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 6, ADMIN);
         artStore = new NonNormieArtStore(address(cubes), ADMIN);
 
         address[] memory cc = new address[](2);

@@ -35,7 +35,7 @@ contract CubeMintControllerTest is Test {
         signer = vm.addr(SIGNER_KEY);
         normies = new ControllerMockERC721("Normies", "NORM");
         externalNft = new ControllerMockERC721("External", "EXT");
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 64, address(this));
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 64, address(this));
         artStore = new NonNormieArtStore(address(cubes), address(this));
         attestationVerifier = new FlatteningAttestation(OWNER, signer);
         controller = new CubeMintController(cubes, artStore, attestationVerifier);

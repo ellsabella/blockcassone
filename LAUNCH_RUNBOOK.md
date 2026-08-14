@@ -1,4 +1,4 @@
-# Blockcassone Genesis — Launch Runbook
+# TheBLOCK Genesis — Launch Runbook
 
 The exact ordered steps to take the genesis mint live on mainnet. Genesis is a
 **multi-source SeaDrop drop** across 6 source collections with a locked allocation of
@@ -41,10 +41,27 @@ per-cube customize overrides), `CubeNFT` (ERC-721 + SeaDrop hook), `CubeRenderer
    anvil --fork-url <mainnet> &                    # or use a hosted archive RPC
    node dev/cc0-proof/flatten-pools.mjs            # -> data/cc0/payloads-<collection>.json
    ```
-6. **Build + verify the token renderer** (must be network-free):
+6. **Build + verify the token renderer — the bundle MUST be provably network-free.**
+   The whole point of the project is that token art depends on nothing off-chain; a
+   bundle that even *attempts* an API call fails this requirement.
    ```bash
-   node scripts/build-token-renderer.mjs           # -> dist/token-renderer/renderer-chunks.json (7 chunks <= 18KB)
+   node scripts/build-token-renderer.mjs           # -> dist/token-renderer/renderer-chunks.json (8 script chunks <= 18KB)
    ```
+   - The build hard-stubs the normies-api dynamic-import fallback and then FAILS if
+     the bundle matches any forbidden pattern (`fetch(`, `XMLHttpRequest`,
+     `WebSocket`, `EventSource`, `sendBeacon`, **`import(`**, `http(s)://`, `/api/`,
+     `ipfs://`). Do not weaken the pattern list; do not upload a bundle from a build
+     that errored. The dev `preview.bundle.js` is exempt and must NEVER go on-chain.
+   - Chunk layout (enforced by `upload-renderer-chunks.mjs` — use it, don't hand-roll):
+     store chunk 0 = HTML head slot, left EMPTY so `CubeRendererV2`'s baked-in
+     on-chain head is used; script chunks at ids 1..N; `chunkCount = N + 1`.
+   - `tokenURI` returns `data:application/json;base64,…` (all three data URIs —
+     metadata, image, animation — are base64; raw-JSON envelopes trip strict
+     marketplace URI validators with "unescaped characters").
+   - After upload, pull `tokenURI` for one Normie cube, one CC0 cube, and (post any
+     test merge) a street token via `scripts/extract-anim.mjs` and confirm: base64
+     scheme, zero URI-unsafe chars, `has normies-api import: false`, head starts
+     `<!doctype html>`, tail ends `</body></html>`.
 
 ## Phase 1 — Deploy contracts
 

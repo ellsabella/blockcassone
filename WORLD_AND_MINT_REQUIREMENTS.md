@@ -1,4 +1,4 @@
-# Blockcassone World And Mint Requirements
+# TheBLOCK World And Mint Requirements
 
 This document captures the current product direction for the dev pipeline, mint
 site, world model, and contract architecture.
@@ -44,7 +44,7 @@ is ingested at mint.
 **Minting happens on OpenSea via SeaDrop — not on our sites.** OpenSea's mint UI
 and the SeaDrop contract handle the transaction; the only inputs at mint time are
 the minter wallet and a quantity. Our sites carry **no mint button** (the Big Cube
-mint/sim controls are removed). Everything Blockcassone-specific — which source
+mint/sim controls are removed). Everything TheBLOCK-specific — which source
 art a cube gets and its plot placement — is assigned by our SeaDrop mint hook
 (`MultiSourceGenesisMinter`) when the mint transaction runs.
 

@@ -33,7 +33,7 @@ contract PoolRebaseTest is Test {
 
     function setUp() public {
         normies = new PoolMockNormies();
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, address(this));
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 4096, address(this));
         runner = new PoolMockCC0("Chain Runners");
         store = new NonNormieArtStore(address(cubes), address(this));
         cubes.setArtStore(address(store));

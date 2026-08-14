@@ -87,7 +87,7 @@ contract DeployGenesis is Script {
         returns (Deployment memory d)
     {
         vm.broadcast();
-        d.cubes = new CubeNFT("Blockcassone Cubes", "CUBE", NormieAddresses.NORMIES, 4096, owner);
+        d.cubes = new CubeNFT("TheBLOCK", "BLOCK", NormieAddresses.NORMIES, 4096, owner);
 
         vm.broadcast();
         d.assetStore = new RendererAssetStore(owner);
@@ -177,7 +177,7 @@ contract DeployGenesis is Script {
     }
 
     function _report(Deployment memory d, address seaDrop) private {
-        console2.log("== Blockcassone genesis deploy ==");
+        console2.log("== TheBLOCK genesis deploy ==");
         console2.log("CubeNFT", address(d.cubes));
         console2.log("MultiSourceGenesisMinter", address(d.genesis));
         console2.log("NonNormieArtStore", address(d.artStore));

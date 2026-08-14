@@ -1,6 +1,6 @@
 # Renderer Contract v1
 
-A conformant Blockcassone renderer accepts canonical plane, token, and optional
+A conformant TheBLOCK renderer accepts canonical plane, token, and optional
 world-context data and produces a visual output. It may be a WebGL viewer, an
 SVG generator, a print renderer, or anything else.
 

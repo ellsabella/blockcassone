@@ -47,7 +47,7 @@ const rows = samples.map((s, i) => `
   </div>`).join('');
 
 const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Blockcassone · CC0 flatten proof</title>
+<title>TheBLOCK · CC0 flatten proof</title>
 <style>
   :root{--bg:#050307;--panel:#0e0910;--ink:#f4dcea;--dim:#9c8494;--pink:#ff3ab8;--pinklt:#ff98d9;--line:#2a1622}
   *{box-sizing:border-box}
@@ -83,7 +83,7 @@ const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 </style></head>
 <body>
 <header>
-  <h1>Blockcassone · CC0 flatten proof — Runners · Skulls · Nouns · Pepes · <span class="rot">Kevin</span></h1>
+  <h1>TheBLOCK · CC0 flatten proof — Runners · Skulls · Nouns · Pepes · <span class="rot">Kevin</span></h1>
   <p class="lede">Real on-chain source art from five fully-on-chain CC0 collections, read from the mainnet fork, flattened to the 400-byte 2-bit tonal payload with the repo's own banding, then rendered through <b>both</b> token surfaces. Nothing offchain: the cube is the exact dependency-free <code>animation_url</code> bundle, the thumbnail is <code>previewThumbnailSVG</code>.</p>
   <p class="legend">Columns → <b>source</b> (decoded 32×32) · <b>flattened</b> (40×40, 4 tonal bands) · <b>tokenURI thumbnail</b> (2-bit tonal, full frame/walkers/glass) · <b>animation_url cube</b> (live WebGL; currently reads the 1-bit silhouette, so it shows form not tonal shading). <b>bg-keyed</b> = clean background separated; <b>otsu</b> = luminance-banded fallback.</p>
 </header>

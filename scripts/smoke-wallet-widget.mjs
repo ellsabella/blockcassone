@@ -34,7 +34,7 @@ try {
 
 await new Promise((r) => setTimeout(r, 3000));
 const mount = win.document.querySelector('[data-wallet-widget]');
-console.log('[smoke] window.BlockcassoneWallet present:', !!win.BlockcassoneWallet);
+console.log('[smoke] window.TheBLOCKWallet present:', !!win.TheBLOCKWallet);
 console.log('[smoke] mount innerHTML length:', mount ? mount.innerHTML.length : '(no mount)');
 console.log('[smoke] mount preview:', mount ? mount.innerHTML.slice(0, 220).replace(/\s+/g, ' ') : '');
 if (asyncErr) console.error('[smoke] ASYNC ERROR during init:', asyncErr.stack ? asyncErr.stack.split('\n').slice(0, 5).join('\n') : asyncErr);

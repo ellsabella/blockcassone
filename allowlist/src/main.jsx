@@ -18,7 +18,7 @@ if (!projectId || projectId.startsWith('REPLACE_')) {
   console.warn('[allowlist] No WalletConnect project id set (WALLETCONNECT_PROJECT_ID in .env) — mobile/QR wallets will not connect. Injected extension wallets still work.');
 }
 const wagmiConfig = getDefaultConfig({
-  appName: 'Blockcassone Allowlist',
+  appName: 'TheBLOCK Allowlist',
   projectId,
   chains: [mainnet],
   transports: { [mainnet.id]: http('/api/mainnet-rpc') },

@@ -43,7 +43,7 @@ contract FlatteningAttestation is EIP712, Ownable {
     mapping(address minter => mapping(uint256 nonce => bool used)) public nonceUsed;
 
     constructor(address initialOwner_, address attestationSigner_)
-        EIP712("BlockcassoneFlattening", "1")
+        EIP712("TheBLOCKFlattening", "1")
         Ownable(initialOwner_)
     {
         attestationSigner = attestationSigner_;

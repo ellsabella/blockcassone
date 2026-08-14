@@ -1,11 +1,11 @@
 // Bridge to the RainbowKit + wagmi wallet island (viewer/vendor/wallet-widget.js) — the SAME
 // stack the allowlist uses. The island renders the standard wallet modal (injected +
 // WalletConnect + wallet list + QR) into the page's [data-wallet-widget] mount and publishes
-// state on window.BlockcassoneWallet. This module keeps the old wallet.js API so the rest of
+// state on window.TheBLOCKWallet. This module keeps the old wallet.js API so the rest of
 // the viewer (customize / move / merge txs) is unchanged. The EIP-712 flattening attestation
 // is still signed server-side, not by the wallet.
 
-function bridge() { return (typeof window !== 'undefined' && window.BlockcassoneWallet) || null; }
+function bridge() { return (typeof window !== 'undefined' && window.TheBLOCKWallet) || null; }
 
 function whenReady(cb) {
   if (bridge()) { cb(); return; }

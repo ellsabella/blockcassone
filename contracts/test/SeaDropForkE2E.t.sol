@@ -71,7 +71,7 @@ contract SeaDropForkE2E is Test {
         endT = block.timestamp + 7 days;
 
         normies = new ForkMockNormies();
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 8, OWNER);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 8, OWNER);
         store = new NonNormieArtStore(address(cubes), OWNER);
         genesis = new MultiSourceGenesisMinter(cubes, bytes32("seed"), OWNER, store, 8, new address[](0), new uint32[](0));
 

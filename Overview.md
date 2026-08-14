@@ -1,9 +1,9 @@
-# Blockcassone - Project Overview
+# TheBLOCK - Project Overview
 
 > Intended audience: a fresh coding/review agent. Read this before opening the
 > implementation files.
 
-Blockcassone is an interactive generative-art prototype built around a 3D
+TheBLOCK is an interactive generative-art prototype built around a 3D
 Hilbert curve. The current dev viewer is now modelling the eventual mint flow:
 load a wallet, simulate minting source NFTs into Hilbert slots, and render each
 minted cube according to whether its source is a Normie or a non-Normie NFT.

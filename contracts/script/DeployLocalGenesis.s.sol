@@ -214,7 +214,7 @@ contract DeployLocalGenesis is Script {
 
         vm.broadcast();
         d.cubes = new CubeNFT(
-            "Blockcassone Cubes", "CUBE", address(d.normies), totalSlots, initialOwner
+            "TheBLOCK", "BLOCK", address(d.normies), totalSlots, initialOwner
         );
 
         vm.broadcast();

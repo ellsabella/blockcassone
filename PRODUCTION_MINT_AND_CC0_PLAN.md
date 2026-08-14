@@ -20,7 +20,7 @@
 
 ## Objective
 
-Blockcassone's genesis mint should be simple, scarce, and copyright-clean:
+TheBLOCK's genesis mint should be simple, scarce, and copyright-clean:
 
 - genesis supply is capped at `4096` cubes
 - every paid genesis cube is backed by a real, fully-on-chain source (Normie live art, or
@@ -255,7 +255,7 @@ source.
 
 ## Dynamic Agent Status
 
-Normies can become agentic after a Blockcassone cube has already minted. The
+Normies can become agentic after a TheBLOCK cube has already minted. The
 project therefore needs to separate:
 
 - mint-time source facts, which are permanent

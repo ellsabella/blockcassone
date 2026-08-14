@@ -4,7 +4,7 @@
 // into viewer/vendor/wallet-widget.js and loaded as a plain <script> on each page.
 //
 // It renders RainbowKit's ConnectButton into every [data-wallet-widget] element and exposes
-// a tiny bridge on window.BlockcassoneWallet so the vanilla viewer/wallet.js can read the
+// a tiny bridge on window.TheBLOCKWallet so the vanilla viewer/wallet.js can read the
 // account + send txs through the connected wallet's EIP-1193 provider.
 import { createRoot } from 'react-dom/client';
 import { useEffect } from 'react';
@@ -51,7 +51,7 @@ const bridge = {
     try { await switchChain(wagmiConfig, { chainId: Number(id) }); return true; } catch { return false; }
   },
 };
-window.BlockcassoneWallet = bridge;
+window.TheBLOCKWallet = bridge;
 
 function Bridge() {
   const { address } = useAccount();

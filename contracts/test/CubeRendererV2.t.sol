@@ -43,7 +43,7 @@ contract CubeRendererV2Test is Test {
 
     function setUp() public {
         normies = new RendererV2MockNormies();
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
         store = new NonNormieArtStore(address(cubes), address(this)); // test acts as store owner
@@ -76,7 +76,7 @@ contract CubeRendererV2Test is Test {
         uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
 
         string memory json = renderer.metadataJSON(cubeId);
-        assertTrue(_contains(json, '"name":"Blockcassone Cube #1"'));
+        assertTrue(_contains(json, '"name":"TheBLOCK #1"'));
         assertTrue(_contains(json, '"image":"data:image/svg+xml;base64,'));
         assertTrue(_contains(json, '"animation_url":"data:text/html;base64,'));
         assertTrue(_contains(json, '"trait_type":"plot","value":"1734"'));
@@ -88,7 +88,9 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(json, '"trait_type":"Origin Collection","value":"Normies"'));
         assertTrue(_contains(json, '"trait_type":"Current Collection","value":"Normies"'));
         assertTrue(_contains(json, '"trait_type":"Source Token ID","value":"6722"'));
-        assertTrue(_contains(json, '"trait_type":"Renderer Version","value":"2"'));
+        // Implementation internals are deliberately NOT traits (user decision):
+        assertFalse(_contains(json, '"trait_type":"Renderer Version"'));
+        assertFalse(_contains(json, '"trait_type":"Payload Version"'));
     }
 
     function testAnimationHTMLInjectsCubeConfigAndRawNormieBytes() public {
@@ -164,7 +166,7 @@ contract CubeRendererV2Test is Test {
         uint256 cubeId = cubes.mintNormieCube(6722, 8, bytes32("seed"));
 
         string memory uri = cubes.tokenURI(cubeId);
-        assertTrue(_startsWith(uri, "data:application/json;utf8,"));
+        assertTrue(_startsWith(uri, "data:application/json;base64,"));
     }
 
     function testAssetStoreChunksOverrideDefaultHTMLShell() public {

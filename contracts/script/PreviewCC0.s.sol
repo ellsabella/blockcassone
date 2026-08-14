@@ -24,7 +24,7 @@ contract PreviewCC0 is Script {
     function run() external {
         uint256 count = vm.envOr("CC0_COUNT", uint256(8));
         MockNormies normies = new MockNormies();
-        CubeNFT cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, address(0xBEEF));
+        CubeNFT cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 4096, address(0xBEEF));
         CubeThumbnailRendererV1 thumb = new CubeThumbnailRendererV1(
             cubes,
             address(normies),

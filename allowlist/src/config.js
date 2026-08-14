@@ -1,4 +1,4 @@
-// Blockcassone — Guaranteed Allowlist configuration + the delegate-registry ABI.
+// TheBLOCK — Guaranteed Allowlist configuration + the delegate-registry ABI.
 
 export const CONFIG = {
   // GTD entitlement: per-collection weighted spots (reflecting floor-price differences),
@@ -32,7 +32,7 @@ export const CONFIG = {
   interestHandleMax: 32,
 
   // EIP-712 attestation (wagmi adds EIP712Domain). `sources` = the holder's chosen art.
-  eip712Domain: { name: 'Blockcassone Allowlist', version: '1', chainId: 1 },
+  eip712Domain: { name: 'TheBLOCK Allowlist', version: '1', chainId: 1 },
   eip712Types: {
     Attestation: [
       { name: 'wallet',   type: 'address' },

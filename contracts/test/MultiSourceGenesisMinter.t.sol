@@ -33,7 +33,7 @@ contract MultiSourceGenesisMinterTest is Test {
         private
         returns (MultiSourceGenesisMinter g, CubeNFT cubes, NonNormieArtStore store)
     {
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), slots, OWNER);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), slots, OWNER);
         store = new NonNormieArtStore(address(cubes), address(this));
         address[] memory cc = new address[](2);
         cc[0] = address(runners);

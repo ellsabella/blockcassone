@@ -84,8 +84,8 @@ contract DeployMainnetNormiePreview is Script {
     function _deploy(PreviewConfig memory config) private returns (Deployment memory deployment) {
         vm.broadcast();
         deployment.cubes = new CubeNFT(
-            "Blockcassone Cubes",
-            "CUBE",
+            "TheBLOCK",
+            "BLOCK",
             NormieAddresses.NORMIES,
             config.totalSlots,
             config.initialOwner

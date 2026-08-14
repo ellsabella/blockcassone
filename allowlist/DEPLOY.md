@@ -84,7 +84,7 @@ missing). Free id at cloud.reown.com — takes ~2 min.
 ```ini
 # /etc/systemd/system/blockal.service
 [Unit]
-Description=Blockcassone allowlist
+Description=TheBLOCK allowlist
 After=network.target
 
 [Service]

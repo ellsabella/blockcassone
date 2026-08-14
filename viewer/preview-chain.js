@@ -153,7 +153,7 @@ async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTok
     },
     primaryType: 'Attestation',
     domain: {
-      name: 'BlockcassoneFlattening',
+      name: 'TheBLOCKFlattening',
       version: '1',
       chainId: Number(cfg.chainId || 1),
       verifyingContract: cfg.flatteningAttestation,

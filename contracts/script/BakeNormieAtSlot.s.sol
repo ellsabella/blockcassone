@@ -28,7 +28,7 @@ contract BakeNormieAtSlot is Script {
 
         address dev = address(0xBEEF);
         BakeMockNormies normies = new BakeMockNormies();
-        CubeNFT cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, dev);
+        CubeNFT cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 4096, dev);
         CubeThumbnailRendererV1 thumb = new CubeThumbnailRendererV1(
             cubes, address(normies), address(0),
             address(new CubeHilbertGeometry()), address(new CubeFrameLayer()), address(new CubeWalkerLayer())

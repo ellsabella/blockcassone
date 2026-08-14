@@ -1,4 +1,4 @@
-# Blockcassone Genesis — Drop Phases
+# TheBLOCK Genesis — Drop Phases
 
 How the genesis mint works, phase by phase. This is the canonical spec for the
 drop mechanics: the landing-page copy, the SeaDrop stage config, and the launch

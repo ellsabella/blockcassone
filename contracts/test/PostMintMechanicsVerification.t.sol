@@ -45,7 +45,7 @@ contract PostMintMechanicsVerificationTest is Test {
         // ADMIN owns the token so it can mint genesis cubes at known slots and toggle
         // moves; the controller is only the customizer (not the token owner).
         vm.startPrank(ADMIN);
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 64, ADMIN);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 64, ADMIN);
         attest = new FlatteningAttestation(ADMIN, signer);
         vm.stopPrank();
 

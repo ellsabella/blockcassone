@@ -70,7 +70,7 @@ contract CubeSeaDropTest is Test {
 
     function setUp() public {
         normies = new SeaDropMockERC721();
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 8, OWNER);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 8, OWNER);
         store = new NonNormieArtStore(address(cubes), OWNER);
         {
             // Normie-only config: whole supply is the Normie collection, no CC0 pools.
