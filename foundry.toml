@@ -8,6 +8,11 @@ libs = ["contracts/lib"]
 solc_version = "0.8.26"
 optimizer = true
 optimizer_runs = 1
+# Legacy codegen stays viable because the move/merge/displacement logic lives in
+# CubeWorldLib, an EXTERNAL linked library (deployed separately, DELEGATECALLed) —
+# that extraction is what keeps CubeNFT under the EIP-170 24,576 B runtime limit
+# without via-ir. Check `forge build --sizes` after ANY CubeNFT addition; forge
+# tests do not enforce the size limit.
 via_ir = false
 evm_version = "cancun"
 fs_permissions = [{ access = "read-write", path = "./data" }]
