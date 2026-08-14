@@ -35,3 +35,4 @@ dev/cc0-proof/out/
 # Auto-generated OpenSea free agent key (secret, self-refreshing)
 data/.opensea-key.json
 data/.rivals.json
+data/rehearsal/

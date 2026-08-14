@@ -18,6 +18,12 @@ const chunkBytes = Number(process.env.BLOCKCASSONE_RENDERER_CHUNK_BYTES || 18_00
 const forbiddenPatterns = [
   /\bfetch\s*\(/,
   /XMLHttpRequest/,
+  /WebSocket/,
+  /EventSource/,
+  /sendBeacon/,
+  // Dynamic import = a runtime module fetch — an offchain dependency by another
+  // name. The normies-api fallback is stubbed out below; nothing else may lazy-load.
+  /\bimport\s*\(/,
   /api\.normies\.art/,
   /api\.opensea\.io/,
   /\/api\//,
@@ -88,7 +94,20 @@ async function main() {
     '--tree-shaking=true',
   ]);
 
-  const bundle = await fs.readFile(bundlePath, 'utf8');
+  let bundle = await fs.readFile(bundlePath, 'utf8');
+  // The onchain token page must NEVER reach for the offchain normies API — art
+  // arrives injected (BLOCKCASSONE_TOKEN + seeded records). The api module is
+  // external (kept out of the bundle); replace its dynamic-import fallback with a
+  // hard rejection so the page is provably self-contained, then the `import(`
+  // forbidden-pattern below enforces there is no other lazy load.
+  const stubbed = bundle
+    .replaceAll('import("../normies-api.js")', 'Promise.reject(new Error("onchain: offchain api disabled"))')
+    .replaceAll("import('../normies-api.js')", 'Promise.reject(new Error("onchain: offchain api disabled"))');
+  if (stubbed !== bundle) {
+    bundle = stubbed;
+    await fs.writeFile(bundlePath, bundle);
+    console.log('stubbed normies-api dynamic import out of the token bundle');
+  }
   const offenders = forbiddenPatterns.filter(pattern => pattern.test(bundle));
   if (offenders.length) {
     throw new Error(`token renderer bundle contains forbidden offchain patterns: ${offenders.map(String).join(', ')}`);
