@@ -36,3 +36,6 @@ dev/cc0-proof/out/
 data/.opensea-key.json
 data/.rivals.json
 data/rehearsal/
+gtd-final.json
+reserve-plan*.json
+data/sepolia-full/
