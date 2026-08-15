@@ -9,11 +9,19 @@ Measured cost basis: 525.8M gas on the identical Sepolia run + ~30M chunks →
 ≈ 0.022 ETH @ 0.04 gwei. Fund the deployer ~0.5 ETH for spike armor.
 
 ## 0. Pre-flight (once)
-- `.env`: `MAINNET_DEPLOYER_PRIVATE` (fresh ops key), `ETHERSCAN_API_KEY` set.
-- Deployer funded (~0.5 ETH). All work committed; `forge test` green (212).
+- Ops key: TERMINAL-generated, encrypted keystore (never a browser wallet — the key
+  must sign ~130 scripted txs; exporting a browser key just doubles the exposure):
+  ```bash
+  cast wallet new                                    # record ADDRESS; key shown once
+  cast wallet import theblock-deployer --interactive # paste key, set password
+  DEPLOYER=$(cast wallet address --account theblock-deployer)
+  ```
+  Fund $DEPLOYER ~0.5 ETH. It is the contract OWNER through launch ops;
+  transferOwnership to the hardware wallet (Rabby) once config stabilizes, then
+  the key is worthless.
+- `.env`: `ETHERSCAN_API_KEY` set (done). All work committed; `forge test` green (212).
 - Re-confirm Nouns supply if days have passed (`bash scripts/cc0-supplies.sh`) —
   they mint daily; the pool must only contain EXISTING ids at commit time.
-- `DEPLOYER=$(cast wallet address --private-key $MAINNET_DEPLOYER_PRIVATE)`
 
 ## 1. Deploy + verify (one command, ~21.4M gas)
 ```bash
@@ -21,7 +29,7 @@ BLOCKCASSONE_OWNER=$DEPLOYER \
 BLOCKCASSONE_ATTESTATION_SIGNER=<signer addr> \
 forge script contracts/script/DeployGenesis.s.sol:DeployGenesis \
   --rpc-url "$ETH_RPC_URL" --sender $DEPLOYER \
-  --private-key "$MAINNET_DEPLOYER_PRIVATE" \
+  --account theblock-deployer \
   --broadcast --slow --verify
 ```
 Record every address from the console output. CubeWorldLib deploys + links
@@ -29,16 +37,18 @@ automatically; `--verify` submits it and CubeNFT (with the library) to Etherscan
 
 ## 2. Renderer chunks (~30M gas)
 ```bash
-BLOCKCASSONE_STORE=<RendererAssetStore> node scripts/upload-chunks-mainnet.mjs
+BLOCKCASSONE_STORE=<RendererAssetStore> bash scripts/upload-chunks-mainnet.sh
 ```
-Idempotent (skips already-correct chunks). Head slot stays empty by design.
+The wrapper prompts for the key silently (`read -s`) and passes it to the node
+uploader for this one process only — nothing persisted. Idempotent (skips
+already-correct chunks). Head slot stays empty by design.
 
 ## 3. CC0 pools + payloads (~330M gas, ~90 txs)
 ```bash
 BLOCKCASSONE_MINTER=<MultiSourceGenesisMinter> \
 forge script contracts/script/CommitPools.s.sol:CommitPools \
   --rpc-url "$ETH_RPC_URL" --sender $DEPLOYER \
-  --private-key "$MAINNET_DEPLOYER_PRIVATE" --broadcast --slow
+  --account theblock-deployer --broadcast --slow
 ```
 On a mid-run failure add `--resume` — do NOT re-run from scratch (committed
 payloads can't be overwritten; a fresh run would revert).
