@@ -26,6 +26,11 @@ per-cube customize overrides), `CubeNFT` (ERC-721 + SeaDrop hook), `CubeRenderer
 1. **Legal sign-off** on all 5 CC0 collections (Runners / Skulls / Pepes / Nouns /
    Kevin). CC0 status is an *approved-list* decision, not a marketplace claim.
 2. **Choose the Normie snapshot block.** Everything downstream is derived from it.
+   ⚠️ **Liveness gate:** Normies BURN as part of that project's mechanics, and the
+   storage contract's `isTokenDataSet(id)` stays TRUE for burned tokens (found
+   2026-08-15: 27% of a random id draw was burned). Any Normie id list that feeds
+   the pool MUST be validated with `ownerOf(id)` (holder snapshot ⇒ live by
+   construction; never trust `isTokenDataSet` for existence).
 3. **Close the allowlist funnel + verify submissions.** Run `allowlist/reserve.mjs`
    (dry-run) against the landing-page submissions: it re-verifies live ownership
    (incl. delegate.xyz), dedupes, caps at 5/wallet, and writes `reserve-plan.json`
@@ -160,6 +165,10 @@ Record all deployed addresses from the console output.
      (ERC-2981), and `setProvenanceHash(...)` (commit to the pool ordering; freezes at
      the first mint, so set it BEFORE opening). `maxSupply()`/`totalSupply()`/`baseURI()`
      are exposed for indexers; nothing to configure.
+   - **Royalty policy (locked 2026-08-14):** ERC-2981 only — OpenSea honors it on
+     their marketplace, which is where the traffic is. NO transfer-level enforcement
+     (ERC-721C / operator restrictions): not worth the contract risk or the audit
+     surface. Do not add transfer hooks for royalties.
 7. **Arm the on-chain GTD window + open the drop.**
    - `genesis.setGtdEndTime(<gtdEnd>)` — the SAME timestamp as the GTD stage's endTime.
      While it's open, the contract serves **reservations only**: a mis-capped leaf or

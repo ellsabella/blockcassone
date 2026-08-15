@@ -13,6 +13,7 @@ import {
   initNormiesManager, setDataReadyCallback, setBannerDataReadyCallback,
 } from './normies-manager.js';
 import { buildHilbertLines, buildFullHilbertPath, buildHilbertPathRange } from './hilbert-lines.js';
+import { createHilbertWalk } from './hilbert-walk.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
 import { buildStoneWalker }   from './materials/stone-walker.js';
 import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner, buildNonNormieIdLabel, setNonNormieResolvers } from './non-normie-art-plane.js';
@@ -117,7 +118,9 @@ if (!gl) {
 }
 log(`WebGL 2 — ${gl.getParameter(gl.RENDERER)}`);
 
+let _walkFixed = false; // ?walk mode owns a fixed 1920×1080 backing store for clean 16:9 capture
 function resize() {
+  if (_walkFixed) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.floor(canvas.clientWidth * dpr);
   const h = Math.floor(canvas.clientHeight * dpr);
@@ -3353,6 +3356,72 @@ if (CINEMATIC && typeof document !== 'undefined' && document.body) {
   document.body.classList.add('cinematic');
 }
 
+// ---------- Promo: "run the Hilbert line" walk + one-click 16:9 recording (?walk) ----------
+const WALK = new URLSearchParams(location.search).has('walk');
+let _walk = null, _walkArmed = 0, _walkStarted = false, _walkRec = null;
+
+function setupWalk() {
+  // Pick the neighbourhood with the most minted cubes → the densest, best-looking populated stretch.
+  const nb = WORLD_SIZE / NEIGHBOURHOOD_SIZE;
+  let nbhd = 0, bestC = -1;
+  for (let i = 0; i < nb; i++) {
+    let c = 0; const s = i * NEIGHBOURHOOD_SIZE;
+    for (let m = s; m < s + NEIGHBOURHOOD_SIZE; m++) if (isMintedSlot(m)) c++;
+    if (c > bestC) { bestC = c; nbhd = i; }
+  }
+  const startMotif = nbhd * NEIGHBOURHOOD_SIZE;
+  const range = _motifRange(startMotif, NEIGHBOURHOOD_SIZE);
+  const pts = [];
+  for (const m of range) for (let i = 0; i < 8; i++) pts.push(hilbert.rawVertices[m * 8 + i]);
+  const cs = sizeOfAABB(cubeAABBFor(startMotif)) || 1;
+  const nbhdSize = sizeOfAABB(aabbForMotifs(range)) || (cs * 4);
+  _walk = createHilbertWalk(orbit, pts, {
+    durationMs: 30000,
+    lookAheadLen: cs * 1.7,
+    heightOffset: cs * 0.42,
+    near: Math.max(0.01, cs * 0.02),
+    far: nbhdSize * 4 + 10,
+  });
+  // Lock the render scope to this neighbourhood so all its cubes stay drawn — no mid-walk rebuilds.
+  mainViewScope = 'neighbourhood';
+  selectedNeighbourhoodIdx = nbhd;
+  selectedStreetIdx = null; selectedRegionIdx = null;
+  selectedMotifIdx = startMotif;
+  scheduleRebuild();
+  log(`walk: neighbourhood ${nbhd} — ${bestC} minted cubes, motifs ${startMotif}..${startMotif + NEIGHBOURHOOD_SIZE - 1}`);
+}
+
+function startWalkRecording() {
+  // Fixed 1920×1080 backing store → the capture is always clean 16:9 1080p; letterbox the display.
+  _walkFixed = true;
+  canvas.width = 1920; canvas.height = 1080;
+  const style = document.createElement('style');
+  style.textContent =
+    'body.cinematic > *:not(#gl){display:none!important} body.cinematic{cursor:default;background:#000!important;overflow:hidden}' +
+    '#gl{position:absolute!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%)!important;' +
+    'width:min(100vw,177.78vh)!important;height:min(56.25vw,100vh)!important}';
+  document.head.appendChild(style);
+  document.body.classList.add('cinematic');
+  try {
+    const stream = canvas.captureStream(60);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const chunks = [];
+    _walkRec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 16000000 });
+    _walkRec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    _walkRec.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'hilbert-walk.webm';
+      document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+      log('walk: saved hilbert-walk.webm (' + (blob.size / 1048576).toFixed(1) + ' MB)');
+    };
+    _walkRec.start();
+    log('walk: recording 30s…');
+  } catch (e) {
+    log('walk: MediaRecorder unavailable — screen-record the fullscreen playback instead (' + e + ')');
+  }
+}
+
 function frame() {
   resize();
   noteFrame();
@@ -3360,6 +3429,19 @@ function frame() {
   if (CINEMATIC) {
     if (!_flight && (mintSimulationLoaded() || (performance.now() - startT) > 2500)) setupCinematicFlight(pickFlightFocus());
     if (_flight) { const info = _flight.update(performance.now()); if (info) driveCinematicScope(info.level); }
+  }
+  if (WALK) {
+    // Arm once data's loaded (+ a warmup beat), scope-lock, then start recording + running the line.
+    if (!_walkArmed && mintSimulationLoaded() && (performance.now() - startT) > 3000) {
+      _walkArmed = performance.now(); setupWalk();
+    }
+    if (_walkArmed && !_walkStarted && performance.now() - _walkArmed > 1000) {
+      _walkStarted = true; startWalkRecording(); _walk.start(performance.now());
+    }
+    if (_walk && _walkStarted) {
+      const info = _walk.update(performance.now());
+      if (info.done && _walkRec && _walkRec.state === 'recording') { _walkRec.stop(); _walkRec = null; }
+    }
   }
   // Flyby Mode: fly the main camera over the focused wallet's cubes, cube by cube. While PAUSED
   // we stop driving entirely (no update) so the user's manual orbit/navigation isn't overridden.
