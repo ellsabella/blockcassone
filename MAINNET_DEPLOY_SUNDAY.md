@@ -69,6 +69,25 @@ cast call <minter> 'totalPublicRemaining()(uint256)' --rpc-url "$ETH_RPC_URL"
 Do NOT: addSnapshotNormies / reserveSources / finalizeSnapshot / updateAllowList /
 updatePublicDrop / setGtdEndTime / setPhase. Those wait for allowlist close + audit.
 
+## Ops-key retirement (NOT Sunday — after launch config stabilizes)
+The ops key stays owner (and funded) through the drop: snapshot, reservations,
+finalize, stage config, phase flips, post-mint flag enables all cost gas. When the
+drop is stable:
+1. **Hand off ownership** (all 5 owned contracts, addresses derived on-chain from
+   CubeNFT — drill-tested round-trip on Sepolia 2026-08-15):
+   ```bash
+   BLOCKCASSONE_CUBES=<cubeNft> BLOCKCASSONE_NEW_OWNER=<Rabby> \
+   forge script contracts/script/HandoffOwnership.s.sol:HandoffOwnership \
+     --rpc-url "$ETH_RPC_URL" --account theblock-deployer --broadcast --slow
+   ```
+   Ownable is 1-step: TRIPLE-CHECK the Rabby address before running.
+2. **Sweep leftover ETH** to the Rabby:
+   ```bash
+   ACCOUNT=theblock-deployer TO=<Rabby> RPC=$ETH_RPC_URL bash scripts/retire-ops-key.sh
+   ```
+3. **Delete the keystore** (`~/.foundry/keystores/theblock-deployer`). Key is now
+   worthless: no ownership, no funds.
+
 ## Notes
 - Dataset provenance: pools are seeded-PRNG (`blockcassone-cc0-genesis-v1`) with the
   36 verified GTD wallets' 44 CC0 picks injected as required ids; skull #2847
