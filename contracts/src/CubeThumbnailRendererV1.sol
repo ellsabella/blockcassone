@@ -296,9 +296,22 @@ contract CubeThumbnailRendererV1 {
     // kind. Normie art is already binary; non-Normie art is a 400-byte 2-bit
     // tonal-band payload (NonNormieArtStore) thresholded to a silhouette.
     function _rawImageBytes(CubeNFT.CubeData memory data, uint256 cubeId) private view returns (bytes memory) {
-        // A merged-street token carries its leader cube's source facts, so its
-        // thumbnail renders the leader exactly. Genesis leaders are Normies, so
-        // street tokens fetch from the Normie store (v1 assumes Normie leaders).
+        // A merged-street token carries its leader cube's source facts AND its
+        // payloadVersion (copied at merge). The leader may be a Normie (payloadVersion
+        // 0 = live art) or a CC0 cube (stored payload) — resolve accordingly. Fetching
+        // Normie storage with a CC0 token id renders an unrelated Normie (audit M-2);
+        // the CC0 branch resolves via the art store's source-keyed lookup, exactly as
+        // the animation renderer does, so image and animation always agree.
+        if (data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET() && data.payloadVersion != 0) {
+            if (nonNormieStore == address(0)) return "";
+            try IThumbnailNonNormieArtStore(nonNormieStore).imageBytesForCube(cubeId) returns (
+                bytes memory bitmap
+            ) {
+                return bitmap;
+            } catch {
+                return "";
+            }
+        }
         if (
             data.sourceKind == cubes.SOURCE_KIND_NORMIE()
                 || data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET()

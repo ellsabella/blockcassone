@@ -93,6 +93,70 @@ contract CubeRendererV2Test is Test {
         assertFalse(_contains(json, '"trait_type":"Payload Version"'));
     }
 
+    // ---- Audit regressions (2026-08-16) -------------------------------------
+
+    /// M-2: a merged street whose LEADER is a CC0 cube must render the CC0 art in
+    /// its thumbnail (v1 previously fetched Normie storage with the CC0 token id).
+    function testMergedStreetThumbnailRendersCC0Leader() public {
+        // Distinctive CC0 payload: only cells 0 and 1599 lit (band 2 each) — the
+        // silhouette matches the two-corner path the Normie raw-bitmap test uses.
+        bytes memory payload = new bytes(400);
+        payload[0] = 0x02;
+        payload[399] = 0x80;
+        address ext = address(new RendererV2MockNormies()); // any contract with code
+        store.recordSourcePayload(ext, 777, payload); // test contract is store owner
+
+        bytes memory raw = new bytes(200); // filler Normies need to exist + be MINTER's
+        for (uint32 s = 1; s <= 4; s++) {
+            normies.mint(MINTER, 9000 + s, raw);
+        }
+        vm.startPrank(OWNER);
+        cubes.mintSnapshotExternalCubeFor(MINTER, ext, 777, 0, bytes32("s0"), 1); // slot 0 = leader
+        for (uint32 s = 1; s <= 4; s++) {
+            cubes.mintNormieCubeFor(MINTER, 9000 + s, s, bytes32(uint256(s)));
+        }
+        vm.stopPrank();
+
+        vm.prank(MINTER);
+        uint256 streetId = cubes.mergeStreet(0);
+
+        string memory svg = renderer.thumbnailSVG(streetId);
+        assertTrue(_contains(svg, '<path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/>'));
+    }
+
+    /// M-3: a per-cube payload override must be CLEARED on rebaseToPoolSource so the
+    /// pool's source-keyed art shows through (previously the stale override shadowed
+    /// it forever while traits reported the new source).
+    function testPoolRebaseClearsPerCubeOverride() public {
+        bytes memory overrideArt = new bytes(400);
+        overrideArt[0] = 0x01;
+        bytes memory poolArt = new bytes(400);
+        poolArt[10] = 0x02;
+
+        address ext = address(new RendererV2MockNormies());
+        store.recordSourcePayload(ext, 555, poolArt);
+
+        vm.prank(MINTER);
+        uint256 cube = cubes.mintNormieCube(6722, 8, bytes32("seed"));
+        store.recordTonalBands2Bit(cube, overrideArt); // per-cube override in place
+        assertEq(keccak256(store.payloadForCube(cube)), keccak256(overrideArt));
+
+        vm.prank(OWNER);
+        cubes.setArtStore(address(store));
+        vm.prank(MINTER);
+        cubes.rebaseToPoolSource(cube, ext, 555);
+
+        assertEq(keccak256(store.payloadForCube(cube)), keccak256(poolArt));
+    }
+
+    /// M-3 gate: only the token may clear a per-cube override.
+    function testClearCubePayloadOnlyToken() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(NonNormieArtStore.OnlyCubesToken.selector, address(this))
+        );
+        store.clearCubePayload(1);
+    }
+
     function testAnimationHTMLInjectsCubeConfigAndRawNormieBytes() public {
         vm.prank(MINTER);
         uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));

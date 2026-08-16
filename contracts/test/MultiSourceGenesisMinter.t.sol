@@ -462,6 +462,112 @@ contract MultiSourceGenesisMinterTest is Test {
         g.releaseReservations(w);
     }
 
+    // ---- Audit regressions (2026-08-16) -------------------------------------
+
+    function testSourcePayloadIsWriteOnce() public { // M-1: store guard, single path
+        (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3);
+        vm.startPrank(OWNER);
+        g.setSourcePayload(1, 200, _payload(1));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NonNormieArtStore.SourcePayloadAlreadyRecorded.selector, address(runners), 200
+            )
+        );
+        g.setSourcePayload(1, 200, _payload(2));
+        vm.stopPrank();
+    }
+
+    function testSourcePayloadBatchIsWriteOnce() public { // M-1: batch + intra-batch dupe
+        (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3);
+        vm.startPrank(OWNER);
+        g.setSourcePayload(1, 200, _payload(1));
+
+        uint256[] memory ids = new uint256[](2);
+        bytes[] memory ps = new bytes[](2);
+        ids[0] = 201;
+        ids[1] = 200; // already recorded above
+        ps[0] = _payload(3);
+        ps[1] = _payload(4);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NonNormieArtStore.SourcePayloadAlreadyRecorded.selector, address(runners), 200
+            )
+        );
+        g.setSourcePayloadBatch(1, ids, ps);
+
+        ids[0] = 202;
+        ids[1] = 202; // intra-batch duplicate
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NonNormieArtStore.SourcePayloadAlreadyRecorded.selector, address(runners), 202
+            )
+        );
+        g.setSourcePayloadBatch(1, ids, ps);
+        vm.stopPrank();
+    }
+
+    function testPayloadSettersBlockedAfterFinalize() public { // M-1: minter gate
+        (MultiSourceGenesisMinter g,,) = _fullWorld();
+        vm.startPrank(OWNER);
+        vm.expectRevert(GenesisMinterBase.SnapshotAlreadyFinalized.selector);
+        g.setSourcePayload(1, 999, _payload(9));
+        uint256[] memory ids = new uint256[](1);
+        bytes[] memory ps = new bytes[](1);
+        ids[0] = 999;
+        ps[0] = _payload(9);
+        vm.expectRevert(GenesisMinterBase.SnapshotAlreadyFinalized.selector);
+        g.setSourcePayloadBatch(1, ids, ps);
+        vm.stopPrank();
+    }
+
+    function testNormieDoubleReservationReverts() public { // L-1
+        (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3);
+        uint256[] memory nrm = new uint256[](10);
+        for (uint256 i = 0; i < 10; i++) nrm[i] = 100 + i;
+        vm.startPrank(OWNER);
+        g.addSnapshotNormies(ALICE, nrm);
+        uint8[] memory cs = new uint8[](1);
+        uint256[] memory ss = new uint256[](1);
+        cs[0] = 0;
+        ss[0] = 100;
+        g.reserveSources(ALICE, cs, ss);
+        // Same Normie for a second wallet: previously a silent no-op removal that
+        // bricked the second holder's guaranteed mint — now rejected up front.
+        vm.expectRevert(abi.encodeWithSelector(MultiSourceGenesisMinter.NormieNotInPool.selector, 100));
+        g.reserveSources(PUB, cs, ss);
+        vm.stopPrank();
+    }
+
+    function testReserveUnpooledNormieReverts() public { // L-1: id must be a candidate
+        (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3);
+        uint8[] memory cs = new uint8[](1);
+        uint256[] memory ss = new uint256[](1);
+        cs[0] = 0;
+        ss[0] = 4242; // never added to the snapshot pool
+        vm.prank(OWNER);
+        vm.expectRevert(abi.encodeWithSelector(MultiSourceGenesisMinter.NormieNotInPool.selector, 4242));
+        g.reserveSources(ALICE, cs, ss);
+    }
+
+    function testNormieReservationsCappedAtAllocation() public { // L-1 related
+        (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3); // Normie cap 8, pool 10
+        uint256[] memory nrm = new uint256[](10);
+        for (uint256 i = 0; i < 10; i++) nrm[i] = 100 + i;
+        vm.startPrank(OWNER);
+        g.addSnapshotNormies(ALICE, nrm);
+        uint8[] memory cs = new uint8[](1);
+        uint256[] memory ss = new uint256[](1);
+        cs[0] = 0;
+        for (uint256 i = 0; i < 8; i++) {
+            ss[0] = 100 + i;
+            g.reserveSources(address(uint160(7000 + i)), cs, ss);
+        }
+        ss[0] = 108; // 9th reservation exceeds the collection-0 allocation
+        vm.expectRevert(abi.encodeWithSelector(MultiSourceGenesisMinter.CollectionCapReached.selector, 0));
+        g.reserveSources(address(uint160(7008)), cs, ss);
+        vm.stopPrank();
+    }
+
     function testReserveRejectsUncommittedStoredSource() public {
         (MultiSourceGenesisMinter g,,) = _deploy(16, 8, 5, 3);
         uint256[] memory rp = new uint256[](5);

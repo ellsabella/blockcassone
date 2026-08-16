@@ -53,6 +53,7 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
     error PoolSizeMismatch(uint8 collectionId, uint256 poolLength, uint32 cap);
     error MissingSourcePayload(uint256 tokenId);
     error SourceNotInPool(uint8 collectionId, uint256 sourceId);
+    error NormieNotInPool(uint256 normieId);
 
     event CollectionRegistered(uint8 indexed collectionId, uint8 model, address contractAddr, uint32 cap);
     event SourcePoolExtended(uint8 indexed collectionId, uint256 count);
@@ -111,6 +112,9 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
         public
         onlyOwner
     {
+        // Finalize freezes the drop's art commitments (audit M-1) — belt and braces on
+        // top of the store's own write-once guard.
+        if (finalized) revert SnapshotAlreadyFinalized();
         _requireStored(collectionId);
         artStore.recordSourcePayload(_collections[collectionId].contractAddr, tokenId, payload);
     }
@@ -121,6 +125,7 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
         uint256[] calldata tokenIds,
         bytes[] calldata payloads
     ) external onlyOwner {
+        if (finalized) revert SnapshotAlreadyFinalized();
         _requireStored(collectionId);
         artStore.recordSourcePayloadBatch(_collections[collectionId].contractAddr, tokenIds, payloads);
     }
@@ -165,10 +170,19 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
                 }
                 _removeFromPool(c, sid); // pull out of the random draw so it can't collide
             } else {
+                // A reserved Normie must currently be IN the candidate pool: this both
+                // validates the id and blocks reserving the same Normie twice (the pool
+                // removal is otherwise an idempotent no-op, so a duplicate would slip
+                // through and brick the second holder's guaranteed mint — audit L-1).
+                if (publicIndexPlusOne[sid] == 0) revert NormieNotInPool(sid);
                 _removeNormieFromPool(sid); // collection 0 (Normie): exclude from the snapshot draw
             }
             _reservations[wallet].push(Reservation({ collectionId: c, sourceId: sid }));
             reservedCount[c] += 1;
+            // Over-reserving collection 0 past its allocation would also brick reserved
+            // mints at the cap (audit L-1 related); STORED collections are implicitly
+            // bounded by their pool size.
+            if (c == 0 && reservedCount[0] > _collections[0].cap) revert CollectionCapReached(0);
         }
         emit SourcesReserved(wallet, collectionIds.length);
     }

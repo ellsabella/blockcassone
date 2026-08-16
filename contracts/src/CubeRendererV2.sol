@@ -177,7 +177,10 @@ contract CubeRendererV2 is ICubeRenderer {
                 pds[k] = cubes.cubeDataUnchecked(plotIds[k]);
                 raws[k] = _rawImageBase64(plotIds[k], pds[k]);
             }
-            total += bytes(raws[k]).length + 192;
+            // Fixed-field cushion per plot: labels+seed(66) ≈ 190, plus slot/sourceTokenId/
+            // agentId which are uint256s (≤78 digits each) — 512 covers the worst case
+            // (the old 192 cushion violated the buffer contract for huge re-based ids).
+            total += bytes(raws[k]).length + 512;
         }
 
         bytes memory buf = StrBuf.alloc(total + 64);
@@ -354,7 +357,9 @@ contract CubeRendererV2 is ICubeRenderer {
         // Skip address(0) and codeless addresses: a name() call on a contract-less
         // address returns empty data that fails string-decode outside the catch.
         if (sourceContract == address(0) || sourceContract.code.length == 0) return "Unknown";
-        try ICollectionName(sourceContract).name() returns (string memory n) {
+        // Gas-capped: an untrusted (customized-source) contract must not be able to
+        // consume the whole render budget from inside name().
+        try ICollectionName(sourceContract).name{ gas: 200_000 }() returns (string memory n) {
             if (bytes(n).length > 0) return _jsonEscape(n);
         } catch { }
         return "Unknown";

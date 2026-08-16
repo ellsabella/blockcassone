@@ -46,6 +46,8 @@ contract NonNormieArtStore is Ownable {
     error EmptyBatch();
     error PayloadListLengthMismatch();
     error BatchBlobTooLarge(uint256 totalBytes, uint256 maxBytes);
+    error SourcePayloadAlreadyRecorded(address sourceContract, uint256 sourceTokenId);
+    error OnlyCubesToken(address caller);
 
     event NonNormiePayloadRecorded(
         uint256 indexed cubeId,
@@ -140,10 +142,16 @@ contract NonNormieArtStore is Ownable {
         onlyRecorder
     {
         if (payload.length == 0) revert EmptyPayload();
+        bytes32 key = sourceKey(sourceContract, sourceTokenId);
+        // Write-once: a genesis cube's art provenance must not be owner-mutable after
+        // mint (audit M-1). A wrong payload is fixed by deploying a fresh store and
+        // module-swapping it in — never by silently repointing a committed source.
+        if (_sourceLoc[key].blob != address(0)) {
+            revert SourcePayloadAlreadyRecorded(sourceContract, sourceTokenId);
+        }
         bytes memory data = payload;
         NonNormieArt.validateTonalBands2Bit(NonNormieArt.PAYLOAD_VERSION_TONAL_BANDS_2BIT, data);
         address blob = SSTORE2.write(data);
-        bytes32 key = sourceKey(sourceContract, sourceTokenId);
         _sourceLoc[key] = SourceLoc({blob: blob, offset: 0, length: uint32(payload.length)});
         bytes32 payloadHash = NonNormieArt.hashTonalBands2Bit(data);
         sourcePayloadHash[key] = payloadHash;
@@ -188,12 +196,26 @@ contract NonNormieArtStore is Ownable {
         address blob = SSTORE2.write(blobData);
         for (uint256 i = 0; i < n; i++) {
             bytes32 key = sourceKey(sourceContract, sourceTokenIds[i]);
+            // Write-once (audit M-1) — checked in the write loop so an intra-batch
+            // duplicate id reverts too.
+            if (_sourceLoc[key].blob != address(0)) {
+                revert SourcePayloadAlreadyRecorded(sourceContract, sourceTokenIds[i]);
+            }
             _sourceLoc[key] =
                 SourceLoc({blob: blob, offset: offsets[i], length: uint32(payloads[i].length)});
             bytes32 payloadHash = NonNormieArt.hashTonalBands2Bit(payloads[i]);
             sourcePayloadHash[key] = payloadHash;
             emit SourcePayloadRecorded(sourceContract, sourceTokenIds[i], payloadHash);
         }
+    }
+
+    /// @notice Clear a cube's per-cube payload override so the source-keyed pool art
+    ///         shows through. Called by the TOKEN on a pool re-base (audit M-3: without
+    ///         this, a previously-customized cube keeps rendering its old art while its
+    ///         traits and the claim registry report the new pool source).
+    function clearCubePayload(uint256 cubeId) external {
+        if (msg.sender != address(cubes)) revert OnlyCubesToken(msg.sender);
+        delete _payloadPointer[cubeId];
     }
 
     function hasSourcePayload(address sourceContract, uint256 sourceTokenId) external view returns (bool) {

@@ -36,6 +36,7 @@ interface INormieGenesisMinter {
 // flattened payload is committed source-keyed (genesis pool + reserve + released).
 interface ICubeArtStore {
     function hasSourcePayload(address sourceContract, uint256 sourceTokenId) external view returns (bool);
+    function clearCubePayload(uint256 cubeId) external;
 }
 
 contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
@@ -998,6 +999,13 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
 
         _captureOrigin(cubeId, data);
         _reassignSource(cubeId, data, sourceContract, sourceTokenId); // claim requires unclaimed
+
+        // A per-cube payload override (from an earlier attested customize) would shadow
+        // the pool's source-keyed art forever — the cube would render its OLD art while
+        // traits and the claim registry report the new source (audit M-3). Clear it so
+        // the pool art shows through. (artStore is non-zero whenever a CC0 pool source
+        // passed _isPooledSource; guarded for the Normie-rebase-with-unset-store edge.)
+        if (artStore != address(0)) ICubeArtStore(artStore).clearCubePayload(cubeId);
 
         bool isNormie = sourceContract == normieContract;
         data.sourceKind = isNormie ? SOURCE_KIND_NORMIE : SOURCE_KIND_EXTERNAL_ERC721;
