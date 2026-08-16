@@ -6,6 +6,10 @@ cd "$(dirname "$0")/.."
 set -a; source .env; set +a
 export PATH="$PATH:$HOME/.foundry/bin"
 
+# Scratch path: DeployLocalGenesis-style config writers run even in simulation and
+# would clobber the tracked Sepolia chain-config.json (bitten twice).
+export BLOCKCASSONE_CHAIN_CONFIG_OUT=data/chain-config.simulation.json
+
 BLOCKCASSONE_OWNER="${DEV_THROWAWAY_PUBLIC}" \
 BLOCKCASSONE_ATTESTATION_SIGNER="${DEV_THROWAWAY_PUBLIC}" \
 forge script contracts/script/DeployGenesis.s.sol:DeployGenesis \
