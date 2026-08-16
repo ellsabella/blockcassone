@@ -78,6 +78,24 @@ export function createApiHandler(env) {
   // rejects every POST (bots included) regardless of signature/captcha; reads (status/admin) stay up.
   const registrationClosed = /^(1|true|yes|on)$/i.test(env.REGISTRATION_CLOSED || '');
 
+  // FCFS / GTD checker lists — plain address-per-line files, read SERVER-SIDE ONLY (never sent to
+  // the client). Live-editable: changes are picked up on the next request (mtime-cached). Point
+  // these at a writable dir (e.g. /var/lib/blockcassone) so /api/allowlist-add can append to them.
+  const gtdListFile = env.GTD_LIST_FILE ? path.resolve(env.GTD_LIST_FILE) : path.join(REPO_ROOT, 'gtd.txt');
+  const fcfsListFile = env.FCFS_LIST_FILE ? path.resolve(env.FCFS_LIST_FILE) : path.join(REPO_ROOT, 'fcfs.txt');
+  let _tierCache = null;
+  const _fileAddrs = fp => { try { return fs.readFileSync(fp, 'utf8').split('\n').map(l => l.trim().toLowerCase()).filter(l => /^0x[0-9a-f]{40}$/.test(l)); } catch { return []; } };
+  const _mtime = fp => { try { return fs.statSync(fp).mtimeMs; } catch { return 0; } };
+  function tierIndex() {
+    const key = `${_mtime(gtdListFile)}:${_mtime(fcfsListFile)}`;
+    if (_tierCache && _tierCache.key === key) return _tierCache;
+    const gtd = new Set(_fileAddrs(gtdListFile));
+    const fcfs = new Set(_fileAddrs(fcfsListFile));
+    for (const w of gtd) fcfs.delete(w); // GTD outranks FCFS
+    _tierCache = { key, gtd, fcfs };
+    return _tierCache;
+  }
+
   const submitLimited = makeLimiter(SUBMIT_MAX_PER_WINDOW);
   const alchemyLimited = makeLimiter(ALCHEMY_MAX_PER_WINDOW);
   const rpcLimited = makeLimiter(RPC_MAX_PER_WINDOW);
@@ -189,6 +207,32 @@ export function createApiHandler(env) {
     if (p === '/api/allowlist-status') {
       const w = url.searchParams.get('wallet') || '';
       return json(res, 200, { registered: /^0x[0-9a-fA-F]{40}$/.test(w) ? isRegistered(w) : false }), true;
+    }
+
+    // ---- allowlist tier check (public) — returns only a tier; the list stays server-side ----
+    if (p === '/api/allowlist-check') {
+      const w = String(url.searchParams.get('wallet') || '').trim();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(w)) return json(res, 400, { error: 'invalid address' }), true;
+      const lw = w.toLowerCase();
+      const idx = tierIndex();
+      const tier = idx.gtd.has(lw) ? 'gtd' : idx.fcfs.has(lw) ? 'fcfs' : null;
+      return json(res, 200, { address: lw, tier }), true;
+    }
+
+    // ---- speedy list update (admin) — append a wallet to gtd.txt / fcfs.txt, no redeploy ----
+    if (p === '/api/allowlist-add') {
+      if (!isAdmin(req)) return json(res, 403, { error: 'forbidden' }), true;
+      const w = String(url.searchParams.get('wallet') || '').trim().toLowerCase();
+      const tier = String(url.searchParams.get('tier') || '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(w)) return json(res, 400, { error: 'invalid address' }), true;
+      if (tier !== 'gtd' && tier !== 'fcfs') return json(res, 400, { error: 'tier must be gtd or fcfs' }), true;
+      const idx = tierIndex();
+      if (idx.gtd.has(w)) return json(res, 200, { ok: true, already: 'gtd', wallet: w }), true;
+      if (tier === 'fcfs' && idx.fcfs.has(w)) return json(res, 200, { ok: true, already: 'fcfs', wallet: w }), true;
+      try { fs.appendFileSync(tier === 'gtd' ? gtdListFile : fcfsListFile, w + '\n'); }
+      catch (e) { return json(res, 500, { error: 'write failed', detail: String(e) }), true; }
+      _tierCache = null; // force re-read on next check
+      return json(res, 200, { ok: true, added: w, tier }), true;
     }
 
     // ---- allowlist submit (public, signed) — GTD art request OR register-interest ----
