@@ -205,13 +205,12 @@
   }
   resetBtn.onclick = showSearchMode;
 
-  // Preview stub: real backend is /api/allowlist-check (wired later). Until then, when the API is
-  // absent, derive a demo tier from the address so every panel can be eyeballed.
-  function stubTier(a) {
-    var c = a.slice(-1).toLowerCase();
-    if ('0123456'.indexOf(c) >= 0) return 'gtd';
-    if ('789ab'.indexOf(c) >= 0) return 'fcfs';
-    return 'none';
+  // On a network/server error, show a neutral retry message — never a guessed tier.
+  function renderError(address) {
+    result.className = 'result show none';
+    rTitle.textContent = 'Couldn’t check right now — please try again.';
+    rSub.innerHTML = ''; rAddr.textContent = address || '';
+    panel.style.display = 'none'; resetBtn.style.display = 'block';
   }
 
   async function check(address) {
@@ -220,11 +219,11 @@
     render('loading');
     try {
       var r = await fetch('/api/allowlist-check?wallet=' + a);
-      if (!r.ok) throw new Error('bad');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       var j = await r.json();
       render(j.tier, a);
     } catch (e) {
-      render(stubTier(a), a); // preview fallback (no backend on the static preview server)
+      renderError(a);
     }
   }
 
