@@ -94,6 +94,33 @@ restarts on the critical path. Target: <1 minute from "mint closed" to live.
    then customizes + attest service (that's when the signer key goes in server env
    + service restart).
 
+## RPC provisioning (indexer + site proxy)
+Sizing (from indexer/README): full backfill ≈ 3 eth_calls/cube → ~12.3k calls at
+sellout, + ~1,679 one-time Normie art reads (M4 cache). Monthly CU volume is
+trivial (<1% of Alchemy's free tier) — **the binding constraint is THROUGHPUT**
+(free tier ≈ 330 CU/s; we hit 429 storms all week at modest concurrency).
+1. **Two separate Alchemy apps** (= separate keys): one for the indexer, one for
+   the site's /api/chain-rpc proxy — isolation + double throughput, both free.
+2. **Upgrade the site-proxy app to pay-as-you-go for launch month** — costs
+   pennies at our volume, removes the throughput ceiling exactly when a traffic
+   spike would hurt most.
+3. **Fallback pool in the proxy**: on 429, fall back to publicnode
+   (battle-tested this week for our own broadcasts). Small server.js addition.
+4. Indexer backfill throttled to ~10 rps (full rebuild ≈ 20 min at sellout;
+   incremental/event-follow after). Prestage: run the mainnet backfill NOW
+   (near-instant pre-mint) and let the timer keep it warm as mints land.
+
+## Share-on-X cards
+The /s/<id> flow is production-ready: absolute URLs from X-Forwarded-Proto/Host
+(Caddy sets both), summary_large_image + twitter:image + og:image, 3h image TTL
+(X caches the image at crawl time, so expiry is safe by design). Launch checks:
+- **Cloudflare: allow verified bots** (Bot Fight Mode can challenge Twitterbot —
+  that would strip images from ALL share tweets; whitelist known bots or exempt
+  /s/*).
+- The pre-launch gate blocks X's crawler too — share cards only work (and can
+  only be tested) once the gate lifts. First smoke test after launch: share a
+  cube, paste the /s/<id> URL in the X composer, confirm the image unfurls.
+
 ## Ops notes
 - Restart discipline: `sudo systemctl restart theblock-site` after ANY env/config change.
 - shares/ is self-sweeping (3h TTL, 500 cap) — no disk babysitting.
