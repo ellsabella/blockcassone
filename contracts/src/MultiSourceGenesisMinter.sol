@@ -53,6 +53,7 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
     error PoolSizeMismatch(uint8 collectionId, uint256 poolLength, uint32 cap);
     error MissingSourcePayload(uint256 tokenId);
     error SourceNotInPool(uint8 collectionId, uint256 sourceId);
+    error NormieNotInPool(uint256 normieId);
 
     event CollectionRegistered(uint8 indexed collectionId, uint8 model, address contractAddr, uint32 cap);
     event SourcePoolExtended(uint8 indexed collectionId, uint256 count);
@@ -111,6 +112,9 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
         public
         onlyOwner
     {
+        // Finalize freezes the drop's art commitments (audit M-1) — belt and braces on
+        // top of the store's own write-once guard.
+        if (finalized) revert SnapshotAlreadyFinalized();
         _requireStored(collectionId);
         artStore.recordSourcePayload(_collections[collectionId].contractAddr, tokenId, payload);
     }
@@ -121,6 +125,7 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
         uint256[] calldata tokenIds,
         bytes[] calldata payloads
     ) external onlyOwner {
+        if (finalized) revert SnapshotAlreadyFinalized();
         _requireStored(collectionId);
         artStore.recordSourcePayloadBatch(_collections[collectionId].contractAddr, tokenIds, payloads);
     }
@@ -165,10 +170,19 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
                 }
                 _removeFromPool(c, sid); // pull out of the random draw so it can't collide
             } else {
+                // A reserved Normie must currently be IN the candidate pool: this both
+                // validates the id and blocks reserving the same Normie twice (the pool
+                // removal is otherwise an idempotent no-op, so a duplicate would slip
+                // through and brick the second holder's guaranteed mint — audit L-1).
+                if (publicIndexPlusOne[sid] == 0) revert NormieNotInPool(sid);
                 _removeNormieFromPool(sid); // collection 0 (Normie): exclude from the snapshot draw
             }
             _reservations[wallet].push(Reservation({ collectionId: c, sourceId: sid }));
             reservedCount[c] += 1;
+            // Over-reserving collection 0 past its allocation would also brick reserved
+            // mints at the cap (audit L-1 related); STORED collections are implicitly
+            // bounded by their pool size.
+            if (c == 0 && reservedCount[0] > _collections[0].cap) revert CollectionCapReached(0);
         }
         emit SourcesReserved(wallet, collectionIds.length);
     }
@@ -217,14 +231,25 @@ contract MultiSourceGenesisMinter is GenesisMinterBase {
     event ReservationsReleased(address indexed wallet, uint256 count);
     error CannotReleaseDuringAllowlist();
 
-    /// @notice Return each wallet's UNMINTED reservations to the draw pool (owner). Run
-    ///         after the GTD (Allowlist) window closes so guaranteed-but-unclaimed art
-    ///         isn't stranded — reserved sources were pulled from the pool, so without
-    ///         this the collection under-fills. Reserved→pool keeps `pool + reserved ==
-    ///         cap` invariant. Blocked while `phase == Allowlist` so a live GTD can't be
-    ///         rugged mid-mint. Idempotent per wallet (only the unminted tail is released).
-    function releaseReservations(address[] calldata wallets) external onlyOwner {
+    /// @notice Return each wallet's UNMINTED reservations to the draw pool. Run after
+    ///         the GTD window closes so guaranteed-but-unclaimed art isn't stranded —
+    ///         reserved sources were pulled from the pool, so without this the
+    ///         collection under-fills (and near sellout the public tail reverts
+    ///         `IncompletePublicFill`). Reserved→pool keeps `pool + reserved == cap`.
+    ///         Access: while the GTD window (`gtdEndTime`) is open NOBODY — owner
+    ///         included — can release (the chosen-art promise is untouchable); once it
+    ///         passes, ANYONE can (so a keeper/bot handles it with no owner tx during a
+    ///         fast-moving mint — see allowlist/release-keeper.mjs). With no window
+    ///         configured (gtdEndTime 0: dev/legacy phase-driven drops) it stays
+    ///         owner-only, still blocked during `phase == Allowlist`. Idempotent per
+    ///         wallet (only the unminted tail is released).
+    function releaseReservations(address[] calldata wallets) external {
         if (phase == Phase.Allowlist) revert CannotReleaseDuringAllowlist();
+        if (gtdEndTime == 0) {
+            _checkOwner();
+        } else if (block.timestamp <= gtdEndTime) {
+            revert GtdWindowActive(gtdEndTime);
+        }
         for (uint256 w = 0; w < wallets.length; w++) {
             address wallet = wallets[w];
             Reservation[] storage res = _reservations[wallet];

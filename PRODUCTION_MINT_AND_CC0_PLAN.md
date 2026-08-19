@@ -9,13 +9,18 @@
 > (source-keyed, no per-mint duplication), and production deploy
 > (`contracts/script/DeployGenesis.s.sol`) are BUILT + tested. For the live launch steps
 > see **[LAUNCH_RUNBOOK.md](LAUNCH_RUNBOOK.md)**; for current architecture see the
-> `launch_mint_architecture` + `cc0_source_art_onchain` memories. The **allowlist /
-> public / snapshot / SeaDrop-compatibility / metadata / agent-registry / renderer**
-> sections below are still accurate; the "genesis is Normie-only" framing is not.
+> `launch_mint_architecture` + `cc0_source_art_onchain` memories. The
+> **SeaDrop-compatibility / metadata / agent-registry / renderer** sections below are
+> still accurate. The **allowlist/snapshot sections are SUPERSEDED**: the Merkle-snapshot
+> "mint your Normies" path (`selectAllowlistNormies`, `NormieSnapshotRegistry`) was
+> removed from the contract — GTD now uses on-chain **reservations** (chosen art,
+> protected by the `gtdEndTime` window) and FCFS gating uses **SeaDrop's own allowlist
+> stage** (one combined merkle tree via `allowlist/merkle.mjs`). The "genesis is
+> Normie-only" framing is also outdated.
 
 ## Objective
 
-Blockcassone's genesis mint should be simple, scarce, and copyright-clean:
+TheBLOCK's genesis mint should be simple, scarce, and copyright-clean:
 
 - genesis supply is capped at `4096` cubes
 - every paid genesis cube is backed by a real, fully-on-chain source (Normie live art, or
@@ -250,7 +255,7 @@ source.
 
 ## Dynamic Agent Status
 
-Normies can become agentic after a Blockcassone cube has already minted. The
+Normies can become agentic after a TheBLOCK cube has already minted. The
 project therefore needs to separate:
 
 - mint-time source facts, which are permanent

@@ -1,13 +1,26 @@
 {
-  "agentStatusRegistry": "0x9E6b222a71644484b6E9eb67bD8400128e0c3fb8",
-  "chainId": 1,
-  "cubeNft": "0x5f401c9cF95cB75bC8B28981D3d77b6513Ad652A",
+  "agentStatusRegistry": "0xfBF1747A24352fCE2aF3744457b86B0331d1E120",
+  "attestationSigner": "0x635f8990D0b90cd9486DdedC8388bd7FA5580cD1",
+  "chainId": 11155111,
+  "cubeMintController": "0xcA927eDe5D63398b59Dcf4645b8308d951463a26",
+  "cubeNft": "0x1461c8b291cd8AA4921cd43356D2ae9d72705b11",
+  "directRpc": false,
   "enabled": true,
-  "genesisMinter": "0xFafab2d458b595f3116F75Cd73a9B5d82e705D69",
-  "normieStorage": "0x1B976bAf51cF51F0e369C070d47FBc47A706e602",
-  "normies": "0x9Eb6E2025B64f340691e424b7fe7022fFDE12438",
-  "renderer": "0xfBA80Ad48B2002aA39268047ed31AbeBA0Ec7e13",
-  "rendererAssetStore": "0xB1cF93F953586f7B9C26B61Ac9342a18C96c27a1",
-  "rpcUrl": "http://127.0.0.1:8545",
-  "useSnapshot": true
+  "flatteningAttestation": "0x622517807bF3A6696b5f319030CeB26aAcA8d2B7",
+  "genesisMinter": "0xaB023fFd42Ae04DeDfACec9E70b57Ce508750867",
+  "mockSeaDrop": "0x96620441d2CD44d9a0248a75C2A0323C13619D1B",
+  "nonNormieStore": "0x85c0B2599B6af9BF67D47093dF59763Af640517E",
+  "normieStorage": "0xDaf5C0fF52C47C883148dc724B32c0B28c7a4407",
+  "normies": "0xDaf5C0fF52C47C883148dc724B32c0B28c7a4407",
+  "renderer": "0x8e6E5CD607803694FFdfFf85f235c002F2360aB6",
+  "rendererAssetStore": "0x18b605F9ec5482419BB98C45e0065376d4782075",
+  "rpcUrl": "",
+  "cc0Pool": [
+    { "contract": "0x0b45c45fbf26d9b76d13939fed94c3c4e0a73ab8", "startId": 1000, "count": 8, "name": "Chain Runners" },
+    { "contract": "0xe866d0d922daba3fc242c8dd009ea9698da4adc9", "startId": 2000, "count": 8, "name": "1337 Skulls" },
+    { "contract": "0x8e5330f32141f915d2fb3d0e1d0ad9bccdfded64", "startId": 3000, "count": 4, "name": "Baby Pepes" },
+    { "contract": "0x82f7ddaddf49a15427983833810fa546dcc37d45", "startId": 4000, "count": 4, "name": "Nouns" },
+    { "contract": "0x454bb6dd5d27102051972d31d747bbbc5f68f7bc", "startId": 5000, "count": 4, "name": "OnChainKevin" }
+  ],
+  "thumbnailRenderer": "0x78550E2E829c5197753c404B4E2a1618BaDe27F4"
 }

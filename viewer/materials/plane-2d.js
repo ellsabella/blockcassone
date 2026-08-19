@@ -47,6 +47,30 @@ export function uvToWorld(u, v, p) {
   ];
 }
 
+// ── Canonical artwork orientation ──────────────────────────────────────────
+// A plane's 4 corners are stored in Hilbert-curve order [c0,c1,c2,c3]. The three
+// "filled" path-edges are c0-c1, c1-c2 (the MIDDLE) and c2-c3; c3-c0 is the open
+// edge. The artwork must STAND on the middle path-edge: its bottom row on c1-c2,
+// "up" pointing toward the open edge c3-c0. This is the canonical orientation the
+// piece is meant to be read in, baked into the 3D world geometry so it holds in
+// every view (panel, big cube, on-chain).
+//
+// Art is fed as uvToWorld(col/size, row/size, corners) with row 0 = image TOP, so
+// v=0 must land on the open edge and v=1 (image bottom) on the middle edge. A cube
+// is read from the OUTSIDE, so the art must also FACE OUTWARD (read un-mirrored from
+// outside the cube). Both requirements are met by the frame [c0,c3,c2,c1]:
+//   • bottom (v=1) on the middle path-edge c1-c2, top (v=0) on the open edge c3-c0;
+//   • u runs so the UV normal points outward (the u-mirror of the inward [c3,c0,c1,c2]).
+// This is a rigid re-seating of the same square (rotation + face-flip), no distortion.
+// Use it EVERYWHERE art is mapped onto a plane (uvToWorld + makePlanePixelFn) so the
+// 2D contour, 3D voxels, ID label and walkers all stay in lockstep. Do NOT use it for
+// the plane's own path-edge geometry (buildPlaneOutline) or the glass edge-bit
+// patterns (collectActiveBitsUV) — those render the true curve geometry.
+export function artCorners(plane) {
+  const p = plane.vertices.positions;
+  return [p[0], p[3], p[2], p[1]];
+}
+
 
 // World-space positions of every active edge bit on this plane, returned in
 // plane-local UV coordinates. Each bit is annotated with `{ uv, edge, sub }`

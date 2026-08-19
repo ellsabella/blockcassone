@@ -5,7 +5,6 @@ import { Strings } from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import { CubeNFT } from "./CubeNFT.sol";
 import { StrBuf } from "./lib/StrBuf.sol";
 import { NonNormieArt } from "./NonNormieArt.sol";
-import { CubeForestLib } from "./render/CubeForestLib.sol";
 import { NormieHexGlyphs } from "./render/NormieHexGlyphs.sol";
 
 interface IThumbnailNormieRawImageStorage {
@@ -72,6 +71,16 @@ contract CubeThumbnailRendererV1 {
         return _renderSVG(data, _rawImageBytes(data, tokenId), _tonalBytes(data, tokenId));
     }
 
+    /// @notice The SAME cube (its real seed/source/art) rendered as if it sat at `slot` — a
+    ///         stateless MOVE preview. Only the slot-derived geometry changes (mainAxis/sideAxis
+    ///         hues, motif layout); the art is the cube's actual on-chain art (live Normie bitmap
+    ///         included), so it works for every source kind. View — free, no state change.
+    function thumbnailSVGAtSlot(uint256 tokenId, uint32 slot) external view returns (string memory) {
+        CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
+        data.slot = slot;
+        return _renderSVG(data, _rawImageBytes(data, tokenId), _tonalBytes(data, tokenId));
+    }
+
     /// @notice Render the thumbnail SVG for arbitrary art with no stored cube. The
     ///         customization UI passes the target cube's `seed` + `slot`, the new
     ///         source's `sourceTokenId`, and a 400-byte 2-bit tonal payload, and
@@ -103,12 +112,18 @@ contract CubeThumbnailRendererV1 {
         // exists). `tonal` (400-byte 2-bit, or empty for Normie) still feeds glass
         // directly — its body test needs the un-punched bitmap.
         bytes memory grid = _buildGrid(data, raw, tonal);
+        uint256 slot = uint256(data.slot);
+        uint256 sideAx = geometry.sideAxis(slot);
+        // 2.5D depth-behind order (matches tmp/line-lab.html): receding SIDE PLANES +
+        // the depth WIREFRAME sit BEHIND the flat front figure, so the cube reads with
+        // depth. Glass + forest are removed from the 2D thumbnail (gas + cleaner line art).
         return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200"><rect width="1200" height="1200" fill="#020203"/>',
             _svgDefs(data, raw, grid),
-            _svgForest(data),
+            _sidePlanes(grid, data.sourceTokenId, _colour(sideAx)),
+            _depthFrame(sideAx),
             _svgBitmap(data, raw),
-            _svgTail(data, raw, tonal)
+            _svgTail(data, raw)
         );
     }
 
@@ -141,11 +156,9 @@ contract CubeThumbnailRendererV1 {
 
     // Body/neighbour mask: bodyN[i] = the 8-neighbour lit count (0..8) for a LIT cell,
     // 0 for a non-lit cell. So `bodyN[i] >= T` == "lit AND neigh8 >= T" for any
-    // threshold T — glass uses T=GLASS_CONV_MIN(5), the walkers use T=3. Built once
-    // and shared, replacing three separate `_neigh8` scans. Fully inlined (no per-cell
-    // function calls) over an unpacked 1-byte-per-cell bitmap, so the neighbour sum is
-    // plain byte reads. Label cells are NOT punched (raw-inclusive) — glass applies its
-    // own label skip, walkers crawl over any body, exactly as the old raw path did.
+    // threshold T — the stone walkers use T=3. Fully inlined (no per-cell function
+    // calls) over an unpacked 1-byte-per-cell bitmap, so the neighbour sum is plain byte
+    // reads. Label cells are NOT punched (raw-inclusive) — walkers crawl over any body.
     function _buildBodyN(bytes memory raw) private pure returns (bytes memory bodyN) {
         bodyN = new bytes(1600);
         if (raw.length != 200) return bodyN;
@@ -180,34 +193,37 @@ contract CubeThumbnailRendererV1 {
     }
 
     // Tail layers split out so neither concat holds too many inlined frames.
-    function _svgTail(CubeNFT.CubeData memory data, bytes memory raw, bytes memory tonal) private view returns (string memory) {
-        // Precompute the 8-neighbour body mask ONCE here and share it across the two
-        // consumers that both need it: the stone walkers and the glass voxels. Before,
-        // `_neigh8` (8 memory reads / call) was recomputed in the walker front-scan,
-        // the walker side-scan, AND the glass loop — the single biggest shared cost.
+    function _svgTail(CubeNFT.CubeData memory data, bytes memory raw) private view returns (string memory) {
+        // 8-neighbour body mask for the stone walkers (glass, the other consumer, is gone).
         bytes memory bodyN = _buildBodyN(raw);
+        uint256 slot = uint256(data.slot);
         return string.concat(
             _svgWalkers(data, bodyN),
-            _glassLayer(bodyN, tonal, data.sourceTokenId, data.seed),
             _svgLabel(data),
             _svgFrame(data),
+            // HOT SECTIONS ride ON TOP of the frame ∪ + the depth edges (user: hot must be
+            // over the green line, not behind). Seed-derived so the flare pattern is permanent.
+            _hotSections(data.seed),
             _hexBanner(data),
             "</svg>"
         );
     }
 
-    // Source-contract address as a NormiesFont hex spine: its 40 uppercase nibbles fill one
-    // side edge-to-edge (25px cells across the ~1000px art grid). Orientation (vertical or
-    // horizontal) and the edge-band position are seed-derived so the banner never crosses the
-    // centre art. White, opacity .74, soft glow (feGaussianBlur .2 grid = 5px). Tuned in
-    // tmp/line-lab.html; glyphs from NormieHexGlyphs (NormiesFont, 0-9/A-F).
+    // Source-contract address as a NormiesFont hex spine: its 40 uppercase nibbles fill an
+    // edge end-to-edge (25px cells across the ~1000px art grid). TWO banners are drawn — one
+    // VERTICAL (up/down) + one HORIZONTAL (left/right) — matching how the 3D cube reads
+    // face-on (2 of the 3 per-plane banners are visible; the third recedes to the vanishing
+    // point and is NOT drawn). Each banner's edge-band position is seed-derived so they sit
+    // differently per cube and never cross the centre art. White, opacity .74, soft glow
+    // (feGaussianBlur .2 grid = 5px). Tuned in tmp/line-lab.html; glyphs from NormieHexGlyphs.
     function _hexBanner(CubeNFT.CubeData memory data) private pure returns (string memory) {
         uint256 h = uint256(keccak256(abi.encodePacked(data.seed, "banner")));
-        bool vertical = (h & 1) == 1;
-        uint256 lo = ((h >> 1) & 1) == 1 ? 700 : 80;  // near-end or near-start edge band
-        uint256 perp = ((h >> 2) % 221) + lo;         // 80..300 or 700..920 grid px within band
+        // vertical banner column x-band: near-left (200..400) or near-right (800..1000)
+        uint256 xband = ((h >> 1) & 1) == 1 ? (800 + (h >> 2) % 200) : (200 + (h >> 2) % 200);
+        // horizontal banner row y-band: near-top (185..360) or near-bottom (810..985)
+        uint256 yband = ((h >> 20) & 1) == 1 ? (810 + (h >> 21) % 175) : (185 + (h >> 21) % 175);
         bytes20 a = bytes20(data.sourceContract);
-        bytes memory buf = StrBuf.alloc(12288);
+        bytes memory buf = StrBuf.alloc(24576);
         buf.cat(
             '<defs><filter id="bnrG" x="-40%" y="-40%" width="180%" height="180%">'
             '<feGaussianBlur stdDeviation="5" result="b"/>'
@@ -217,14 +233,20 @@ contract CubeThumbnailRendererV1 {
         for (uint256 i = 0; i < 20; i++) {
             uint8 bb = uint8(a[i]);
             for (uint256 k = 0; k < 2; k++) {
-                uint256 nib = k == 0 ? (bb >> 4) : (bb & 0x0f);
-                uint256 idx = i * 2 + k;
-                uint256 cx = vertical ? (101 + perp) : (101 + idx * 25);
-                uint256 cy = vertical ? (86 + idx * 25) : (86 + perp);
+                string memory glyph = NormieHexGlyphs.path(k == 0 ? (bb >> 4) : (bb & 0x0f));
+                uint256 idx = i * 2 + k; // 0..39 along the edge
+                // vertical banner: fixed x-band, stepping down in y
                 buf.cat(
                     string.concat(
-                        '<path transform="translate(', cx.toString(), " ", cy.toString(),
-                        ') scale(0.025)" d="', NormieHexGlyphs.path(nib), '"/>'
+                        '<path transform="translate(', xband.toString(), " ", (86 + idx * 25).toString(),
+                        ') scale(0.025)" d="', glyph, '"/>'
+                    )
+                );
+                // horizontal banner: stepping across in x, fixed y-band
+                buf.cat(
+                    string.concat(
+                        '<path transform="translate(', (101 + idx * 25).toString(), " ", yband.toString(),
+                        ') scale(0.025)" d="', glyph, '"/>'
                     )
                 );
             }
@@ -233,27 +255,11 @@ contract CubeThumbnailRendererV1 {
         return buf.str();
     }
 
-    function _svgDefs(CubeNFT.CubeData memory data, bytes memory raw, bytes memory grid) private view returns (string memory) {
-        uint256 slot = uint256(data.slot);
+    function _svgDefs(CubeNFT.CubeData memory data, bytes memory raw, bytes memory grid) private pure returns (string memory) {
         return _thumbnailDefs(
             _bitmapPath(raw),
             _figureLines(grid, data.sourceTokenId),
-            _labelPath(data.sourceTokenId),
-            _colour(geometry.mainAxis(slot)),
-            _colour(geometry.sideAxis(slot))
-        );
-    }
-
-    function _svgForest(CubeNFT.CubeData memory data) private view returns (string memory) {
-        // Forest strands are Normie-only; non-Normie / customized cubes show only
-        // the bare edge-point orbs (drawn by the frame layer).
-        if (data.sourceKind != cubes.SOURCE_KIND_NORMIE()) return "";
-        uint256 slot = uint256(data.slot);
-        return CubeForestLib.render(
-            data,
-            _colour(geometry.mainAxis(slot)),
-            _colour(geometry.sideAxis(slot)),
-            geometry.motifLayout(slot)
+            _labelPath(data.sourceTokenId)
         );
     }
 
@@ -290,9 +296,22 @@ contract CubeThumbnailRendererV1 {
     // kind. Normie art is already binary; non-Normie art is a 400-byte 2-bit
     // tonal-band payload (NonNormieArtStore) thresholded to a silhouette.
     function _rawImageBytes(CubeNFT.CubeData memory data, uint256 cubeId) private view returns (bytes memory) {
-        // A merged-street token carries its leader cube's source facts, so its
-        // thumbnail renders the leader exactly. Genesis leaders are Normies, so
-        // street tokens fetch from the Normie store (v1 assumes Normie leaders).
+        // A merged-street token carries its leader cube's source facts AND its
+        // payloadVersion (copied at merge). The leader may be a Normie (payloadVersion
+        // 0 = live art) or a CC0 cube (stored payload) — resolve accordingly. Fetching
+        // Normie storage with a CC0 token id renders an unrelated Normie (audit M-2);
+        // the CC0 branch resolves via the art store's source-keyed lookup, exactly as
+        // the animation renderer does, so image and animation always agree.
+        if (data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET() && data.payloadVersion != 0) {
+            if (nonNormieStore == address(0)) return "";
+            try IThumbnailNonNormieArtStore(nonNormieStore).imageBytesForCube(cubeId) returns (
+                bytes memory bitmap
+            ) {
+                return bitmap;
+            } catch {
+                return "";
+            }
+        }
         if (
             data.sourceKind == cubes.SOURCE_KIND_NORMIE()
                 || data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET()
@@ -327,9 +346,7 @@ contract CubeThumbnailRendererV1 {
     function _thumbnailDefs(
         string memory bitmapPath,
         string memory outlinePath,
-        string memory labelPath,
-        string memory planeColor,
-        string memory sideColor
+        string memory labelPath
     )
         private
         pure
@@ -337,45 +354,23 @@ contract CubeThumbnailRendererV1 {
     {
         if (bytes(bitmapPath).length == 0 || bytes(outlinePath).length == 0) return "";
         bytes memory buf = StrBuf.alloc(
-            8600 + bytes(bitmapPath).length + bytes(outlinePath).length + bytes(labelPath).length
+            4096 + bytes(bitmapPath).length + bytes(outlinePath).length + bytes(labelPath).length
         );
         buf.cat('<defs>');
-        // shared white-ish glow tiers #g / #p / #h
-        buf.cat('<filter id="g" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.3" result="t"/><feColorMatrix in="t" type="matrix" values="5 0 0 0 0 0 5 0 0 0 0 0 5 0 0 0 0 0 1 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="m"/><feColorMatrix in="m" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 .62 0" result="mc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
-        buf.cat('<filter id="p" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="t"/><feColorMatrix in="t" type="matrix" values="6 0 0 0 0 0 6 0 0 0 0 0 6 0 0 0 0 0 .95 0" result="tc"/><feGaussianBlur in="SourceGraphic" stdDeviation="11" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .50 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="20" result="w"/><feColorMatrix in="w" type="matrix" values="2 0 0 0 0 0 2 0 0 0 0 0 2 0 0 0 0 0 .24 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
-        buf.cat('<filter id="h" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="9" result="m"/><feColorMatrix in="m" type="matrix" values="4 0 0 0 0 0 4 0 0 0 0 0 4 0 0 0 0 0 .32 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation="24" result="w"/><feColorMatrix in="w" type="matrix" values="2.4 0 0 0 0 0 2.4 0 0 0 0 0 2.4 0 0 0 0 0 .14 0" result="wc"/><feMerge><feMergeNode in="wc"/><feMergeNode in="mc"/></feMerge></filter>');
         // Figure neon (#nfN): wide soft + tight bright, screen-composited (additive)
         // and hue-preserving. Applied inside scale(25), so stdDeviation is in grid
-        // units. #wfN softens the white core. (Tuned in tmp/line-lab.html.)
+        // units. #wfN softens the white core. Also reused by the receding SIDE PLANES.
+        // (Tuned in tmp/line-lab.html.)
         buf.cat('<filter id="nfN" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation=".1" result="wb"/><feColorMatrix in="wb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .1 0" result="w"/><feGaussianBlur in="SourceGraphic" stdDeviation=".11" result="tb"/><feColorMatrix in="tb" type="matrix" values="10.5 0 0 0 0 0 10.5 0 0 0 0 0 10.5 0 0 0 0 0 2.7 0" result="t"/><feBlend in="w" in2="t" mode="screen"/></filter>');
         buf.cat('<filter id="wfN" filterUnits="userSpaceOnUse" x="-16" y="-16" width="72" height="72" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".015"/></filter>');
         // Frame neon (#nfF / #wfF) — drawn in raw 1200-space, so stdDeviation is in
-        // viewBox px (= grid units x 25).
+        // viewBox px (= grid units x 25). Reused by the depth wireframe + hot sections.
         buf.cat('<filter id="nfF" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="wb"/><feColorMatrix in="wb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .8 0" result="w"/><feGaussianBlur in="SourceGraphic" stdDeviation="2.75" result="tb"/><feColorMatrix in="tb" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1.35 0" result="t"/><feBlend in="w" in2="t" mode="screen"/></filter>');
         buf.cat('<filter id="wfF" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".75"/></filter>');
-        // Edge-orb glow (#pfP) + soft white core (#pwP), raw 1200-space.
+        // Edge-orb glow (#pfP) + soft white core (#pwP), raw 1200-space. #pfP also softens
+        // the depth wireframe's back-corner orbs.
         buf.cat('<filter id="pfP" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.75" result="b"/><feColorMatrix in="b" type="matrix" values="3 0 0 0 0 0 3 0 0 0 0 0 3 0 0 0 0 0 1.05 0"/></filter>');
         buf.cat('<filter id="pwP" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation=".875"/></filter>');
-        // Glass soft-halo (#gGlass): glowG1/G2=1 -> no colour amplification, just a
-        // faint blurred halo under the source. The screen blend supplies brightness.
-        buf.cat('<filter id="gGlass" filterUnits="userSpaceOnUse" x="-120" y="-120" width="1440" height="1440" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="1.25" result="m"/><feColorMatrix in="m" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .62 0" result="mc"/><feGaussianBlur in="SourceGraphic" stdDeviation=".5" result="t"/><feColorMatrix in="t" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0" result="tc"/><feMerge><feMergeNode in="mc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge></filter>');
-        // forest particle filter #pc + plane-colour cloud gradient #cg
-        buf.cat('<filter id="pc" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="2" seed="7" result="noise"/><feColorMatrix in="noise" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.3 -1.12" result="mask"/><feComposite operator="in" in="SourceGraphic" in2="mask" result="clip"/><feGaussianBlur in="clip" stdDeviation="5" result="gr"/><feColorMatrix in="clip" type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .6 0" result="dim"/><feMerge><feMergeNode in="gr"/><feMergeNode in="gr"/><feMergeNode in="dim"/></feMerge></filter>');
-        buf.cat('<radialGradient id="cg"><stop offset="0" stop-color="');
-        buf.cat(planeColor);
-        buf.cat('" stop-opacity=".5"/><stop offset=".4" stop-color="');
-        buf.cat(planeColor);
-        buf.cat('" stop-opacity=".22"/><stop offset="1" stop-color="');
-        buf.cat(planeColor);
-        buf.cat('" stop-opacity="0"/></radialGradient>');
-        // second cloud gradient (#cg2) for the doubled side-plane colour
-        buf.cat('<radialGradient id="cg2"><stop offset="0" stop-color="');
-        buf.cat(sideColor);
-        buf.cat('" stop-opacity=".5"/><stop offset=".4" stop-color="');
-        buf.cat(sideColor);
-        buf.cat('" stop-opacity=".22"/><stop offset="1" stop-color="');
-        buf.cat(sideColor);
-        buf.cat('" stop-opacity="0"/></radialGradient>');
         // path data referenced by <use>
         buf.cat('<path id="n" d="');
         buf.cat(bitmapPath);
@@ -549,201 +544,181 @@ contract CubeThumbnailRendererV1 {
         return "";
     }
 
-    // --- Glass voxel cells -----------------------------------------------------
-    // Bright translucent "glass" cells filling the silhouette body, screen-blended
-    // (mix-blend-mode) so they read as luminous glass over the dark cube, not dim
-    // alpha-over fills. Colour comes from an RGB light field whose three lights sit
-    // on an evenly-spaced 120deg triangle; the triangle's ROTATION is derived from
-    // the cube seed, so every cube lands the rainbow differently. Tuned in
-    // tmp/line-lab.html; lab grid-units x25 -> these viewBox-px constants.
-    uint256 private constant GLASS_CONV_MIN = 4;   // glass where >= this many of 8 neighbours are on (body)
-    uint256 private constant GLASS_COVERAGE = 26;  // % of body cells kept (seeded scatter)
-    int256 private constant GLASS_CX = 600;        // light-triangle centre (viewBox px)
-    int256 private constant GLASS_CY = 585;
-    int256 private constant GLASS_SPREAD = 400;    // light distance from centre (16 grid x25)
-    uint256 private constant GLASS_R2 = 160000;    // light falloff R^2 ((16 grid x25)^2)
+    // --- 2.5D depth geometry (side planes, wireframe, hot sections) -------------
+    // Ported from tmp/line-lab.html: the cube reads as 3D by projecting the figure
+    // onto two receding SIDE faces + drawing the receding Hilbert wireframe BEHIND the
+    // flat front figure. Central vanishing point at grid (20,20) == raw (600,585); the
+    // back face is the front scaled about the VP by backScale 0.72. Grid-space layers are
+    // wrapped in translate(100 85) scale(25) (the figure space); raw layers use viewBox px
+    // directly. All view-only (no blockspace). Glass + forest were removed from the 2D.
 
-    function _glassLayer(bytes memory bodyN, bytes memory tonal, uint256 normieId, bytes32 seed)
+    // Frame (Hilbert) hue paired against a plane's ART axis, never the same colour as that
+    // plane's normie lines: green(1) -> pink, red(0)/blue(2) -> green.
+    function _frameHue(uint256 axis) private pure returns (string memory) {
+        return axis == 1 ? "#ff19a6" : "#1aff38";
+    }
+
+    // Bilinear corners of a projected side quad, grid units x100 (a=Q00,b=Q10,c=Q11,d=Q01).
+    struct Quad {
+        int256 ax; int256 ay; int256 bx; int256 by; int256 cx; int256 cy; int256 dx; int256 dy;
+    }
+
+    // Bilinear map of grid vertex (U,V) in 0..40 onto the quad:
+    // P = (1-u)(1-v)a + u(1-v)b + uv c + (1-u)v d, u=U/40 v=V/40. Corners are x100, so the
+    // result is a grid coord x100. All corners land inside 0..40 -> P is always non-negative.
+    function _bl(Quad memory q, uint256 U, uint256 V) private pure returns (uint256, uint256) {
+        int256 w00 = int256((40 - U) * (40 - V));
+        int256 w10 = int256(U * (40 - V));
+        int256 w11 = int256(U * V);
+        int256 w01 = int256((40 - U) * V);
+        int256 x = (w00 * q.ax + w10 * q.bx + w11 * q.cx + w01 * q.dx) / 1600;
+        int256 y = (w00 * q.ay + w10 * q.by + w11 * q.cy + w01 * q.dy) / 1600;
+        return (uint256(x), uint256(y));
+    }
+
+    // Grid coord x100 -> "d.d" (1 decimal = 0.1 grid = 2.5px in the scale(25) group; still 10x
+    // finer than the integer front figure, imperceptible on the small receding side planes),
+    // appended straight into `buf` with no intermediate string alloc.
+    function _catFixed(bytes memory buf, uint256 v) private pure {
+        buf.cat((v / 100).toString());
+        buf.cat(".");
+        buf.cat(((v / 10) % 10).toString());
+    }
+
+    // One boundary segment "M<a>L<b>" where <a>/<b> are cached projected-vertex strings.
+    function _edge(bytes memory buf, string[] memory vtx, Quad memory q, uint256 u0, uint256 v0, uint256 u1, uint256 v1)
         private
         pure
-        returns (string memory)
     {
-        if (bodyN.length != 1600) return "";
-        bool hasTonal = tonal.length == 400;
+        buf.cat("M");
+        buf.cat(_vtx(vtx, q, u0, v0));
+        buf.cat("L");
+        buf.cat(_vtx(vtx, q, u1, v1));
+    }
 
-        // Per-cube rainbow orientation: pick ONE of 6 evenly-spaced rotations
-        // (0,60,..,300) from the hashed seed. Six discrete, well-separated angles
-        // read as clearly distinct cube-to-cube — a fine 0..359 rotation barely
-        // varies for nearby/structured seeds. Precompute the rotated lights once.
-        uint256 rot = (uint256(keccak256(abi.encodePacked(seed))) % 6) * 60;
-        uint256[6] memory L = _lights(rot);
+    // Lattice vertex (U,V) in 0..40, projected + formatted as "x y" — computed ONCE and cached
+    // (a boundary vertex is shared by up to 4 segments, and each formatting is the hot cost).
+    function _vtx(string[] memory vtx, Quad memory q, uint256 U, uint256 V) private pure returns (string memory) {
+        uint256 i = V * 41 + U;
+        string memory s = vtx[i];
+        if (bytes(s).length != 0) return s;
+        (uint256 x, uint256 y) = _bl(q, U, V);
+        bytes memory b = StrBuf.alloc(24);
+        _catFixed(b, x);
+        b.cat(" ");
+        _catFixed(b, y);
+        s = b.str();
+        vtx[i] = s;
+        return s;
+    }
 
-        bytes memory buf = StrBuf.alloc(131072);
-        // screen blend = bright luminous glass over the dark cube (alpha-over would
-        // only darken). glowG1/G2 = 1 in the lab -> the filter is just a faint soft
-        // halo (no colour amplification).
-        buf.cat('<g filter="url(#gGlass)" stroke-width="0.3" style="mix-blend-mode:plus-lighter">');
-        uint256 kept = 0;
-        for (uint256 i = 0; i < 1600 && kept < 760; i++) {
-            // bodyN[i] >= GLASS_CONV_MIN == "lit AND neigh8 >= 5" (from the shared mask),
-            // replacing the old _bitmapBit + _neigh8 recompute in one byte read.
-            if (uint8(bodyN[i]) < GLASS_CONV_MIN) continue;
-            uint256 col = i % 40;
-            uint256 row = i / 40;
-            if (_isLabelCell(normieId, row, col)) continue;
-            if (uint256(keccak256(abi.encodePacked(seed, col, row))) % 100 >= GLASS_COVERAGE) continue;
-            // Tonal band (1..3) shades the glass; Normie / no-tonal defaults to 1 (full).
-            uint8 band = hasTonal ? NonNormieArt.tonalBandAt(tonal, uint16(row), uint16(col)) : 1;
-            if (band == 0) band = 1;
-            buf.cat(_glassRect(col, row, L, band));
-            kept++;
+    // The figure silhouette (band-boundary rule of _figureLines) bilinearly projected onto a side
+    // quad at FULL 40-grid fidelity. Each lattice vertex is projected + decimal-formatted a SINGLE
+    // time (cached in `vtx`, shared by its up-to-4 segments) so the string work — the dominant
+    // render cost — is minimised without coarsening the contour. Label cells are dropped so the
+    // #NNNN never smears onto the sides.
+    function _projFig(bytes memory grid, uint256 sourceId, Quad memory q) private pure returns (string memory) {
+        if (grid.length != 1600) return "";
+        bytes memory buf = StrBuf.alloc(65536);
+        string[] memory vtx = new string[](41 * 41); // (V*41+U) projected+formatted, lazy
+        for (uint256 row = 0; row < 40; row++) {
+            for (uint256 col = 0; col < 40; col++) {
+                uint8 b = uint8(grid[row * 40 + col]);
+                if (b == 0) continue;
+                if (_isLabelCell(sourceId, row, col)) continue;
+                int256 r = int256(row);
+                int256 c = int256(col);
+                if (_gridAt(grid, r, c - 1) < b) _edge(buf, vtx, q, col, row, col, row + 1);
+                if (_gridAt(grid, r, c + 1) < b) _edge(buf, vtx, q, col + 1, row, col + 1, row + 1);
+                if (_gridAt(grid, r - 1, c) < b) _edge(buf, vtx, q, col, row, col + 1, row);
+                if (_gridAt(grid, r + 1, c) < b) _edge(buf, vtx, q, col, row + 1, col + 1, row + 1);
+            }
         }
-        buf.cat("</g>");
         return buf.str();
     }
 
-    // Per-cell glass brightness (x1000): DENSER cells (more on-neighbours) glow
-    // brighter, so the scattered glass reads the form's body and sparse edge
-    // cells stay faint. A per-cell variety factor keeps it from looking
-    // mechanical. No centre bias (that caused the old central bunching).
-    function _glassDensity(uint256 col, uint256 row) private pure returns (uint256 v) {
-        // Opacity x1000, shaped to the reference's measured distribution: mostly
-        // faint (median ~.14), with a steep bright tail (top ~10% ramps to ~.64).
-        // Random per cell so the bright cells scatter rather than cluster.
-        uint256 r = uint256(keccak256(abi.encodePacked(col, row))) % 1000;
-        if (r <= 900) {
-            uint256 t = r * 1000 / 900; // 0..1000
-            v = 65 + (t * t / 1000) * 255 / 1000; // .065 .. .320
-        } else {
-            v = 320 + (r - 900) * 320 / 100; // .320 .. ~.636
-        }
-    }
-
-    function _glassRect(uint256 col, uint256 row, uint256[6] memory L, uint8 band)
+    // Two receding side planes: the figure contour projected onto the LEFT + RIGHT cube faces
+    // in the doubled-axis (sideColor) hue, upside-down vs the hero (the shared edge flips
+    // orientation). Reuses the figure glow #nfN, thinner (sideW .45, sideGlow .5), group
+    // opacity sideOp .76. Drawn in the figure grid space (translate(100 85) scale(25)).
+    function _sidePlanes(bytes memory grid, uint256 sourceId, string memory sideColor)
         private
         pure
         returns (string memory)
     {
-        uint256 d = _glassDensity(col, row);  // 65..636 (x1000)
-        // Shade by tonal band: the LIGHT subject (band 1) glows full; DARKER regions
-        // (band 3 = eye sockets / hollows) dim toward dark, so sockets read as hollows
-        // rather than bright blocks — matching the source and the 3D cube.
-        d = d * (100 - 40 * (uint256(band) - 1)) / 100; // band1=100% band2=60% band3=20%
-        uint256 fo = 240 + d * 1100 / 1000;   // fillBase .24 + density x fillScale 1.1
-        if (fo > 720) fo = 720;               // fillCap .72
-        uint256 so = fo * 16 / 10;            // rim opacity = fill x rimOp 1.6
-        if (so > 1000) so = 1000;
-        (uint256 r, uint256 g, uint256 b) = _glassRGB(col, row, L);
-        string memory fill = string.concat(r.toString(), ",", g.toString(), ",", b.toString());
-        // rim = the cell tone lightened toward white by rimLight .8
-        string memory rim = string.concat(_rim(r).toString(), ",", _rim(g).toString(), ",", _rim(b).toString());
+        // corners x100; VP (20,20), backScale .72 -> back corners 5.60 / 34.40.
+        // LEFT  {0,1,2,3}=[bBL,BL,TL,bTL]: Q00=bBL Q10=BL  Q11=TL  Q01=bTL
+        Quad memory qL = Quad(560, 3440, 0, 4000, 0, 0, 560, 560);
+        // RIGHT {4,5,6,7}=[BR,bBR,bTR,TR]: Q00=BR  Q10=bBR Q11=bTR Q01=TR
+        Quad memory qR = Quad(4000, 4000, 3440, 3440, 3440, 560, 4000, 0);
+        string memory dL = _projFig(grid, sourceId, qL);
+        string memory dR = _projFig(grid, sourceId, qR);
+        if (bytes(dL).length == 0 && bytes(dR).length == 0) return "";
         return string.concat(
-            '<rect x="', (101 + col * 25).toString(), '" y="', (86 + row * 25).toString(),
-            '" width="20" height="20" fill="rgb(', fill, ')" fill-opacity="', _dec2(fo),
-            '" stroke="rgb(', rim, ')" stroke-opacity="', _dec2(so), '"/>'
+            '<g transform="translate(100 85) scale(25)" opacity="0.76" fill="none" stroke-linecap="round" stroke-linejoin="round">',
+            _sidePath2(dL, sideColor),
+            _sidePath2(dR, sideColor),
+            "</g>"
         );
     }
 
-    // Glass cell colour: light field -> saturate (bold hue) -> colour gain (brightness)
-    // -> whiten. Matches the lab's col3(). Returns numeric (r,g,b) so the rect can build
-    // both the fill and the brightened rim.
-    function _glassRGB(uint256 col, uint256 row, uint256[6] memory L)
-        private
-        pure
-        returns (uint256, uint256, uint256)
-    {
-        (uint256 R, uint256 G, uint256 B) = _lightColor(112 + col * 25, 97 + row * 25, L);
-        return _glassTone(R, G, B);
+    // The 3 neon passes (glow #nfN / colour core / white core) for one side-plane path.
+    // Widths = the NORMIE stack x sideW .45 (glow also x sideGlow .5): .146*.45*.5=.033,
+    // .105*.45=.047, .04*.45=.018 (tuned in tmp/line-lab.html; white core has no blur).
+    function _sidePath2(string memory d, string memory hue) private pure returns (string memory) {
+        if (bytes(d).length == 0) return "";
+        return string.concat(
+            '<path d="', d, '" stroke="', hue, '" stroke-width="0.033" filter="url(#nfN)"/>',
+            '<path d="', d, '" stroke="', hue, '" stroke-width="0.047" opacity="0.95"/>',
+            '<path d="', d, '" stroke="#fff" stroke-width="0.018" opacity="0.9"/>'
+        );
     }
 
-    // rim colour = cell tone brightened toward white by rimLight .8 (v + (255-v)*.8 = .2v+204).
-    function _rim(uint256 v) private pure returns (uint256) { return (v * 2 + 2040) / 10; }
-
-    function _glassTone(uint256 R, uint256 G, uint256 B)
-        private
-        pure
-        returns (uint256, uint256, uint256)
-    {
-        int256 luma = (299 * int256(R) + 587 * int256(G) + 114 * int256(B)) / 1000;
-        return (_glassChan(int256(R), luma), _glassChan(int256(G), luma), _glassChan(int256(B), luma));
+    // The receding Hilbert wireframe: 2 top receders (TL->bTL, TR->bTR) + 2 back sides
+    // (bTL->bBL, bTR->bBR), plus soft orbs on the 4 back corners. Raw 1200-space:
+    // F=(100,85)(1100,85)(1100,1085)(100,1085); VP (600,585), back = front*.72 about VP ->
+    // bTL(240,225) bTR(960,225) bBR(960,945) bBL(240,945). Side-frame hue, fuzzy #nfF.
+    // boxW .11 -> raw x25: glow 6.6 (x2.4), core 2.75, white 0.825 (x0.3); orb r 4.675.
+    function _depthFrame(uint256 sideAxis) private pure returns (string memory) {
+        string memory fh = _frameHue(sideAxis);
+        string memory d = "M100 85L240 225M1100 85L960 225M240 225L240 945M960 225L960 945";
+        return string.concat(
+            '<g fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.8">',
+            '<path d="', d, '" stroke="', fh, '" stroke-width="6.6" filter="url(#nfF)"/>',
+            '<path d="', d, '" stroke="', fh, '" stroke-width="2.75" opacity="0.95"/>',
+            '<path d="', d, '" stroke="#fff" stroke-width="0.825" opacity="0.85"/>',
+            "</g>",
+            '<g fill="#fff" opacity="0.88" filter="url(#pfP)">'
+            '<circle cx="240" cy="225" r="4.675"/><circle cx="960" cy="225" r="4.675"/>'
+            '<circle cx="960" cy="945" r="4.675"/><circle cx="240" cy="945" r="4.675"/>'
+            "</g>"
+        );
     }
 
-    // saturate 3, then colour gain 2.6 * (1 - whiten .42) = 1.508, then + 255*.42.
-    // Signed: a saturated channel can dip below 0 before clamping.
-    function _glassChan(int256 c, int256 luma) private pure returns (uint256) {
-        int256 v = (luma + (c - luma) * 3) * 1508 / 1000 + 107;
-        if (v < 0) return 0;
-        if (v > 255) return 255;
-        return uint256(v);
+    // HOT SECTIONS: bright yellow-white flares patched along the whole Hilbert outline
+    // (front border + receding depth edges) via an irregular dash + dash-offset, glowing
+    // (#nfF) over a white core. Drawn ON TOP of the frame. A 2D-only flourish (the 3D Hilbert
+    // line is uniform), so it has no 3D counterpart to mirror — but the offset is derived from
+    // the permanent `seed` (like the edge points + banner), NOT the mutable slot, so the flare
+    // pattern is a stable part of the cube's identity and does not shift when a cube moves.
+    // Dash "5 6 9 7 4 5 11 8" and hotW .3 x25 -> raw; hotOp .66. (Tuned in tmp/line-lab.html.)
+    function _hotSections(bytes32 seed) private pure returns (string memory) {
+        string memory front = _frontBorderRaw();
+        string memory d = "M100 85L240 225M1100 85L960 225M240 225L240 945M960 225L960 945";
+        // Offset within the dash period (sum of the dash array = 1375) -> full flare variation.
+        uint256 off = uint256(keccak256(abi.encodePacked(seed, "hot"))) % 1375;
+        return string.concat(
+            '<g fill="none" stroke-linecap="round" opacity="0.66" stroke-dasharray="125 150 225 175 100 125 275 200" stroke-dashoffset="', off.toString(), '">',
+            '<g stroke="#fff2a0" filter="url(#nfF)"><path d="', front, '" stroke-width="7.5"/><path d="', d, '" stroke-width="7.5"/></g>',
+            '<g stroke="#fffbe6"><path d="', front, '" stroke-width="3"/><path d="', d, '" stroke-width="3"/></g>',
+            "</g>"
+        );
     }
 
-    // RGB light field at (px,py) for the rotated triangle L = [Rx,Ry,Gx,Gy,Bx,By].
-    // Each light a = R2/(R2+d^2); saturate to the dominant hue, then whiten where
-    // lights overlap (scaled by whiteBloom .15).
-    function _lightColor(uint256 px, uint256 py, uint256[6] memory L)
-        private
-        pure
-        returns (uint256 R8, uint256 G8, uint256 B8)
-    {
-        uint256 r = _lightA(px, py, L[0], L[1]);
-        uint256 g = _lightA(px, py, L[2], L[3]);
-        uint256 b = _lightA(px, py, L[4], L[5]);
-        uint256 mx = r;
-        if (g > mx) mx = g;
-        if (b > mx) mx = b;
-        if (mx == 0) mx = 1;
-        uint256 R = r * 10000 / mx;
-        uint256 G = g * 10000 / mx;
-        uint256 B = b * 10000 / mx;
-        uint256 sum = r + g + b;
-        uint256 white = (sum > 13000 ? (sum - 13000) / 2 : 0) * 15 / 100; // whiteBloom .15
-        if (white > 10000) white = 10000;
-        R = R + (10000 - R) * white / 10000;
-        G = G + (10000 - G) * white / 10000;
-        B = B + (10000 - B) * white / 10000;
-        R8 = R * 255 / 10000;
-        G8 = G * 255 / 10000;
-        B8 = B * 255 / 10000;
-    }
-
-    function _lightA(uint256 px, uint256 py, uint256 lx, uint256 ly) private pure returns (uint256) {
-        uint256 dx = px > lx ? px - lx : lx - px;
-        uint256 dy = py > ly ? py - ly : ly - py;
-        return GLASS_R2 * 10000 / (GLASS_R2 + dx * dx + dy * dy);
-    }
-
-    // Three light positions on a 120deg triangle, rotated `rot` degrees about the
-    // centre. L = [Rx,Ry, Gx,Gy, Bx,By] in viewBox px.
-    function _lights(uint256 rot) private pure returns (uint256[6] memory L) {
-        L[0] = _lpos(GLASS_CX, _cos1e4(rot));       L[1] = _lpos(GLASS_CY, _sin1e4(rot));
-        L[2] = _lpos(GLASS_CX, _cos1e4(rot + 120)); L[3] = _lpos(GLASS_CY, _sin1e4(rot + 120));
-        L[4] = _lpos(GLASS_CX, _cos1e4(rot + 240)); L[5] = _lpos(GLASS_CY, _sin1e4(rot + 240));
-    }
-
-    function _lpos(int256 centre, int256 trig1e4) private pure returns (uint256) {
-        return uint256(centre + GLASS_SPREAD * trig1e4 / 10000); // 200..1000, always > 0
-    }
-
-    // sin(deg) x10000 via Bhaskara I: sin x ~= 4x(180-x)/(40500 - x(180-x)).
-    function _sin1e4(uint256 deg) private pure returns (int256) {
-        deg = deg % 360;
-        bool neg = deg >= 180;
-        uint256 x = neg ? deg - 180 : deg;    // 0..179
-        uint256 num = 4 * x * (180 - x);      // 0..32400
-        uint256 den = 40500 - x * (180 - x);  // 32400..40500
-        int256 s = int256(num * 10000 / den); // 0..10000
-        return neg ? -s : s;
-    }
-
-    function _cos1e4(uint256 deg) private pure returns (int256) {
-        return _sin1e4(deg + 90);
-    }
-
-    // Format an x1000 opacity fixed-point (0..1000) as an SVG decimal (".07", ".88", "1").
-    function _dec2(uint256 fp) private pure returns (string memory) {
-        if (fp >= 1000) return "1";
-        uint256 d = fp / 10;
-        return string.concat(".", d < 10 ? "0" : "", d.toString());
+    // The front frame ∪ (fixed open-top: bottom + left + right) in raw 1200-space — byte-identical
+    // to CubeFrameLayer._borderPath, so the hot flares trace the drawn frame exactly.
+    function _frontBorderRaw() private pure returns (string memory) {
+        return "M100 1085H1100M100 85V1085M1100 85V1085";
     }
 
     // --- Stone walkers --------------------------------------------------------
@@ -840,14 +815,7 @@ contract CubeThumbnailRendererV1 {
         return 0x2EBA; // '#' (centre bar + two crossbars, matches viewer label.js 3x5 font)
     }
 
-    // Forest: thin inward strands from active edge points to a hub, branching to
-    // tips; each tip carries a turbulence particle-cloud (colour + white passes).
-    // Two colour passes (walker rule): ~1 in 3 owned strands take the unique
-    // (figure) plane colour, the rest the doubled side-plane colour, so the forest
-    // reads e.g. "blue + 2x red" like the walkers. Each pass draws thin cores +
-    // faint turbulence clouds (gradient #cg = unique, #cg2 = side). The wide blurred
-    // glow pass was dropped (lab glowOp=0) — the thin core + soft cloud reads cleaner
-    // and halves the strand element count.
+    // Read bit `index` from the packed 40x40 (1 bit/cell) silhouette.
     function _bitmapBit(bytes memory raw, uint256 index) private pure returns (bool) {
         uint256 byteIndex = index / 8;
         uint256 bitIndex = 7 - (index % 8);

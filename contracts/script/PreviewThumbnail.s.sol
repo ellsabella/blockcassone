@@ -84,7 +84,7 @@ contract PreviewThumbnail is Script {
         Env memory e;
         e.forked = forked;
         e.normies = new PreviewMockNormies();
-        e.cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(e.normies), 4096, DEV);
+        e.cubes = new CubeNFT("TheBLOCK", "BLOCK", address(e.normies), 4096, DEV);
         e.thumb = new CubeThumbnailRendererV1(
             e.cubes,
             address(e.normies),

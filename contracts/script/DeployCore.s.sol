@@ -39,8 +39,8 @@ contract DeployCore is Script {
         uint32 totalSlots
     ) internal returns (Deployment memory deployment) {
         deployment.cubes = new CubeNFT(
-            "Blockcassone Cubes",
-            "CUBE",
+            "TheBLOCK",
+            "BLOCK",
             normies,
             totalSlots,
             address(this)

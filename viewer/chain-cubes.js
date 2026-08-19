@@ -1,5 +1,5 @@
 import { NORMIES_CONTRACT } from './wallet-nfts.js';
-import { compactNormieArtFromRaw } from './art-snapshot.js';
+import { compactNormieArtFromRaw, compactNonNormieArt } from './art-snapshot.js';
 import { startRpc, recordHydration } from './perf-metrics.js';
 
 const SELECTORS = {
@@ -8,6 +8,7 @@ const SELECTORS = {
   resolvedCubeData: '0xc7f1b0a2',
   ownerOf: '0x6352211e',
   rawImageData: '0x6985bf3c',
+  payloadForCube: '0x28d846fa', // NonNormieArtStore.payloadForCube(uint256)
 };
 
 let configCache = null;
@@ -72,6 +73,8 @@ async function loadChainConfig() {
         chainId: Number(raw?.chainId || 0),
         cubeNft,
         genesisMinter: normalizeAddress(raw?.genesisMinter),
+        nonNormieStore: normalizeAddress(raw?.nonNormieStore),
+        cc0Pool: Array.isArray(raw?.cc0Pool) ? raw.cc0Pool : [],
         normies: normalizeAddress(raw?.normies) || NORMIES_CONTRACT,
         normieStorage: normalizeAddress(raw?.normieStorage) || normalizeAddress(raw?.normies) || NORMIES_CONTRACT,
         maxCubes: Math.max(1, Math.min(4096, Number(raw?.maxCubes || 4096))),
@@ -143,6 +146,11 @@ function recordFromChain(config, cubeId, owner, dataHex) {
   const sourceContract = addressWord(row[8]);
   const sourceTokenId = numberWord(row[9]);
   const sourceKind = sourceKindNumber === 1 ? 'normie' : 'external';
+  // Resolve the CC0 collection name (Chain Runners / Nouns / …) from the deploy-declared
+  // cc0Pool so cubes label as "Nouns #3001" instead of a bare "Source #…".
+  const poolName = sourceKind === 'external'
+    ? (config.cc0Pool || []).find(p => String(p.contract || '').toLowerCase() === sourceContract)?.name
+    : '';
 
   return {
     cubeId,
@@ -156,7 +164,7 @@ function recordFromChain(config, cubeId, owner, dataHex) {
       contract: sourceContract,
       tokenId: String(sourceTokenId),
     },
-    cc0: null,
+    cc0: poolName ? { projectName: poolName } : null,
     agentic: numberWord(row[4]) !== 0,
     agentId: numberWord(row[5]) ? String(numberWord(row[5])) : '',
     seed: bytes32Word(row[10]),
@@ -222,6 +230,30 @@ async function hydrateNormieArt(config, records) {
   }
 }
 
+// Hydrate .art for external (CC0) cubes by batching payloadForCube(cubeId) from the
+// NonNormieArtStore and packing the 400-byte 2-bit tonal into the compact art shape the
+// scene builder consumes. Mirrors hydrateNormieArt. A stub/absent payload (length != 400)
+// is skipped, so a cube with no committed art just renders blank rather than erroring.
+async function hydrateNonNormieArt(config, records) {
+  if (!config.nonNormieStore) return;
+  const ext = records.filter(r => r && r.sourceKind === 'external' && !r.art);
+  const chunkSize = 60;
+  for (let offset = 0; offset < ext.length; offset += chunkSize) {
+    const chunk = ext.slice(offset, offset + chunkSize);
+    const calls = chunk.map(r => ({ to: config.nonNormieStore, data: calldata(SELECTORS.payloadForCube, r.cubeId) }));
+    try {
+      const rows = await batchCall(config, calls);
+      for (let i = 0; i < chunk.length; i++) {
+        const tonal = decodeAbiBytes(rows[i]);
+        if (tonal.length !== 400) continue;
+        chunk[i].art = compactNonNormieArt({ id: Number(chunk[i].source?.tokenId) || chunk[i].cubeId, tonal });
+      }
+    } catch (err) {
+      console.warn('[chain-cubes] non-normie art hydration failed', err);
+    }
+  }
+}
+
 export async function loadChainMintRecords() {
   const config = await loadChainConfig();
   if (!config.enabled) return { enabled: false, records: [] };
@@ -233,6 +265,7 @@ export async function loadChainMintRecords() {
     const snapRecords = await loadSnapshotRecords(config);
     if (snapRecords) {
       await hydrateNormieArt(config, snapRecords);
+      await hydrateNonNormieArt(config, snapRecords);
       const snapEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
       recordHydration(snapEnd - hydrateStart, snapRecords.length);
       return { enabled: true, config, records: snapRecords };
@@ -297,6 +330,7 @@ export async function loadChainMintRecords() {
     }
   }
 
+  await hydrateNonNormieArt(config, records);
   const hydrateEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
   recordHydration(hydrateEnd - hydrateStart, records.length);
   return { enabled: true, config, records };

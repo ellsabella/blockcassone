@@ -24,6 +24,17 @@ function loadEnvFile() {
 }
 loadEnvFile();
 
+// Kill-switch: with REGISTRATION_CLOSED set, every HTML route (root + SPA fallback) serves the
+// static "allowlist closed" page instead of the app. Real assets (cube-bg, planes, font) still
+// serve normally so the closed page renders. Pairs with the same flag's API seal in api.mjs.
+const CLOSED = /^(1|true|yes|on)$/i.test(process.env.REGISTRATION_CLOSED || '');
+// SITE_MODE picks the landing page: 'checker' → the FCFS/GTD checker, 'closed' → the closed page.
+// REGISTRATION_CLOSED still forces the closed page unless SITE_MODE=checker is explicitly set.
+const SITE_MODE = String(process.env.SITE_MODE || '').toLowerCase();
+const LANDING = SITE_MODE === 'checker' ? 'checker.html'
+  : (SITE_MODE === 'closed' || CLOSED) ? 'closed.html'
+  : 'index.html';
+
 const api = createApiHandler(process.env);
 
 const MIME = {
@@ -42,14 +53,14 @@ function securityHeaders(res) {
 function serveStatic(req, res) {
   const url = new URL(req.url, 'http://x');
   let rel = decodeURIComponent(url.pathname);
-  if (rel === '/' || rel === '') rel = '/index.html';
+  if (rel === '/' || rel === '') rel = '/' + LANDING;
   const abs = path.join(DIST, rel);
   // Path-traversal guard: resolved path must stay inside DIST.
   if (!abs.startsWith(DIST + path.sep) && abs !== DIST) { res.statusCode = 403; res.end('forbidden'); return; }
   fs.stat(abs, (err, st) => {
     if (err || !st.isFile()) {
-      // SPA fallback → index.html
-      const idx = path.join(DIST, 'index.html');
+      // SPA fallback → the app's index.html (or the closed page when REGISTRATION_CLOSED is set)
+      const idx = path.join(DIST, LANDING);
       res.statusCode = 200; res.setHeader('content-type', MIME['.html']);
       fs.createReadStream(idx).pipe(res);
       return;

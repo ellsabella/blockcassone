@@ -7,7 +7,10 @@ pragma solidity ^0.8.26;
 ///         NormiesFont.otf via dev/extract-hex-glyphs.py. Render each at `scale(cell/1000)`.
 ///         The glyph index IS the nibble value (0..15), so no character mapping is needed.
 library NormieHexGlyphs {
-    function path(uint256 v) internal pure returns (string memory) {
+    // `public` (not `internal`) so this library's ~2.6KB of glyph paths deploys as its OWN
+    // contract and is DELEGATECALL-linked, keeping it out of CubeThumbnailRendererV1's
+    // bytecode (which was over the 24576-byte limit). It's a view path, so the call is free.
+    function path(uint256 v) public pure returns (string memory) {
         if (v == 0) return "M266 382H422V226H266ZM422 382H578V226H422ZM110 538H266V382H110ZM578 538H734V382H578ZM110 694H266V538H110ZM578 694H734V538H578ZM266 850H422V694H266ZM422 850H578V694H422Z";
         if (v == 1) return "M110 382H266V226H110ZM266 382H422V226H266ZM266 538H422V382H266ZM266 694H422V538H266ZM266 850H422V694H266Z";
         if (v == 2) return "M266 382H422V226H266ZM422 382H578V226H422ZM110 538H266V382H110ZM578 538H734V382H578ZM422 694H578V538H422ZM110 850H266V694H110ZM266 850H422V694H266Z";

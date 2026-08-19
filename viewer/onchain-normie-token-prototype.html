@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Blockcassone Onchain Normie Token Prototype</title>
+  <title>TheBLOCK Onchain Normie Token Prototype</title>
   <style>
     html, body {
       margin: 0;
@@ -190,7 +190,7 @@
 
       const on = pixels.reduce((sum, v) => sum + v, 0);
       hud.textContent =
-        `Blockcassone Cube #${TOKEN.tokenId}\n` +
+        `TheBLOCK #${TOKEN.tokenId}\n` +
         `Normie #${TOKEN.sourceTokenId} | plot ${TOKEN.slot} | region ${Math.floor(TOKEN.slot / 512)} | neighbourhood ${Math.floor(TOKEN.slot / 64)} | street ${Math.floor(TOKEN.slot / 8)}\n` +
         `${sourceLabel} | ${rawHex.length / 2} bytes | ${on}/${PIXELS} lit pixels\n` +
         "drag orbit | wheel zoom | double-click reset | add ?api&normie=6722 to compare dev API pixels";

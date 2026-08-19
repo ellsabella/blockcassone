@@ -1,5 +1,5 @@
 /**
- * Blockcassone Global Configuration
+ * TheBLOCK Global Configuration
  *
  * Single source of truth for all colours, materials, and shared constants.
  * Both the main renderer and dev tools reference this file.

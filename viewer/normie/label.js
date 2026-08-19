@@ -1,7 +1,7 @@
 // Normie ID label — "#NNNN" pixel-font glyphs in the bottom-right of each plane.
 
 import { mat4, identity } from '../../renderer/src/math.js';
-import { uvToWorld, planeBasis } from '../materials/plane-2d.js';
+import { uvToWorld, planeBasis, artCorners } from '../materials/plane-2d.js';
 import { buildCoreLineMesh, buildGlowLineMesh, planePerpFn } from '../materials/line-mesh.js';
 import { normieIdForCube } from './status.js';
 import { axisColorLinear, luminescentTint } from './outlines.js';
@@ -98,7 +98,7 @@ export function buildIdLabelFor(plane, gl, meshes, id, prefix) {
       if (!isFilled(col, row + 1)) segs.push({ ua: u0, va: v1, ub: u1, vb: v1 });
     }
 
-    const p    = plane.vertices.positions;
+    const p    = artCorners(plane);
     const flat = new Float32Array(segs.length * 6);
     let i = 0;
     for (const { ua, va, ub, vb } of segs) {

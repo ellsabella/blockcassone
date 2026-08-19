@@ -1,4 +1,4 @@
-# Blockcassone World And Mint Requirements
+# TheBLOCK World And Mint Requirements
 
 This document captures the current product direction for the dev pipeline, mint
 site, world model, and contract architecture.
@@ -44,7 +44,7 @@ is ingested at mint.
 **Minting happens on OpenSea via SeaDrop — not on our sites.** OpenSea's mint UI
 and the SeaDrop contract handle the transaction; the only inputs at mint time are
 the minter wallet and a quantity. Our sites carry **no mint button** (the Big Cube
-mint/sim controls are removed). Everything Blockcassone-specific — which source
+mint/sim controls are removed). Everything TheBLOCK-specific — which source
 art a cube gets and its plot placement — is assigned by our SeaDrop mint hook
 (`MultiSourceGenesisMinter`) when the mint transaction runs.
 
@@ -59,17 +59,18 @@ now). The mint may be closed before 4096 sell out (see "Partial mint").
    supported** — a hot wallet acting for a vault), and the page reads the
    qualifying source assets across the six genesis collections. It surfaces the
    entitlement, e.g. *"You own 3 Normies, 1 Chain Runner, 0 Nouns → 4 qualifying,
-   capped at 3 GTD spots"*, and the holder signs an **ownership attestation** for
+   capped at 5 GTD spots"*, and the holder signs an **ownership attestation** for
    that wallet.
    Crucially the page shows **thumbnails of the holder's qualifying artworks and
    lets them choose which specific artworks they want turned into cubes**. That
    selection is captured; a backend script verifies the attested wallet actually
    controls those assets (pass/fail); approved wallet→artwork reservations are
    baked on-chain before the drop. When a GTD holder mints their quantity on
-   OpenSea, the hook assigns **their chosen artworks**. Entitlement is 1
-   guaranteed spot per qualifying asset, **capped at 3 per wallet** (provisional);
-   total GTD size TBD. Reserved-but-unminted sources **release back to the pool**
-   when the GTD window closes.
+   OpenSea, the hook assigns **their chosen artworks**. Entitlement is weighted
+   by collection (see `allowlist/src/config.js` spotWeights), **capped at 5 per
+   wallet**; total GTD size TBD. Reserved-but-unminted sources **release back to
+   the pool** when the GTD window closes (on-chain `gtdEndTime`: releases are
+   time-locked until then, permissionless after — see `allowlist/release-keeper.mjs`).
 
 2. **FCFS allowlist** — the wider Normie + CC0 community, first-come-first-served
    via a **simple token-gate** allowlist (holds a qualifying asset ⇒ eligible).
@@ -86,11 +87,13 @@ now). The mint may be closed before 4096 sell out (see "Partial mint").
 - **FCFS + Public:** a seeded-PRNG single-draw over the remaining per-collection
   allocation (the locked 1679/901/655/410/328/123 split) → collection + token.
 
-Contract implication (build phase): the minter needs a **reservation registry**
-(wallet → ordered source tokens) consulted first by the SeaDrop hook, falling
-back to the random pool draw. FCFS token-gating is a SeaDrop allowlist stage
-(merkle of qualifying holders). This differs from the current
-`MultiSourceGenesisMinter` (snapshot-Normie allowlist + random public).
+Contract status (BUILT): the minter has the **reservation registry** (wallet →
+ordered source tokens) consulted first by the SeaDrop hook, falling back to the
+random pool draw, plus an **on-chain GTD window** (`gtdEndTime`): while it is
+open only reserved art can mint (random draws revert) and reservations cannot be
+released; after it passes, releases are permissionless. FCFS token-gating is a
+SeaDrop allowlist stage — GTD and FCFS leaves live in ONE merkle tree
+(`allowlist/merkle.mjs`) because SeaDrop stores a single root per token.
 
 ### Delegation + attestation (landing page)
 

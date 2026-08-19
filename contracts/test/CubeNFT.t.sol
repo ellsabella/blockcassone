@@ -43,7 +43,7 @@ contract CubeNFTTest is Test {
         externalNft = new MockERC721("External", "EXT");
         renderer = new MockCubeRenderer();
         agentRegistry = new AgentStatusRegistry(OWNER);
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 64, OWNER);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 64, OWNER);
 
         normies.mint(MINTER, 101);
         normies.mint(OTHER, 202);

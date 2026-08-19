@@ -3,6 +3,7 @@ import { useAccount, usePublicClient, useSignTypedData } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { CONFIG, entitlementFor } from './config.js';
 import { resolveHoldings } from './lib.js';
+import { turnstileToken } from './turnstile.js';
 
 const keyOf = h => `${h.collectionId}:${h.tokenId}`;
 
@@ -127,9 +128,13 @@ export default function App() {
         wallet: address, kind: 'gtd', vaults: message.vaults,
         sources: chosen.map(h => ({ collectionId: h.collectionId, tokenId: h.tokenId, contractAddr: h.contractAddr })),
         issuedAt: String(issuedAt), nonce, signature,
+        // Optional X handle for the pre-launch group chat (unsigned; outreach only).
+        handle: handle.trim().replace(/^@+/, '').slice(0, CONFIG.interestHandleMax),
         // Client-reported entitlement (unsigned) — review triage only; re-verified on-chain.
         entitlement: { normies: entitlement.normies, other: entitlement.other, spots: cap },
       };
+      try { payload.turnstileToken = await turnstileToken(); }
+      catch { setStatus('Bot check failed — please try again.'); return; }
       setStatus('Submitting…');
       // The backend appends the signed request to the collected dataset (the source of
       // truth for review). A local mirror guards against the backend being unreachable.
@@ -173,6 +178,8 @@ export default function App() {
         // Client-reported holdings (unsigned) — triage only; FCFS eligibility re-verified on-chain.
         heldSummary: { normies: entitlement.normies, other: entitlement.other },
       };
+      try { payload.turnstileToken = await turnstileToken(); }
+      catch { setStatus('Bot check failed — please try again.'); return; }
       setStatus('Submitting…');
       let backendUnreachable = false;
       try {
@@ -196,15 +203,13 @@ export default function App() {
 
   const interestCTA = (note) => (
     <div className="interest">
-      <div className="muted">{note}</div>
-      <div className="interest-row">
-        <input
-          className="handle-input" type="text" spellCheck={false} value={handle}
-          placeholder="@yourhandle (optional)" maxLength={CONFIG.interestHandleMax + 1}
-          onChange={e => setHandle(e.target.value)}
-        />
-        <button className="cta small" onClick={attestInterest}>REGISTER INTEREST ▸</button>
-      </div>
+      <div className="handle-note">{note}</div>
+      <input
+        className="handle-input wide" type="text" spellCheck={false} value={handle}
+        placeholder="@yourhandle (optional)" maxLength={CONFIG.interestHandleMax + 1}
+        onChange={e => setHandle(e.target.value)}
+      />
+      <button className="cta wide" onClick={attestInterest}>SIGN TO REGISTER ▸</button>
     </div>
   );
 
@@ -238,6 +243,7 @@ export default function App() {
         </div>
       ) : finished ? (
         <div className="finished">
+          <h1 className="blockword finished-title">BLOCKS</h1>
           <PlaneShow />
           <div className="thanks">thank you for registering</div>
           <div className="dims">1-D ---&gt; 2-D ---&gt; 3-D</div>
@@ -245,14 +251,9 @@ export default function App() {
       ) : done && done.kind === 'interest' ? (
         <div className="content done">
           <div className="check">✓</div>
-          <h2>You're on the interest list</h2>
-          <p className="muted">
-            Thanks for registering{done.handle ? ` (@${done.handle})` : ''}.{' '}
-            {(Number(done.heldSummary?.normies || 0) + Number(done.heldSummary?.other || 0)) > 0
-              ? 'As a holder of a qualifying asset you\'re eligible for the FCFS phase — '
-              : ''}
-            we'll announce FCFS + public mint details. Follow{' '}
-            <a href="https://x.com/bright_lightart" target="_blank" rel="noreferrer">@bright_lightart</a> for updates.
+          <h2 className="thanks-msg">thank you for registering</h2>
+          <p className="follow-line">
+            follow <a href="https://x.com/bright_lightart" target="_blank" rel="noreferrer">@bright_lightart</a> for updates
           </p>
           <button className="cta small close-btn" onClick={() => setFinished(true)}>CLOSE</button>
         </div>
@@ -277,33 +278,41 @@ export default function App() {
             <div className="brand">THE BLOCK</div>
             <ConnectButton showBalance={false} chainStatus="none" accountStatus="avatar" />
           </div>
-          <h2>Choose your candidates</h2>
-
           {loading ? (
-            <div className="muted big">Reading your holdings + delegations…</div>
+            <div className="apply-fcfs">
+              <h2 className="apply-title">Apply for Allowlist</h2>
+              <div className="muted big">Reading your holdings + delegations…</div>
+            </div>
           ) : holdings.length === 0 ? (
-            <>
-              <div className="muted big">No qualifying assets in this wallet or its delegations.</div>
-              {interestCTA('Register your interest to hear about the FCFS + public mint.')}
-            </>
+            <div className="apply-fcfs">
+              <h2 className="apply-title">Apply for Allowlist</h2>
+              <div className="eligibility">
+                <div className="elig-dim">You are not eligible for the GTD phase.</div>
+                <div className="elig-bright">Sign a message to register for the FCFS phase.</div>
+              </div>
+              {interestCTA('Optional — add your X handle if you want in to the group chat before launch.')}
+            </div>
           ) : cap === 0 ? (
-            <>
-              <div className="entitle">
+            <div className="apply-fcfs">
+              <h2 className="apply-title">Apply for Allowlist</h2>
+              <div className="entitle centered">
                 {[...counts.entries()].map(([name, n]) => <span className="hold" key={name}><b>{n}</b> {name}</span>)}
               </div>
-              <div className="muted big">
-                That doesn't reach a guaranteed spot yet — a spot needs <b>1 Normie</b>, or <b>4 items</b> from the
-                other collections (each worth ¼ spot). Your {entitlement.other} other item{entitlement.other === 1 ? '' : 's'} = {entitlement.raw} spot.
+              <div className="eligibility">
+                <div className="elig-dim">Your holdings don't reach a guaranteed GTD spot yet ({entitlement.raw} of 1).</div>
+                <div className="elig-bright">Sign a message to register for the FCFS phase.</div>
               </div>
-              {interestCTA('You still qualify for the FCFS phase — register your interest to be added.')}
-            </>
+              {interestCTA('Optional — add your X handle if you want in to the group chat before launch.')}
+            </div>
           ) : (
             <>
+              <h2 className="eligible-title">Congratulations! You are eligible.</h2>
+              <div className="eligible-sub">Choose your candidates&hellip;</div>
               <div className="entitle">
                 {[...counts.entries()].map(([name, n]) => <span className="hold" key={name}><b>{n}</b> {name}</span>)}
                 <span className="entitle-spots">→ <b>{cap}</b> guaranteed spot{cap > 1 ? 's' : ''}</span>
               </div>
-              <div className="weighting">1 Normie = 1 spot · each other item = ¼ spot · max {CONFIG.gtdCapPerWallet}. Pick up to {cap}.</div>
+              <div className="weighting">Normie / Kevin / Noun = 1 spot · Chain Runner = ½ · 1337 Skull = ½ · Baby Pepe = ¼ · max {CONFIG.gtdCapPerWallet}. Pick up to {cap}.</div>
 
               <div className={'art-grid' + (selected.size >= cap ? ' full' : '')}>
                 {holdings.map(h => {
@@ -317,10 +326,17 @@ export default function App() {
                 })}
               </div>
 
-              <div className="submitbar">
-                <span className="muted">{selected.size} / {cap} selected</span>
-                <button className="cta small" disabled={!selected.size} onClick={attest}>SUBMIT ▸</button>
+              <div className="handle-block">
+                <div className="handle-note">Provide your X handle if you want to be added to the BLOCKS group chat before launch.</div>
+                <input
+                  className="handle-input" type="text" spellCheck={false} value={handle}
+                  placeholder="@yourhandle (optional)" maxLength={CONFIG.interestHandleMax + 1}
+                  onChange={e => setHandle(e.target.value)}
+                />
               </div>
+
+              <div className="selcount muted">{selected.size} / {cap} selected</div>
+              <button className="cta wide" disabled={!selected.size} onClick={attest}>SIGN TO REGISTER ▸</button>
             </>
           )}
           {status && <div className="status err">{status}</div>}

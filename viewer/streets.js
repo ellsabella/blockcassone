@@ -5,10 +5,11 @@
 
 import { loadChainMintRecords } from './chain-cubes.js';
 import {
-  moveCube, mergeStreet, quoteMove, quoteMerge, cubeThumbnailSVG,
+  moveCube, mergeStreet, quoteMove, quoteMerge, cubeThumbnailSVG, cubeAnimationURI,
+  thumbnailAtSlotSVG, movedAnimationURI,
   contractFlags, setTransactionSender,
 } from './preview-chain.js';
-import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js';
+import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js?v=20260806-1';
 import { biomeForStreet } from './cube-env.js';
 
 const $ = id => document.getElementById(id);
@@ -24,7 +25,7 @@ function glyph(seed){const s=(typeof seed==='string'?parseInt(String(seed).slice
 
 const els = {};
 const S = { mode:'mine', me:null, flags:null, recs:[], bySlot:new Map(), merged:new Set(),
-  myStreets:[], myCubes:[], detail:null, staged:null, moveCube:null, filters:new Set(), thumbCache:new Map() };
+  myStreets:[], myCubes:[], detail:null, staged:null, moveCube:null, moveTarget:null, previewTok:0, filters:new Set(), thumbCache:new Map() };
 
 // ---------- boot ----------
 (async function init(){
@@ -33,7 +34,7 @@ const S = { mode:'mine', me:null, flags:null, recs:[], bySlot:new Map(), merged:
   S.flags=flags;
   if (flags && !flags.movesEnabled && !flags.mergesEnabled){ $('app').style.display='none'; $('gate').style.display='flex'; return; }
   let cfg={}; try{ cfg=await (await fetch('/data/chain-config.json',{cache:'no-store'})).json(); }catch{}
-  mountConnectButton($('wallet-connect'), { chainId:cfg.chainId, rpcUrl:cfg.rpcUrl, chainName:'Blockcassone', onChange:onWallet });
+  mountConnectButton($('wallet-connect'), { chainId:cfg.chainId, rpcUrl:cfg.rpcUrl, chainName:'TheBLOCK', onChange:onWallet });
   wireStatic();
   renderMine();
 })();
@@ -53,6 +54,10 @@ async function loadWorld(){
   for (const r of recs){ S.bySlot.set(Number(r.slot), r); if (r.sourceKindNumber===3) S.merged.add(Math.floor(Number(r.slot)/8)); }
   S.myCubes = recs.filter(r=>r.sourceKindNumber!==3 && String(r.wallet||'').toLowerCase()===S.me)
     .map(r=>({cubeId:r.cubeId, slot:Number(r.slot), seed:r.seed, biome:biomeForStreet(Math.floor(Number(r.slot)/8))}));
+  // Merged streets you own — a whole street collapsed into one token (sourceKind 3). Shown
+  // as their own highlighted cards, not in the active-street list (they can't merge again).
+  S.myMerged = recs.filter(r=>r.sourceKindNumber===3 && String(r.wallet||'').toLowerCase()===S.me)
+    .map(r=>({sid:Math.floor(Number(r.slot)/8), cubeId:r.cubeId, seed:r.seed, biome:biomeForStreet(Math.floor(Number(r.slot)/8))}));
   const sids=new Set(S.myCubes.map(c=>Math.floor(c.slot/8)).filter(sid=>!S.merged.has(sid)));
   S.myStreets=[...sids].map(streetData);
   S.mode==='mine'?renderMine():renderMove();
@@ -73,7 +78,7 @@ function analyze(s){const c=count(s),me=c.me,rival=c.rival,vac=c.vac;
   if(me+vac>=5) return {kind:'grow',need:5-me,d:(5-me)+rival};
   return {kind:'locked',d:100};}
 function actionLine(s){const c=count(s),m=analyze(s),wf=s.biome.weight;
-  if(m.kind==='ready') return {lead:'MERGE NOW → 1 golden',fee:'free'};
+  if(m.kind==='ready') return {lead:'MERGE NOW → merged street',fee:'free'};
   if(m.kind==='fill') return {lead:`move in ${m.need} more → MERGE`,fee:''};
   if(m.kind==='evict') return {lead:`evict ${c.rival} rival${c.rival>1?'s':''} → MERGE`,fee:'from '+fmtEth(1e15+(wf-1)*1e16)};
   if(m.kind==='grow') return {lead:`move in ${m.need} to take control`,fee:''};
@@ -82,13 +87,34 @@ function actionLine(s){const c=count(s),m=analyze(s),wf=s.biome.weight;
 // ---------- MY STREETS ----------
 function renderMine(){
   if (!S.me){ els.view.innerHTML=`<div class="empty">connect a wallet to see your streets</div>`; return; }
-  if (!S.myStreets.length){ els.view.innerHTML=`<div class="empty">you don't hold a cube on any street yet.<br>use “Move a cube” to stake one.</div>`; return; }
+  const merged=S.myMerged||[];
+  if (!S.myStreets.length && !merged.length){ els.view.innerHTML=`<div class="empty">you don't hold a cube on any street yet.<br>use “Move a cube” to stake one.</div>`; return; }
   const sorted=[...S.myStreets].sort((a,b)=>analyze(a).d-analyze(b).d);
-  els.view.innerHTML=`<div class="barrow">your streets · sorted by <b style="color:var(--ink);margin-left:4px">closest to merge</b></div>
-    <div class="list">${sorted.map(cardHTML).join('')}</div>
+  const mergedSec = merged.length ? `<div class="barrow">✦ your <b style="color:#ffd479;margin-left:4px">merged streets</b></div>
+    <div class="list">${merged.map(mergedCardHTML).join('')}</div>` : '';
+  const streetsSec = sorted.length ? `<div class="barrow">your streets · sorted by <b style="color:var(--ink);margin-left:4px">closest to merge</b></div>
+    <div class="list">${sorted.map(cardHTML).join('')}</div>` : '';
+  els.view.innerHTML=`${mergedSec}${streetsSec}
     <div class="legend"><span><i class="me"></i>yours</span><span><i class="rv"></i>rival</span><span><i class="vc"></i>vacant</span></div>`;
-  els.view.querySelectorAll('.card').forEach(el=>el.onclick=()=>openDetail(S.myStreets.find(s=>s.sid==el.dataset.sid)));
+  els.view.querySelectorAll('.card:not(.merged)').forEach(el=>el.onclick=()=>openDetail(S.myStreets.find(s=>s.sid==el.dataset.sid)));
+  loadMergedThumbs();
 }
+// A merged street: one token that IS the whole street. Highlighted gold, badged, not clickable
+// into the merge flow (nothing left to do). Shows its on-chain thumbnail once loaded.
+function mergedCardHTML(s){ const anim=S.animCache&&S.animCache.get(s.cubeId);
+  const media = anim
+    ? `<iframe class="m3d" src="${anim}" sandbox="allow-scripts" loading="lazy" title="Street ${s.sid} live"></iframe>`
+    : `<div class="mart">${S.thumbCache.get(s.cubeId)||glyph(s.seed)}</div>`;
+  return `<div class="card merged" data-sid="${s.sid}">
+    <div class="hd"><span>✦ Street ${s.sid}</span><span class="biome">${s.biome.emoji} ${s.biome.name}</span><span class="count mbadge">MERGED</span></div>
+    ${media}
+    <div class="act"><span class="lead" style="color:#ffd479">one token · the whole street · cube #${s.cubeId}</span></div></div>`; }
+// 2D thumbnail first (fast), then the live on-chain 3D engine for each merged street.
+async function loadMergedThumbs(){ if(!S.animCache) S.animCache=new Map();
+  for (const s of (S.myMerged||[])){
+    if (!S.thumbCache.has(s.cubeId)){ try{ S.thumbCache.set(s.cubeId, await cubeThumbnailSVG(s.cubeId)); if(S.mode==='mine') renderMine(); }catch{} }
+    if (!S.animCache.has(s.cubeId)){ try{ S.animCache.set(s.cubeId, await cubeAnimationURI(s.cubeId)); if(S.mode==='mine') renderMine(); }catch{ S.animCache.set(s.cubeId,null); } }
+  } }
 function cardHTML(s){const c=count(s),m=analyze(s),a=actionLine(s),cls=m.kind==='ready'?'ready':(m.kind==='locked'?'locked':'');
   return `<div class="card ${cls}" data-sid="${s.sid}">
     <div class="hd"><span>Street ${s.sid}</span><span class="biome">${s.biome.emoji} ${s.biome.name}</span><span class="count">you <b>${c.me}</b>/8</span></div>
@@ -101,6 +127,15 @@ function openDetail(s){ S.detail=s; S.staged=null; renderDetail(); openSheet(); 
 async function loadThumbs(s){
   for (const p of s.plots){ if (!p || S.thumbCache.has(p.cubeId)) continue;
     try{ const svg=await cubeThumbnailSVG(p.cubeId); S.thumbCache.set(p.cubeId,svg); if(S.detail===s) renderDetail(); }catch{} }
+}
+// Lazily fetch each cube's REAL on-chain thumbnail into S.thumbCache, then re-render once so
+// the finder strip + pick-cube popup show the same art as the detail sheet (the `glyph` is only
+// a placeholder shown while loading). Cached → each cube is fetched at most once.
+async function ensureCubeThumbs(cubes, onLoaded){
+  let any=false;
+  for(const c of cubes){ const id=c&&c.cubeId; if(id==null||S.thumbCache.has(id)) continue;
+    try{ S.thumbCache.set(id, await cubeThumbnailSVG(id)); any=true; }catch{} }
+  if(any && onLoaded) onLoaded();
 }
 function renderDetail(){
   const s=S.detail,c=count(s),m=analyze(s);
@@ -121,15 +156,16 @@ function dplot(p,i){const st=S.staged&&S.staged.slotIdx===i?' staged':'';
   const artHtml=S.thumbCache.get(p.cubeId)||glyph(p.seed);
   return `<div class="dplot ${p.owner}${st}" data-i="${i}">${artHtml}<span class="pin">${p.owner==='me'?'you':'rival'}</span></div>`;}
 function statusHTML(s,c,m){
-  if(m.kind==='ready') return `<div class="status ready">✦ Sole occupier of ${c.me} plots, no rivals — <b>merge now</b> into one golden cube. The ${c.vac} vacant plot${c.vac!==1?'s':''} lock into the street; you don't fill them.</div>`;
+  if(m.kind==='ready') return `<div class="status ready">✦ Sole occupier of ${c.me} plots, no rivals — <b>merge now</b> into one merged street. The ${c.vac} vacant plot${c.vac!==1?'s':''} lock into the street; you don't fill them.</div>`;
   if(m.kind==='fill') return `<div class="status">Sole occupier but only ${c.me} filled. Move in <b>${m.need} more</b> of your cubes (tap a vacant plot) to reach 5, then merge.</div>`;
   if(m.kind==='evict') return `<div class="status">You <b>control</b> this street (${c.me}/8). <b>Evict</b> the ${c.rival} rival${c.rival>1?'s':''} — tap a red plot — then merge.</div>`;
   if(m.kind==='grow') return `<div class="status">You hold ${c.me}/8. Move <b>${m.need} more</b> in (tap vacant plots) to reach 5/8 control, then evict.</div>`;
   return `<div class="status">You hold ${c.me}/8 and can't reach 5/8 control here yet.</div>`;}
 function renderDetActions(s,m){
   const a=$('det-actions');
+  if(S.staged){ a.innerHTML=''; return; } // a confirm sheet is showing — don't double the button
   if(m.kind==='ready'){ const on=S.flags?S.flags.mergesEnabled:true;
-    a.innerHTML=`<button class="act merge" id="merge" ${on?'':'disabled'}>⬧ Merge street → 1 golden cube</button><div class="hint">${on?'free · irreversible':'merging is paused on-chain'}</div>`;
+    a.innerHTML=`<button class="act merge" id="merge" ${on?'':'disabled'}>⬧ Merge into one street</button><div class="hint">${on?'free · irreversible':'merging is paused on-chain'}</div>`;
     if(on)$('merge').onclick=()=>stageMerge(); return; }
   a.innerHTML=`<div class="hint">tap a ${count(s).me>=5?'red plot to evict, or a ':''}vacant plot to move a cube in</div>`;
 }
@@ -143,15 +179,15 @@ function onPlot(i){ const s=S.detail,p=s.plots[i];
 // ---------- stage: merge / fill / evict → confirm ----------
 function stageMerge(){ S.staged={type:'merge'}; renderDetail();
   quoteMerge({street:S.detail.sid}).then(q=>{ if(S.staged&&S.staged.type==='merge'){ S.staged.fee=q.fee; renderDetail(); } }).catch(()=>{}); }
-function startFill(i){ const s=S.detail; pickCube('Move which cube here?', s, cube=>{ S.staged={type:'fill',slotIdx:i,incoming:cube,slot:s.base+i}; renderDetail();
+function startFill(i){ const s=S.detail; pickCube('Move which cube here?', s, s.base+i, false, cube=>{ S.staged={type:'fill',slotIdx:i,incoming:cube,slot:s.base+i}; renderDetail();
   quoteMove({cubeId:cube.cubeId,newSlot:s.base+i}).then(q=>{ if(S.staged&&S.staged.incoming===cube){ S.staged.fee=q.fee; renderDetail(); } }).catch(()=>{}); }); }
-function startEvict(i){ const s=S.detail; pickCube('Which of your cubes swaps in?', s, cube=>{ S.staged={type:'evict',slotIdx:i,incoming:cube,slot:s.base+i}; renderDetail();
+function startEvict(i){ const s=S.detail; pickCube('Which of your cubes swaps in?', s, s.base+i, true, cube=>{ S.staged={type:'evict',slotIdx:i,incoming:cube,slot:s.base+i}; renderDetail();
   quoteMove({cubeId:cube.cubeId,newSlot:s.base+i}).then(q=>{ if(S.staged&&S.staged.incoming===cube){ Object.assign(S.staged,{fee:q.fee,victim:q.victim,victimShare:q.victimShare,houseShare:q.houseShare}); renderDetail(); } }).catch(()=>{}); }); }
 
 function stagedHTML(){ if(!S.staged) return ''; const st=S.staged,s=S.detail;
   const quoting='<span style="color:var(--faint)">quoting…</span>';
   if(st.type==='merge') return `<div class="confirm"><h3>Confirm merge</h3>
-    <div class="kv"><span>collapse into 1 golden cube</span><b>7 slots burned</b></div>
+    <div class="kv"><span>collapse into 1 merged street</span><b>7 slots burned</b></div>
     <div class="kv"><span>fee</span><b>${st.fee==null?quoting:fmtEth(st.fee)}</b></div>
     <div class="row" style="margin-top:10px"><button class="act ghost" id="discard">Discard</button><button class="act merge" id="commit">Merge on-chain →</button></div></div>`;
   if(st.type==='fill') return `<div class="confirm"><h3>Confirm move</h3>
@@ -173,35 +209,98 @@ async function commitStaged(){ const st=S.staged,s=S.detail,owner=walletAccount(
   try{
     if(st.type==='merge') await mergeStreet({street:s.sid,owner});
     else await moveCube({cubeId:st.incoming.cubeId,owner,newSlot:st.slot});
-    toast(st.type==='merge'?'✦ Street merged into a golden cube':(st.type==='evict'?'✓ Rival evicted + paid':'✓ Moved in'), st.type==='merge'?'gold':undefined);
-    S.staged=null; closeSheet(); await loadWorld();
+    toast(st.type==='merge'?'✦ Merged into one street':(st.type==='evict'?'✓ Rival evicted + paid':'✓ Moved in'), st.type==='merge'?'gold':undefined);
+    S.staged=null; closeSheet();
+    await loadWorld();
+    // The read RPC can lag the just-mined tx by a block — reload again shortly so the new
+    // merged street / displacement always appears without a manual refresh.
+    setTimeout(loadWorld, 2500);
   }catch(e){ toast((st.type||'action')+' failed: '+msg(e),true); if(btn){btn.disabled=false;renderDetail();} }
 }
 
 // ---------- pick-cube (nested in the sheet) ----------
-function pickCube(title, street, cb){
-  const avail=S.myCubes.filter(c=>Math.floor(c.slot/8)!==street.sid); // a cube from ELSEWHERE swaps in
+function pickCube(title, street, slot, displacement, cb){
+  const avail=S.myCubes.filter(c=>Math.floor(c.slot/8)!==street.sid); // a cube from ELSEWHERE moves in
   if(!avail.length){ toast('you have no cube elsewhere to move in',true); return; }
-  const grid=avail.map(c=>`<div class="pcube" data-id="${c.cubeId}">${glyph(c.seed)}<span class="lab">#${c.cubeId} ${c.biome.emoji}</span></div>`).join('');
   const back=els.sheetbody.innerHTML;
-  els.sheetbody.innerHTML=`<div class="dhd"><span class="t">${esc(title)}</span><button class="close">✕</button></div>
-    <div style="color:var(--faint);font-size:11px;padding:0 0 8px">a cube you hold elsewhere swaps in; the displaced owner takes its old slot</div>
-    <div class="cubegrid">${grid}</div>`;
-  els.sheetbody.querySelector('.close').onclick=()=>{ els.sheetbody.innerHTML=back; renderDetail(); };
-  els.sheetbody.querySelectorAll('.pcube').forEach(el=>el.onclick=()=>{ const cube=avail.find(c=>c.cubeId==el.dataset.id); renderDetail(); cb(cube); });
+  // Only the DISPLACEMENT (evict) case involves a swap; filling a vacant plot does not.
+  const sub=displacement
+    ? 'the cube you pick swaps in; the rival you displace takes your cube&rsquo;s old slot'
+    : 'pick one of your cubes to move into this vacant plot';
+  let feeTxt='quoting…';
+  function paint(){
+    const grid=avail.map(c=>`<div class="pcube" data-id="${c.cubeId}">${S.thumbCache.get(c.cubeId)||glyph(c.seed)}<span class="lab">#${c.cubeId} ${c.biome.emoji}</span></div>`).join('');
+    els.sheetbody.innerHTML=`<div class="dhd"><span class="t">${esc(title)}</span><button class="close">✕</button></div>
+      <div style="color:var(--faint);font-size:11px;padding:0 0 6px">${sub}</div>
+      <div style="font-size:11px;padding:0 0 8px">est. fee <b>${feeTxt}</b> <span style="color:var(--faint)">· exact shown on confirm</span></div>
+      <div class="cubegrid">${grid}</div>`;
+    els.sheetbody.querySelector('.close').onclick=()=>{ els.sheetbody.innerHTML=back; renderDetail(); };
+    els.sheetbody.querySelectorAll('.pcube').forEach(el=>el.onclick=()=>{ const cube=avail.find(c=>c.cubeId==el.dataset.id); renderDetail(); cb(cube); });
+  }
+  paint();
+  ensureCubeThumbs(avail, ()=>{ if(els.sheetbody.querySelector('.cubegrid')) paint(); }); // real art, not the glyph
+  // Representative fee for THIS slot (the move fee is slot/biome-driven; the exact per-cube
+  // quote appears in the staged confirm). Shown in all cases — fill and evict alike.
+  quoteMove({cubeId:avail[0].cubeId,newSlot:slot})
+    .then(q=>{ feeTxt='≈ '+fmtEth(q.fee); if(els.sheetbody.querySelector('.cubegrid')) paint(); })
+    .catch(()=>{ feeTxt='~'+fmtEth(1e15); if(els.sheetbody.querySelector('.cubegrid')) paint(); });
 }
 
 // ---------- MOVE A CUBE finder ----------
 function renderMove(){
   if(!S.me){ els.view.innerHTML=`<div class="empty">connect a wallet first</div>`; return; }
   els.view.innerHTML=`<div class="barrow">1 · pick a cube to move</div>
-    <div class="strip" id="mstrip">${S.myCubes.map(c=>`<div class="thumb ${S.moveCube&&S.moveCube.cubeId===c.cubeId?'sel':''}" data-id="${c.cubeId}">${glyph(c.seed)}<span class="id">#${c.cubeId}</span></div>`).join('')||'<span class="empty">no cubes in this wallet</span>'}</div>
+    <div class="strip" id="mstrip">${S.myCubes.map(c=>`<div class="thumb ${S.moveCube&&S.moveCube.cubeId===c.cubeId?'sel':''}" data-id="${c.cubeId}">${S.thumbCache.get(c.cubeId)||glyph(c.seed)}<span class="id">#${c.cubeId}</span></div>`).join('')||'<span class="empty">no cubes in this wallet</span>'}</div>
+    <div class="mprev" id="mprev"></div>
     <div class="barrow">2 · where to? filter the world</div>
     <div class="chips">${['near my streets','low population','affordable','🌊 water','🏔️ mountain','🧊 ice','🌿 grass','🏜️ desert','🌲 forest'].map(f=>`<div class="fchip ${S.filters.has(f)?'on':''}" data-f="${f}">${f}</div>`).join('')}</div>
     <div class="cands" id="cands"></div>`;
-  els.view.querySelectorAll('#mstrip .thumb').forEach(el=>el.onclick=()=>{ S.moveCube=S.myCubes.find(c=>c.cubeId==el.dataset.id); renderMove(); });
+  els.view.querySelectorAll('#mstrip .thumb').forEach(el=>el.onclick=()=>{ S.moveCube=S.myCubes.find(c=>c.cubeId==el.dataset.id); S.moveTarget=null; renderMove(); });
   els.view.querySelectorAll('.fchip').forEach(el=>el.onclick=()=>{ const f=el.dataset.f; S.filters.has(f)?S.filters.delete(f):S.filters.add(f); renderMove(); });
+  ensureCubeThumbs(S.myCubes, ()=>{ if($('mstrip')) renderMove(); }); // swap real art into the strip
   renderCands();
+  renderMovePreview();
+}
+// Side-by-side 2D+3D of the picked cube; when a target slot is chosen it re-renders at THAT slot
+// (post-move colours/geometry) and reveals a Confirm button. `previewTok` guards stale async.
+function renderMovePreview(){
+  const box=$('mprev'); if(!box) return;
+  const c=S.moveCube;
+  if(!c){ box.innerHTML=''; return; }
+  const t=S.moveTarget; // { slot, sid, biome } or null
+  const label=t ? `<b>after → street ${t.sid}</b> ${t.biome.emoji} ${t.biome.name}`
+                : `<b>now</b> · street ${Math.floor(c.slot/8)} ${c.biome.emoji}`;
+  box.innerHTML=`
+    <div class="mpv">
+      <div class="mppane"><span class="mptag">2D${t?' · after move':''}</span><div class="mpfill" id="mp2d"><div class="mpnote">…</div></div></div>
+      <div class="mppane"><span class="mptag">3D${t?' · after move':''}</span><div class="mpfill" id="mp3d"><div class="mpnote">loading…</div></div></div>
+    </div>
+    <div class="mpbar"><span class="mplabel">${label}</span>${
+      t ? `<button class="act primary" id="mpconfirm">Confirm move → <b id="mpfee">quoting…</b></button>`
+        : `<span class="mphint">tap a slot below to preview the move</span>`}</div>`;
+  const tk=++S.previewTok, slot=t?t.slot:c.slot;
+  (async()=>{ try{ const svg=(!t&&S.thumbCache.get(c.cubeId))?S.thumbCache.get(c.cubeId):await thumbnailAtSlotSVG(c.cubeId,slot);
+    if(tk===S.previewTok){ const n=$('mp2d'); if(n) n.innerHTML=svg; } }
+    catch{ if(tk===S.previewTok){ const n=$('mp2d'); if(n) n.innerHTML='<div class="mpnote">2D preview unavailable</div>'; } } })();
+  (async()=>{ try{ const uri=t?await movedAnimationURI(c.cubeId,t.slot):await cubeAnimationURI(c.cubeId);
+    if(tk===S.previewTok){ const n=$('mp3d'); if(n) n.innerHTML=`<iframe title="3D preview" src="${uri}"></iframe>`; } }
+    catch{ if(tk===S.previewTok){ const n=$('mp3d'); if(n) n.innerHTML='<div class="mpnote">3D preview unavailable</div>'; } } })();
+  if(t){
+    $('mpconfirm').onclick=confirmMove;
+    quoteMove({cubeId:c.cubeId,newSlot:t.slot})
+      .then(q=>{ if(S.moveTarget) S.moveTarget.fee=q.fee; const n=$('mpfee'); if(n&&tk===S.previewTok) n.textContent=fmtEth(q.fee); })
+      .catch(()=>{ const n=$('mpfee'); if(n&&tk===S.previewTok) n.textContent='~'+fmtEth(1e15); });
+  }
+}
+async function confirmMove(){
+  const c=S.moveCube, t=S.moveTarget; if(!c||!t) return;
+  if(!(S.flags?S.flags.movesEnabled:true)) return toast('moving is paused on-chain',true);
+  const owner=walletAccount()||S.me, btn=$('mpconfirm');
+  if(btn){ btn.disabled=true; btn.textContent='confirming…'; }
+  try{
+    await moveCube({cubeId:c.cubeId,owner,newSlot:t.slot});
+    toast('✓ Moved'); S.moveTarget=null; await loadWorld(); setTab('mine'); setTimeout(loadWorld,2500);
+  }catch(e){ toast('move failed: '+msg(e),true); if(btn){ btn.disabled=false; renderMovePreview(); } }
 }
 function renderCands(){
   const F=S.filters, mine=new Set(S.myStreets.map(s=>s.sid));
@@ -220,9 +319,16 @@ function renderCands(){
   }
   const grid=$('cands'); if(!grid) return;
   grid.innerHTML = out.length ? out.map(candHTML).join('') : `<div class="empty" style="grid-column:1/-1">no open slots match — loosen the filters</div>`;
-  grid.querySelectorAll('.cand').forEach(el=>el.onclick=()=>{ if(!S.moveCube){toast('pick a cube first',true);return;} moveToSlot(+el.dataset.slot); });
+  grid.querySelectorAll('.cand').forEach(el=>el.onclick=()=>{
+    if(!S.moveCube){toast('pick a cube first',true);return;}
+    const slot=+el.dataset.slot, sid=Math.floor(slot/8);
+    S.moveTarget={slot, sid, biome:biomeForStreet(sid)};           // preview first; confirm in the pane
+    grid.querySelectorAll('.cand').forEach(x=>x.classList.toggle('sel', +x.dataset.slot===slot));
+    renderMovePreview();
+    $('mprev')?.scrollIntoView({behavior:'smooth', block:'nearest'});
+  });
 }
-function candHTML(c){ return `<div class="cand" data-slot="${c.slot}"><div class="art">+</div>
+function candHTML(c){ return `<div class="cand${S.moveTarget&&S.moveTarget.slot===c.slot?' sel':''}" data-slot="${c.slot}"><div class="art">+</div>
   <div class="meta"><div class="b">${c.biome.emoji} ${c.biome.name}</div><div>vacant · pop ${c.pop}/8</div><div class="fee">~${fmtEth(1e15)}</div></div></div>`;}
 async function moveToSlot(slot){
   if(!(S.flags?S.flags.movesEnabled:true)) return toast('moving is paused on-chain',true);
@@ -230,7 +336,7 @@ async function moveToSlot(slot){
   try{ const q=await quoteMove({cubeId:cube.cubeId,newSlot:slot});
     if(!confirm(`Move #${cube.cubeId} to slot ${slot} for ${fmtEth(q.fee)}?`)) return;
     await moveCube({cubeId:cube.cubeId,owner,newSlot:slot});
-    toast('✓ Moved'); await loadWorld(); setTab('mine');
+    toast('✓ Moved'); await loadWorld(); setTab('mine'); setTimeout(loadWorld, 2500);
   }catch(e){ toast('move failed: '+msg(e),true); }
 }
 

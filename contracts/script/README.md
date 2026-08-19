@@ -95,7 +95,7 @@ anvil --fork-url "$ETH_RPC_URL"
 
 Then deploy the preview stack. This script points `CubeNFT.normieContract` at
 the real Normies contract and points `CubeRendererV2.normieStorage` at the real
-NormiesStorage contract, while still deploying the Blockcassone contracts
+NormiesStorage contract, while still deploying the TheBLOCK contracts
 locally on the fork:
 
 ```bash
@@ -156,7 +156,7 @@ The default output folder is:
 
 ## Agent Binding Maintenance
 
-Normies may become agentic after Blockcassone mint. The token renderer does not
+Normies may become agentic after TheBLOCK mint. The token renderer does not
 read OpenSea directly; it reads `AgentStatusRegistry` through `CubeNFT`.
 
 To inspect current OpenSea agent binding for known Normie IDs and generate

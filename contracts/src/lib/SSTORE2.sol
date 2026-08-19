@@ -40,11 +40,18 @@ library SSTORE2 {
     /// @dev Reads `size` bytes starting at byte `start` of the stored blob (i.e.
     ///      the data AFTER the 1-byte STOP prefix). Used to slice one payload out of
     ///      a packed batch blob without loading the whole 24KB into memory.
+    error SliceOutOfBounds(address pointer, uint256 start, uint256 size);
+
     function read(address pointer, uint256 start, uint256 size)
         internal
         view
         returns (bytes memory data)
     {
+        // extcodecopy silently zero-pads past the end — an out-of-range slice must
+        // revert, not fabricate zero bytes (latent-footgun hardening; all current
+        // callers store (offset,length) atomically so this never fires today).
+        // length() already excludes the STOP prefix: valid iff start+size <= data length.
+        if (start + size > length(pointer)) revert SliceOutOfBounds(pointer, start, size);
         data = new bytes(size);
         assembly {
             // +1 skips the STOP prefix that write() prepends.

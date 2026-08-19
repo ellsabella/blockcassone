@@ -8,11 +8,11 @@
 import { loadWalletNftsAcrossChains } from './wallet-nfts.js';
 import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
 import {
-  previewThumbnailSVG, cubeThumbnailSVG, cubeAnimationURI, loadOwnedCubes,
+  previewThumbnailSVG, cubeThumbnailSVG, cubeAnimationURI, proposedAnimationURI, loadOwnedCubes,
   customizeCube, rebaseToPoolSource, contractFlags, setTransactionSender,
-  poolSources, poolSourcePayload,
+  poolSources, unclaimedPoolSources, poolSourcePayload,
 } from './preview-chain.js';
-import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js';
+import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js?v=20260806-1';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -20,7 +20,7 @@ const msg = e => String((e && e.message) || e).slice(0, 160);
 
 const els = {};
 const state = { owned: [], cube: null, proposal: null, holding: false,
-  currentSvg: null, currentAnim: null, proposedSvg: null, walletNfts: [] };
+  currentSvg: null, currentAnim: null, proposedSvg: null, proposedAnim: null, walletNfts: [] };
 // proposal = { kind:'wallet'|'cc0', sourceContract, sourceTokenId, payload:Uint8Array(400), art?:url, label }
 
 // ---------- boot ----------
@@ -35,7 +35,7 @@ const state = { owned: [], cube: null, proposal: null, holding: false,
   let cfg = {};
   try { cfg = await (await fetch('/data/chain-config.json', { cache: 'no-store' })).json(); } catch {}
   mountConnectButton($('wallet-connect'), {
-    chainId: cfg.chainId, rpcUrl: cfg.rpcUrl, chainName: 'Blockcassone', onChange: onWallet,
+    chainId: cfg.chainId, rpcUrl: cfg.rpcUrl, chainName: 'TheBLOCK', onChange: onWallet,
   });
   wireStatic();
   render();
@@ -90,7 +90,7 @@ async function setProposalWallet(nft) {
       payload, art: nft.imageUrl, label: nft.name || ('#' + nft.tokenId) };
     state.proposedSvg = null; state.holding = false;
     render();
-    fetchProposed2D();
+    fetchProposed2D(); fetchProposed3D();
   } catch (e) { toast('could not load that art: ' + msg(e), true); }
 }
 
@@ -103,13 +103,27 @@ async function fetchProposed2D() {
   } catch (e) { if (state.proposal === p) { state.proposedSvg = note('preview unavailable', msg(e)); paint2D(); } }
 }
 
+// True 3D preview of the proposal: the real on-chain engine with the proposed art swapped in.
+async function fetchProposed3D() {
+  const p = state.proposal, c = state.cube; if (!p || !c) return;
+  state.proposedAnim = null; paint3D();
+  try {
+    const uri = await proposedAnimationURI(c.cubeId, { sourceContract: p.sourceContract, sourceTokenId: p.sourceTokenId, payload: p.payload });
+    if (state.proposal === p) { state.proposedAnim = uri; paint3D(); }
+  } catch (e) { if (state.proposal === p) { state.proposedAnim = null; paint3D(); } }
+}
+
 async function spin() {
   const c = state.cube; if (!c) return;
   toast('spinning…');
   try {
-    const sources = await poolSources();
-    if (!sources.length) { toast('no CC0 pool art committed on this deploy yet', true); return; }
-    // Pick a random source, avoiding an immediate repeat of the current proposal.
+    const sources = await unclaimedPoolSources();
+    if (!sources.length) {
+      const total = (await poolSources()).length;
+      toast(total ? 'every CC0 pool source is already taken — none left to spin' : 'no CC0 pool art committed on this deploy yet', true);
+      return;
+    }
+    // Pick a random UNCLAIMED source, avoiding an immediate repeat of the current proposal.
     let pick, tries = 0;
     do { pick = sources[(Math.random() * sources.length) | 0]; tries++; }
     while (state.proposal && state.proposal.kind === 'cc0'
@@ -119,10 +133,10 @@ async function spin() {
     const payload = await poolSourcePayload(pick);
     if (!payload || !payload.length) { toast('that source has no art — spin again', true); return; }
     state.proposal = { kind: 'cc0', sourceContract: pick.sourceContract, sourceTokenId: pick.sourceTokenId,
-      payload, label: 'CC0 ' + short(pick.sourceContract) + ' #' + pick.sourceTokenId };
+      payload, label: (pick.sourceName || ('CC0 ' + short(pick.sourceContract))) + ' #' + pick.sourceTokenId };
     state.proposedSvg = null; state.holding = false;
     render();
-    fetchProposed2D();
+    fetchProposed2D(); fetchProposed3D();
   } catch (e) { toast('spin failed: ' + msg(e), true); }
 }
 
@@ -151,7 +165,7 @@ async function commit() {
 function render() {
   renderStrip();
   const proposing = !!state.proposal, proposed = proposing && !state.holding;
-  const proposed3d = proposed && !!state.proposal.art; // only wallet proposals render 3D pre-commit
+  const proposed3d = proposed; // every proposal now renders in true 3D (real engine, swapped art)
   els.pane2d.classList.toggle('proposed', proposed);
   els.pane3d.classList.toggle('proposed', proposed3d);
   els.tag2d.textContent = proposed ? '2D · PREVIEW' : (state.holding ? '2D · current' : '2D · thumbnail');
@@ -175,20 +189,18 @@ function paint2D() {
 
 function paint3D() {
   const proposed = state.proposal && !state.holding;
-  // Proposed WALLET art → the dev preview bundle (flattens the image URL live).
-  if (proposed && state.proposal.art) {
-    const key = 'p|' + state.cube.cubeId + '|' + state.proposal.sourceContract + ':' + state.proposal.sourceTokenId;
-    if (els.art3d.dataset.key === key) return;
-    const q = new URLSearchParams({ art: state.proposal.art, slot: String(state.cube.slot), seed: String(state.cube.seed),
-      src: String(state.proposal.sourceTokenId), ca: String(state.proposal.sourceContract) });
-    els.art3d.innerHTML = `<iframe src="/viewer/cube-preview.html?${q.toString()}" title="3D preview"></iframe>`;
-    els.art3d.dataset.key = key;
-    return;
-  }
-  // CC0 proposal has no off-chain art URL to preview in 3D pre-commit; the 2D is exact.
-  if (proposed && !state.proposal.art) {
-    els.art3d.innerHTML = note('3D updates after you commit', '2D preview is exact');
-    els.art3d.dataset.key = 'cc0';
+  // Proposed art (wallet OR CC0) → the REAL on-chain engine with the proposed art swapped in.
+  if (proposed) {
+    if (state.proposedAnim) {
+      const key = 'p|' + state.cube.cubeId + '|' + state.proposal.sourceContract + ':' + state.proposal.sourceTokenId;
+      if (els.art3d.dataset.key === key) return;
+      els.art3d.innerHTML = '<iframe title="3D preview"></iframe>';
+      els.art3d.querySelector('iframe').src = state.proposedAnim; // large data: URI via property
+      els.art3d.dataset.key = key;
+      return;
+    }
+    els.art3d.innerHTML = note('rendering 3D preview…', 'the proposed art in true 3D');
+    els.art3d.dataset.key = 'p-loading';
     return;
   }
   // Otherwise (current cube, or held) → the cube's real on-chain animation.
@@ -246,7 +258,7 @@ async function openSheet() {
   els.sheet_status.textContent = acct ? 'loading your NFTs…' : 'connect a wallet first';
   if (!acct) return;
   try {
-    const nfts = await loadWalletNftsAcrossChains(acct);
+    const nfts = (await loadWalletNftsAcrossChains(acct)).nfts || []; // returns walletState {nfts,…}
     state.walletNfts = nfts;
     els.sheet_status.textContent = nfts.length ? `${nfts.length} items` : 'no NFTs found';
     els.walletgrid.innerHTML = nfts.slice(0, 60).map((n, i) =>

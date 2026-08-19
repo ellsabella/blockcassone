@@ -112,8 +112,14 @@ function decodePng(buf) {
 }
 
 // ---- source -> 32x32 colours [{r,g,b,a} in 0..1] ----
-async function crGrid(id) {
-  const svg = Buffer.from(decodeString(await ethCall(CR_RENDER, sel('tokenSVG(uint256)') + word(id))), 'base64').toString('utf8');
+export async function crGrid(id) {
+  // Chain Runners' renderer is keyed by DNA, not token id: the main contract maps
+  // tokenId -> getDna(tokenId) (a 256-bit trait pack) and tokenSVG(dna) draws THAT.
+  // Passing the raw id renders "the runner whose dna == id" — plausible-looking but
+  // wrong art (caught 2026-08-15 comparing Sepolia mints against OpenSea).
+  const dna = (await ethCall(CR, sel('getDna(uint256)') + word(id))).replace(/^0x/, '');
+  if (!/^[0-9a-fA-F]{64}$/.test(dna)) throw new Error(`cr ${id}: bad getDna result`);
+  const svg = Buffer.from(decodeString(await ethCall(CR_RENDER, sel('tokenSVG(uint256)') + dna)), 'base64').toString('utf8');
   const colors = new Array(32 * 32).fill(null).map(() => ({ r: 0, g: 0, b: 0, a: 0 }));
   for (const m of svg.matchAll(/<rect\s+fill='(#[0-9a-fA-F]{3,6})'\s+x='(\d+)'\s+y='(\d+)'/g)) {
     let hex = m[1].slice(1); if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
@@ -143,7 +149,7 @@ function compositeLayers(pngs, size) {
 }
 const pngsIn = svg => (svg.match(/data:image\/png;base64,[A-Za-z0-9+/=]+/g) || []).map(u => decodePng(Buffer.from(u.split(',')[1], 'base64')));
 
-async function skullGrid(id) {
+export async function skullGrid(id) {
   const meta = JSON.parse(dataUriBody(decodeString(await ethCall(SKULLS, sel('tokenURI(uint256)') + word(id))).replace(/^"|"$/g, '')));
   const layers = pngsIn(dataUriBody(meta.svg_image_data));
   for (const L of layers) if (L.w !== 32 || L.h !== 32) throw new Error(`skull layer ${L.w}x${L.h} != 32`);
@@ -153,7 +159,7 @@ async function skullGrid(id) {
 // Nouns — on-chain seed -> descriptor.generateSVGImage (RLE <rect> at viewBox 320,
 // i.e. a 32×32 grid scaled ×10). First rect is the full-frame background fill.
 function hexToRgb(h) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); return { r: parseInt(h.slice(0, 2), 16) / 255, g: parseInt(h.slice(2, 4), 16) / 255, b: parseInt(h.slice(4, 6), 16) / 255, a: 1 }; }
-async function nounGrid(id) {
+export async function nounGrid(id) {
   const seedRaw = (await ethCall(NOUNS, sel('seeds(uint256)') + word(id))).replace(/^0x/, '');
   const svg = Buffer.from(decodeString(await ethCall(NOUNS_DESC, sel('generateSVGImage((uint48,uint48,uint48,uint48,uint48))') + seedRaw)), 'base64').toString('utf8');
   const colors = new Array(32 * 32).fill(null).map(() => ({ r: 0, g: 0, b: 0, a: 0 }));
@@ -173,7 +179,7 @@ async function nounGrid(id) {
 // a PNG sprite sheet (1728×72 = 24 frames of 72×72); the CSS animation scrolls it, so
 // frame 0 is the top-left 72×72. Unlike skulls/kevin these are separate stacked elements
 // in DOCUMENT order (first = bottom, last = top), so reverse for the top-first compositor.
-async function pepeGrid(id) {
+export async function pepeGrid(id) {
   const meta = JSON.parse(dataUriBody(decodeString(await ethCall(PEPES, sel('tokenURI(uint256)') + word(id))).replace(/^"|"$/g, '')));
   const pngs = pngsIn(dataUriBody(meta.image));
   if (!pngs.length) throw new Error('pepe: no PNG layers');
@@ -184,7 +190,7 @@ async function pepeGrid(id) {
 // OnChainKevin — off-chain tokenURI carries the DNA in its URL; the on-chain renderer
 // turns that DNA string into an SVG (data-URI wrapped) of layered 32×32 PNGs stacked
 // via one CSS background-image list (first = top, same as skulls).
-async function kevinGrid(id) {
+export async function kevinGrid(id) {
   const uri = decodeString(await ethCall(KEVIN, sel('tokenURI(uint256)') + word(id)));
   const dna = (uri.match(/dna=([0-9a-fA-Fx]+)/) || [])[1];
   if (!dna) throw new Error('kevin: no dna in tokenURI');
@@ -240,7 +246,7 @@ function padBandsTo40(bands, size) {
   return out;
 }
 
-function flatten(srcColors, size) {
+export function flatten(srcColors, size) {
   if (size < 40) {
     // Band at NATIVE resolution — the art's own border IS its background, so the subject
     // separates correctly — THEN pad the band map into 40 with a band-0 border. No pixel
@@ -311,4 +317,9 @@ async function main() {
   );
   console.log(`\nwrote ${samples.length} samples -> out/manifest.json + data/cc0/*.hex + tmp/cc0-samples.js`);
 }
-main().catch(e => { console.error(e.stack || e); process.exit(1); });
+// Run the sample-proof main() only when invoked directly (node dev/cc0-proof/flatten.mjs);
+// flatten-pools.mjs imports the decoders + flatten() above without triggering it.
+import { pathToFileURL } from 'node:url';
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(e => { console.error(e.stack || e); process.exit(1); });
+}

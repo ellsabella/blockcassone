@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "chainId": 1,
+  "rpcUrl": "",
+  "directRpc": false,
+  "mockSeaDrop": "0x0000000000000000000000000000000000000000",
+  "cubeNft": "0x1794d9119C2ceaDaa78D98e8330AD5395fa0C112",
+  "genesisMinter": "0x682faC6d06240C6b94ae17B6CD1B0C8A790f2648",
+  "renderer": "0xAEae5c763ae65991b328bF0cbee63393386eB0b7",
+  "thumbnailRenderer": "0xBb8cCCae7Be4eF0440749d179B119C6578D3284f",
+  "rendererAssetStore": "0xed19db43529DB78f6A27b124a43bf0B385a96F49",
+  "agentStatusRegistry": "0xFB41C8A94bc48De4c9f10141Bf8ca53430516c00",
+  "normies": "0x9Eb6E2025B64f340691e424b7fe7022fFDE12438",
+  "normieStorage": "0x1B976bAf51cF51F0e369C070d47FBc47A706e602",
+  "nonNormieStore": "0x063197C15FFC17650c0E3F8897Da3b2c9FC244BE",
+  "cubeMintController": "0x48F823cF9203552c555a8399441A7C714C699222",
+  "flatteningAttestation": "0x7915FA1B376de495e0d0b254DA11A6cB27cC4b8f",
+  "attestationSigner": "0x013e2f9ca0be2a0497c50a2bda97de58052d9c16"
+}

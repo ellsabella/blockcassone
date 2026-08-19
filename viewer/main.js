@@ -1,4 +1,4 @@
-// Blockcassone viewer — dev tool for previewing artwork.
+// TheBLOCK viewer — dev tool for previewing artwork.
 
 import { mat4, identity, v3Normalize, vec3, multiply, invert } from '../renderer/src/math.js';
 import { createBox, createWireframeBox, createMeshGL }         from '../renderer/src/geometry.js';
@@ -13,6 +13,7 @@ import {
   initNormiesManager, setDataReadyCallback, setBannerDataReadyCallback,
 } from './normies-manager.js';
 import { buildHilbertLines, buildFullHilbertPath, buildHilbertPathRange } from './hilbert-lines.js';
+import { createHilbertWalk, createCubeOrbit } from './hilbert-walk.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
 import { buildStoneWalker }   from './materials/stone-walker.js';
 import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner, buildNonNormieIdLabel, setNonNormieResolvers } from './non-normie-art-plane.js';
@@ -41,7 +42,8 @@ import {
   sourceNftForSlot,
 } from './mint-simulator.js';
 import { mintNormieCubeOnChain } from './preview-chain.js';
-import { mountConnectButton } from './wallet.js';
+import { mountConnectButton } from './wallet.js?v=20260806-1';
+import { makePanel } from './panels.js';
 import {
   applyDim, applyMotifStyle, applyBurnedDesaturation, grayscaleColor,
 } from './scene/styling.js';
@@ -67,6 +69,12 @@ if (typeof window !== 'undefined') {
   window.perfReset = () => { resetMetrics(); return 'perf metrics reset'; };
 }
 
+// Build stamp — bump alongside the ?v= query on the module script tags. If the console
+// shows an OLD value after reloading, the browser is still serving cached JS (open
+// DevTools → Network → tick "Disable cache", then reload).
+const VIEWER_BUILD = '20260806-1';
+if (typeof window !== 'undefined') console.log('[viewer] build', VIEWER_BUILD);
+
 const canvas = document.getElementById('gl');
 const logEl  = document.getElementById('log');
 const nftLabelEl = document.getElementById('nft-label');
@@ -80,6 +88,17 @@ const worldMapAxisEl = document.getElementById('world-map-axis');
 const ownerInventoryEl = document.getElementById('owner-inventory');
 const ownerInventoryTitleEl = document.getElementById('owner-inventory-title');
 const ownerInventoryListEl = document.getElementById('owner-inventory-list');
+const ownerInventoryMineEl = document.getElementById('owner-inventory-mine');
+// "Show mine" → focus the connected wallet's own cubes (easy to get lost otherwise).
+if (ownerInventoryMineEl) {
+  ownerInventoryMineEl.addEventListener('click', () => {
+    const me = loadedWalletAddress();
+    if (!me) return;
+    ownerFocusEnabled = true;
+    setOwnerFocusAddress(me);
+    rebuildScene();
+  });
+}
 
 const logLines = [];
 function log(msg) {
@@ -99,7 +118,9 @@ if (!gl) {
 }
 log(`WebGL 2 — ${gl.getParameter(gl.RENDERER)}`);
 
+let _walkFixed = false; // ?walk mode owns a fixed 1920×1080 backing store for clean 16:9 capture
 function resize() {
+  if (_walkFixed) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.floor(canvas.clientWidth * dpr);
   const h = Math.floor(canvas.clientHeight * dpr);
@@ -113,7 +134,7 @@ window.addEventListener('resize', () => {
   if (cubeDetailWidthPx && window.innerWidth > 860) applyCubeDetailWidth(cubeDetailWidthPx);
 });
 
-// ---------- Blockcassone data layer ----------
+// ---------- TheBLOCK data layer ----------
 // These come from globals defined by the /public/*.js script tags.
 const HILBERT_ORDER = 5;
 const STREET_SIZE = 8;
@@ -553,21 +574,27 @@ function updateSvgThumb(motifIdx) {
   const seq = ++_svgThumbSeq; // every call invalidates any still-in-flight load below
   const hide = () => { svgThumbEl.classList.remove('open'); svgThumbEl.setAttribute('aria-hidden', 'true'); };
   if (motifIdx === null || motifIdx === undefined || !isMintedSlot(motifIdx)) { hide(); return; }
-  // Real per-slot SVG if one was pre-rendered, else a TYPE-matched placeholder (Normie vs
-  // source/CC0). Only ~21 real files exist for now; the indexer renders these per cube in
-  // production, so the placeholder won't match the exact art yet.
+  // Primary = the LIVE on-chain thumbnail (/api/thumbnail?slot=N), rendered by
+  // CubeThumbnailRendererV1 from the SAME art bytes the 3D cube uses — so the two
+  // panels always match. Falls back to a pre-rendered static file for dev-only
+  // (off-chain) slots or if the endpoint is unavailable.
   const cube = getMintedCubeForSlot(motifIdx);
   const isNormie = cube && cube.sourceKind === 'normie';
-  const real = `/data/preview-slot-${motifIdx}.svg`;
-  const fallback = isNormie
+  const real = `/api/thumbnail?slot=${motifIdx}`;
+  const fallback = `/data/preview-slot-${motifIdx}.svg`;
+  const fallback2 = isNormie
     ? `/data/preview-slot-${motifIdx % 12}.svg`
     : `/data/preview-nonnormie-${motifIdx % 6}.svg`;
   // Probe candidates off-screen; only swap the VISIBLE <img> once a load is confirmed, and
   // only if this is still the latest request (seq guard). This kills the abort-races that
   // previously left the panel on a placeholder or a stale cube during fast navigation/flyby.
   const stale = () => seq !== _svgThumbSeq;
-  const tryLoad = (src, next) => {
+  // Candidate chain: live on-chain thumbnail → per-slot static → type placeholder.
+  const candidates = [...new Set([real, fallback, fallback2])];
+  const tryLoad = (idx) => {
     if (stale()) return;
+    const src = candidates[idx];
+    if (src === undefined) { hide(); return; }
     const probe = new Image();
     probe.onload = () => {
       if (stale()) return;
@@ -575,10 +602,10 @@ function updateSvgThumb(motifIdx) {
       svgThumbEl.classList.add('open');
       svgThumbEl.setAttribute('aria-hidden', 'false');
     };
-    probe.onerror = () => { if (stale()) return; next ? tryLoad(next, null) : hide(); };
+    probe.onerror = () => { if (stale()) return; tryLoad(idx + 1); };
     probe.src = src;
   };
-  tryLoad(real, fallback !== real ? fallback : null);
+  tryLoad(0);
 }
 // Resizable SVG thumbnail (drag the left edge, like the cube-detail panel).
 const svgThumbResizeEl = document.getElementById('svg-thumb-resize');
@@ -810,14 +837,29 @@ function updateOwnerInventory(ownerLabel) {
   if (!ownerInventoryEl || !ownerInventoryListEl) return;
   ownerInventoryListEl.replaceChildren();
   if (!ownerFocusEnabled || !ownerFocusAddress) {
-    ownerInventoryEl.classList.remove('open');
+    ownerInventoryEl.classList.remove('open', 'mine');
     ownerInventoryEl.setAttribute('aria-hidden', 'true');
+    if (ownerInventoryMineEl) ownerInventoryMineEl.hidden = true;
     return;
   }
   const cubes = ownerFocusedCubes();
   if (ownerInventoryTitleEl) {
-    ownerInventoryTitleEl.textContent = `${ownerLabel || shortAddress(ownerFocusAddress)} (${cubes.length})`;
+    const eyebrow = document.createElement('span');
+    eyebrow.className = 'oi-eyebrow';
+    eyebrow.textContent = 'Owner';
+    const idEl = document.createElement('span');
+    idEl.className = 'oi-id';
+    idEl.textContent = ownerLabel || shortAddress(ownerFocusAddress);
+    const countEl = document.createElement('span');
+    countEl.className = 'oi-count';
+    countEl.textContent = `(${cubes.length})`;
+    ownerInventoryTitleEl.replaceChildren(eyebrow, idEl, countEl);
   }
+  // Viewing OUR OWN cubes? Turn the panel green + hide the "Show mine" button.
+  const me = loadedWalletAddress();
+  const isMine = !!me && !!ownerFocusAddress && me.toLowerCase() === ownerFocusAddress.toLowerCase();
+  ownerInventoryEl.classList.toggle('mine', isMine);
+  if (ownerInventoryMineEl) ownerInventoryMineEl.hidden = isMine || !me;
   for (const cube of cubes) {
     const button = document.createElement('button');
     button.className = 'owner-inventory-item';
@@ -1520,7 +1562,7 @@ if (walletLoadBtn) walletLoadBtn.addEventListener('click', loadWalletFromInput);
 // Wallet Connect (injected EIP-1193): connecting owner-focuses the connected address,
 // so the viewer filters to that wallet's cubes (its list panel + navigation light up).
 // The default fake "my wallet" for testing (owns cubes in the dev registry).
-const MY_WALLET = '0x15f89dc0088f13ffabbc75ff3f279c9570a69c33';
+const MY_WALLET = '0x19be634c0aa60db9b43494d05fd5a5f5d910aaeb';
 let connectedAddress = null;
 let _cloudItems = []; // impostor-cloud draw items, faded per frame by camera distance
 
@@ -1576,6 +1618,12 @@ function resolveDisplayOwner() {
 // Focus the resolved display owner's first Normie — opens the list + cube detail + thumbnail.
 // Never blanks: falls back to any minted cube only if no Normies exist at all.
 function focusDefaultOwner() {
+  // Prefer the connected wallet, then the dev test wallet (MY_WALLET) — whichever
+  // actually owns cubes here — so the view opens on YOUR cubes, not an arbitrary
+  // Normie holder. Falls back to the deterministic Normie-owner pick, then any cube.
+  for (const addr of [connectedAddress, MY_WALLET]) {
+    if (addr && focusOwnerFirstCube(addr)) return;
+  }
   const owner = resolveDisplayOwner();
   if (owner) { focusCubeAndOwner(normieOwnersMap().get(owner)[0]); return; }
   const cubes = getMintedCubes();
@@ -1723,7 +1771,13 @@ function applyViewerMode() {
   else if (_flyby) { stopFlyby(); recentreOrbit(); } // only when leaving an ACTIVE flyby (orbit exists by then)
   syncFlybyControls(); // owns nav-bar + flyby-transport visibility for both modes
 }
-if (modeNavBtn) modeNavBtn.addEventListener('click', () => { viewerMode = 'navigation'; applyViewerMode(); });
+if (modeNavBtn) modeNavBtn.addEventListener('click', () => { viewerMode = 'navigation'; applyViewerMode();
+
+// Draggable + resizable HUD panels (persisted per panel). Titlebars drag; a bottom-right grip
+// resizes both ways. Reset: localStorage.removeItem('bc-panels-v2') then reload.
+makePanel(document.getElementById('cube-detail'), { handle: document.getElementById('cube-detail-bar'), key: 'cube-detail' });
+makePanel(document.getElementById('svg-thumb'), { handle: document.getElementById('svg-thumb-bar'), key: 'svg-thumb', minH: 180 });
+makePanel(document.getElementById('owner-inventory'), { handle: document.getElementById('owner-inventory-title'), key: 'owner-inventory' }); });
 if (modeFlybyBtn) modeFlybyBtn.addEventListener('click', () => { viewerMode = 'flyby'; applyViewerMode(); });
 
 // Show / hide the floating info panels (owned list, cube detail, SVG thumbnail) — one class
@@ -3302,6 +3356,87 @@ if (CINEMATIC && typeof document !== 'undefined' && document.body) {
   document.body.classList.add('cinematic');
 }
 
+// ---------- Promo: "run the Hilbert line" walk + one-click 16:9 recording (?walk) ----------
+const WALK = new URLSearchParams(location.search).has('walk');
+let _walk = null, _walkArmed = 0, _walkStarted = false, _walkRec = null, _walkName = 'hilbert-walk';
+let _walkStartT = 0, _walkDurationMs = 15000;
+
+function setupWalk() {
+  // Figure-eight orbit around one populated Normie cube — all sides, zoom out/in, 10s seamless loop.
+  let slot = -1, normieId = null;
+  for (let m = 0; m < WORLD_SIZE; m++) {
+    if (!isMintedSlot(m)) continue;
+    const cube = getMintedCubeForSlot(m);
+    if (cube && (cube.sourceKind === 'normie' || cube.nft?.isNormie)) {
+      slot = m; normieId = cube.nft?.normieId ?? null; break;
+    }
+  }
+  if (slot < 0) { log('walk: no populated Normie cube found'); return; }
+
+  const c = centerOfAABB(cubeAABBFor(slot));
+  const cs = sizeOfAABB(cubeAABBFor(slot)) || 1;
+  _walkName = 'normie-figure8' + (normieId != null ? '-' + normieId : '');
+  _walkDurationMs = 16000; // slower
+
+  _walk = createCubeOrbit(orbit, c, {
+    durationMs: _walkDurationMs,
+    loops: 3,                 // three figure-eights
+    yawAmp: Math.PI,          // every side
+    pitchAmp: 1.0,            // top & bottom
+    diveMin: cs * 0.06,       // plunge right into the middle of the cube
+    diveMax: cs * 3.0,        // …then pull fully back out
+    diveCycles: 3,            // dive in once per figure-eight
+    near: Math.max(0.004, cs * 0.008),
+    far: cs * 12,
+  });
+  // Street scope draws the cube in full detail; select it so detail/thumbnail track it.
+  mainViewScope = 'street';
+  selectedStreetIdx = streetIndexForMotif(slot);
+  selectedNeighbourhoodIdx = null; selectedRegionIdx = null;
+  selectedMotifIdx = slot;
+  scheduleRebuild();
+  log(`walk: Normie cube slot ${slot}${normieId != null ? ` (Normie #${normieId})` : ''} — figure-8 orbit, 10s → ${_walkName}.webm`);
+}
+
+function startWalkRecording() {
+  // Fixed 1920×1080 backing store → the capture is always clean 16:9 1080p; letterbox the display.
+  _walkFixed = true;
+  canvas.width = 1920; canvas.height = 1080;
+  const style = document.createElement('style');
+  style.textContent =
+    'body.cinematic > *:not(#gl){display:none!important} body.cinematic{cursor:default;background:#000!important;overflow:hidden}' +
+    '#gl{position:absolute!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%)!important;' +
+    'width:min(100vw,177.78vh)!important;height:min(56.25vw,100vh)!important}';
+  document.head.appendChild(style);
+  document.body.classList.add('cinematic');
+  try {
+    const stream = canvas.captureStream(60);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const chunks = [];
+    _walkRec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 16000000 });
+    _walkRec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    _walkRec.onstop = async () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      log('walk: uploading ' + (blob.size / 1048576).toFixed(1) + ' MB to capture server…');
+      try {
+        const r = await fetch('http://localhost:8124/capture?name=' + encodeURIComponent(_walkName), { method: 'POST', body: blob });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        log('walk: saved server-side → captures/' + _walkName + '.webm ✓');
+      } catch (e) {
+        // Fallback: browser download (goes to your Downloads folder).
+        log('walk: capture server unreachable (' + e + ') — falling back to browser download');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'hilbert-walk.webm';
+        document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+      }
+    };
+    _walkRec.start();
+    log('walk: recording 30s…');
+  } catch (e) {
+    log('walk: MediaRecorder unavailable — screen-record the fullscreen playback instead (' + e + ')');
+  }
+}
+
 function frame() {
   resize();
   noteFrame();
@@ -3309,6 +3444,22 @@ function frame() {
   if (CINEMATIC) {
     if (!_flight && (mintSimulationLoaded() || (performance.now() - startT) > 2500)) setupCinematicFlight(pickFlightFocus());
     if (_flight) { const info = _flight.update(performance.now()); if (info) driveCinematicScope(info.level); }
+  }
+  if (WALK) {
+    // Arm once data's loaded (+ a warmup beat), scope-lock, then start recording + running the line.
+    if (!_walkArmed && mintSimulationLoaded() && (performance.now() - startT) > 3000) {
+      _walkArmed = performance.now(); setupWalk();
+    }
+    if (_walkArmed && _walk && !_walkStarted && performance.now() - _walkArmed > 1000) {
+      _walkStarted = true; _walkStartT = performance.now(); startWalkRecording(); _walk.start(_walkStartT);
+    }
+    if (_walk && _walkStarted) {
+      const info = _walk.update(performance.now());
+      const elapsed = performance.now() - _walkStartT;
+      if (_walkRec && _walkRec.state === 'recording' && (info.done || elapsed >= _walkDurationMs)) {
+        _walkRec.stop(); _walkRec = null; // captured exactly one loop → seamless
+      }
+    }
   }
   // Flyby Mode: fly the main camera over the focused wallet's cubes, cube by cube. While PAUSED
   // we stop driving entirely (no update) so the user's manual orbit/navigation isn't overridden.

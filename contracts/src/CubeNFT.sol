@@ -6,7 +6,7 @@ import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
 import {IERC721} from "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {ICubeRenderer} from "./interfaces/ICubeRenderer.sol";
-import {CubeEnv} from "./lib/CubeEnv.sol";
+import {CubeWorldLib} from "./lib/CubeWorldLib.sol";
 import {
     INonFungibleSeaDropToken,
     ISeaDrop,
@@ -36,6 +36,7 @@ interface INormieGenesisMinter {
 // flattened payload is committed source-keyed (genesis pool + reserve + released).
 interface ICubeArtStore {
     function hasSourcePayload(address sourceContract, uint256 sourceTokenId) external view returns (bool);
+    function clearCubePayload(uint256 cubeId) external;
 }
 
 contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
@@ -130,15 +131,6 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     uint256 private _nextCubeId = 1;
     address public agentStatusRegistry;
 
-    // Post-mint move game. Off during the genesis mint so a moved cube can't land
-    // on a slot the allocator will target (which would brick a mint tx); the owner
-    // flips it on once the mint is done.
-    bool public movesEnabled;
-
-    // Post-mint merge game. Independent of moves — off at deploy, flipped on by the
-    // owner when merging opens (kept separate so move and merge reveal on their own).
-    bool public mergesEnabled;
-
     // Post-mint customize game (re-base a cube's source art). Independent of move/merge —
     // off at deploy, gates BOTH update paths (customizeCubeSource + rebaseToPoolSource).
     bool public customizesEnabled;
@@ -152,23 +144,23 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     // near-empty street. Rivals must be displaced out first (sole occupier required).
     uint256 public constant MERGE_MIN_FILLED = 5;
 
-    // ---- Fee / displacement economics (see FEES_AND_DISPLACEMENT_SPEC.md) -----
-    // Flat base fee: move-to-empty and per-empty-plot merge (both to the house), and the
-    // base term of a displacement fee (paid to the displaced owner).
-    uint256 public baseFee;
-    // Added per downgrade-point when a displacement pushes the victim into a lower-rarity biome.
-    uint256 public premiumPerPoint;
-    // Fee-rarity points per biome id (0 desert,1 water,2 grass,3 forest,4 mountain,5 ice).
-    // Independent of CubeEnv's world distribution so pricing tunes without moving biomes.
-    uint256[6] public biomeWeight;
-    // House cut (bps) of a displacement fee, taken ONLY when the mover grabs a higher tier.
-    uint16 public displaceHouseCutBps;
-    // Min seconds between displacements of the same victim address (anti-harassment).
-    uint256 public displaceCooldown;
+    // ---- World mechanics state (see FEES_AND_DISPLACEMENT_SPEC.md) -----------
+    // Move/merge switches + fee/displacement economics, grouped so CubeWorldLib
+    // (the external move/merge library) takes ONE storage pointer. The fields were
+    // public variables before the extraction; the explicit getters below preserve
+    // that ABI exactly.
+    CubeWorldLib.WorldState private _world;
 
-    uint256 public houseBalance;                        // accrued house fees, owner-withdrawable
-    mapping(address => uint256) public owed;            // pull-payment fallback for failed pushes
-    mapping(address => uint256) public lastDisplacedAt; // victim address -> last displacement ts
+    function movesEnabled() external view returns (bool) { return _world.movesEnabled; }
+    function mergesEnabled() external view returns (bool) { return _world.mergesEnabled; }
+    function baseFee() external view returns (uint256) { return _world.baseFee; }
+    function premiumPerPoint() external view returns (uint256) { return _world.premiumPerPoint; }
+    function biomeWeight(uint256 biomeId) external view returns (uint256) { return _world.biomeWeight[biomeId]; }
+    function displaceHouseCutBps() external view returns (uint16) { return _world.displaceHouseCutBps; }
+    function displaceCooldown() external view returns (uint256) { return _world.displaceCooldown; }
+    function houseBalance() external view returns (uint256) { return _world.houseBalance; }
+    function owed(address account) external view returns (uint256) { return _world.owed[account]; }
+    function lastDisplacedAt(address victim) external view returns (uint256) { return _world.lastDisplacedAt[victim]; }
 
     event MoveFeePaid(uint256 indexed cubeId, uint256 fee);
     event DisplacementPaid(uint256 indexed cubeId, address indexed victim, uint256 victimShare, uint256 houseShare);
@@ -226,11 +218,11 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
 
         // Fee defaults (owner-tunable). Weights by biome id: desert 3, water 1, grass 1,
         // forest 1, mountain 8, ice 12. See FEES_AND_DISPLACEMENT_SPEC.md.
-        baseFee = 0.001 ether;
-        premiumPerPoint = 0.01 ether;
-        biomeWeight = [uint256(3), 1, 1, 1, 8, 12];
-        displaceHouseCutBps = 3333; // ~1/3
-        displaceCooldown = 15 minutes;
+        _world.baseFee = 0.001 ether;
+        _world.premiumPerPoint = 0.01 ether;
+        _world.biomeWeight = [uint256(3), 1, 1, 1, 8, 12];
+        _world.displaceHouseCutBps = 3333; // ~1/3
+        _world.displaceCooldown = 15 minutes;
     }
 
     function mintNormieCube(uint256 normieId, uint32 slot, bytes32 seed)
@@ -546,7 +538,7 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
 
     /// @notice Owner switch that opens the merge game (off at deploy). Independent of moves.
     function setMergesEnabled(bool enabled) external onlyOwner {
-        mergesEnabled = enabled;
+        _world.mergesEnabled = enabled;
         emit MergesEnabledUpdated(enabled);
     }
 
@@ -572,75 +564,29 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
         return _mergeStreet(street, leaderCubeId);
     }
 
+    /// @dev Validation, fee, and world-state writes live in CubeWorldLib; the token
+    ///      lifecycle (burn the plots, mint the street token) must stay here — OZ's
+    ///      _burn/_safeMint aren't reachable from a library. Event order matches the
+    ///      pre-extraction code: plot-burn Transfers, street-mint Transfer, then the
+    ///      merge events, refund last.
     function _mergeStreet(uint32 street, uint256 requestedLeader)
         internal
         returns (uint256 streetTokenId)
     {
-        if (!mergesEnabled) revert MergesDisabled();
-
-        uint256 base = uint256(street) * 8;
-        if (base + 8 > totalSlots) revert InvalidSlot(uint32(base));
-
-        uint256[8] memory plots;
-        uint256 occ;
-        uint256 leader;
-        bool leaderFound;
-        for (uint256 k = 0; k < 8; k++) {
-            uint256 cid = cubeForSlot[uint32(base + k)];
-            if (cid == 0) continue;
-            if (_cubeData[cid].sourceKind == SOURCE_KIND_MERGED_STREET) {
-                revert StreetAlreadyMerged(street);
-            }
-            if (ownerOf(cid) != msg.sender) revert NotStreetOwner(street, cid);
-            plots[k] = cid;
-            if (leader == 0) leader = cid; // default: lowest occupied plot leads
-            if (cid == requestedLeader) leaderFound = true;
-            occ++;
-        }
-        if (occ == 0) revert EmptyStreet(street);
-        if (occ < MERGE_MIN_FILLED) revert NotEnoughFilled(street, occ); // merge with vacants OK, but >= 5 filled
-        // An explicit leader must be one of this street's occupied plots.
-        if (requestedLeader != 0) {
-            if (!leaderFound) revert InvalidLeader(street, requestedLeader);
-            leader = requestedLeader;
-        }
-
-        // Fee: free when you own the whole street; baseFee per vacant plot you lock up.
-        uint256 emptyPlots = 8 - occ;
-        uint256 fee = emptyPlots * baseFee;
-        if (msg.value < fee) revert InsufficientFee(fee, msg.value);
-        houseBalance += fee;
-
         streetTokenId = _nextCubeId++;
-        CubeData memory ld = _cubeData[leader];
-        _cubeData[streetTokenId] = CubeData({
-            slot: ld.slot, // leader's slot drives the street thumbnail (colour/geometry)
-            sourceKind: SOURCE_KIND_MERGED_STREET,
-            rendererVersion: ld.rendererVersion,
-            payloadVersion: ld.payloadVersion,
-            agentic: false,
-            agentId: 0,
-            mintedAt: uint64(block.timestamp),
-            sourceChainId: block.chainid,
-            sourceContract: ld.sourceContract,
-            sourceTokenId: ld.sourceTokenId, // leader Normie -> street SVG thumbnail
-            seed: ld.seed
-        });
+        (uint256[8] memory plots, uint8 occ, uint256 fee) = CubeWorldLib.mergeStreet(
+            _world, _cubeData, _streetInfo, cubeForSlot, street, requestedLeader, streetTokenId, totalSlots
+        );
 
-        StreetInfo storage si = _streetInfo[streetTokenId];
-        si.street = street;
-        si.occupiedCount = uint8(occ);
         for (uint256 k = 0; k < 8; k++) {
-            si.plotCubeIds[k] = plots[k];
             if (plots[k] != 0) _burn(plots[k]); // CubeData retained for rendering
-            cubeForSlot[uint32(base + k)] = streetTokenId; // street locks all 8 slots
         }
 
         _safeMint(msg.sender, streetTokenId);
-        emit StreetMerged(streetTokenId, msg.sender, street, uint8(occ));
-        emit MergeFeePaid(street, emptyPlots, fee);
+        emit StreetMerged(streetTokenId, msg.sender, street, occ);
+        emit MergeFeePaid(street, 8 - occ, fee);
         emit MetadataUpdate(streetTokenId);
-        _refundExcess(fee);
+        CubeWorldLib.refundExcess(_world, fee);
     }
 
     /// @notice CubeData for a (possibly burned) cube, with no ownership check.
@@ -683,7 +629,7 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     // its colour, geometry, street, and environment follow the destination.
 
     function setMovesEnabled(bool enabled) external onlyOwner {
-        movesEnabled = enabled;
+        _world.movesEnabled = enabled;
         emit MovesEnabledUpdated(enabled);
     }
 
@@ -692,123 +638,11 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     ///         >= STREET_MOVE_MAJORITY of its 8 plots), paying the displaced owner. The
     ///         displaced cube takes the mover's old slot. Merged-street tokens are anchored —
     ///         they can neither be moved nor displaced. See FEES_AND_DISPLACEMENT_SPEC.md.
+    /// @dev All logic in CubeWorldLib; `_ownerOf` is resolved here because the
+    ///      library can't reach OZ internals (and public ownerOf reverts with the
+    ///      wrong error for a nonexistent cube).
     function moveCube(uint256 cubeId, uint32 newSlot) external payable nonReentrant {
-        if (!movesEnabled) revert MovesDisabled();
-
-        address owner = _ownerOf(cubeId);
-        if (owner == address(0)) revert NonexistentCube(cubeId);
-        if (owner != msg.sender) revert NotCubeOwner(cubeId, msg.sender);
-
-        CubeData storage data = _cubeData[cubeId];
-        if (data.sourceKind == SOURCE_KIND_MERGED_STREET) revert CannotMoveStreet(cubeId);
-        if (newSlot >= totalSlots) revert InvalidSlot(newSlot);
-
-        uint32 oldSlot = data.slot;
-        if (newSlot == oldSlot) revert InvalidSlot(newSlot);
-
-        uint256 occupant = cubeForSlot[newSlot];
-        if (occupant == 0) {
-            // Plain move into a vacant slot: flat base fee to the house.
-            if (msg.value < baseFee) revert InsufficientFee(baseFee, msg.value);
-            houseBalance += baseFee;
-            cubeForSlot[oldSlot] = 0;
-            cubeForSlot[newSlot] = cubeId;
-            data.slot = newSlot;
-            emit CubeMoved(cubeId, oldSlot, newSlot, msg.sender);
-            emit MoveFeePaid(cubeId, baseFee);
-            emit MetadataUpdate(cubeId); // slot changed => colour/env/street changed
-            _refundExcess(baseFee);
-            return;
-        }
-
-        // Occupied target => displacement (handled in a helper to keep this frame shallow).
-        if (_cubeData[occupant].sourceKind == SOURCE_KIND_MERGED_STREET) {
-            revert CannotDisplaceStreet(occupant);
-        }
-        _displace(cubeId, oldSlot, newSlot, occupant);
-    }
-
-    /// @dev Force-swap `cubeId` into `newSlot`, sending the occupant to `oldSlot`. A self-swap
-    ///      (you own both) is free; otherwise requires majority + cooldown and pays the victim.
-    function _displace(uint256 cubeId, uint32 oldSlot, uint32 newSlot, uint256 occupant) private {
-        CubeData storage data = _cubeData[cubeId];
-        CubeData storage other = _cubeData[occupant];
-        address victim = _ownerOf(occupant);
-
-        if (victim != msg.sender) {
-            uint256 ownedCount = _ownedInStreet(msg.sender, newSlot);
-            if (ownedCount < STREET_MOVE_MAJORITY) revert NotStreetMajority(newSlot, ownedCount);
-            // No cooldown for a never-displaced victim (lastDisplacedAt == 0).
-            uint256 last = lastDisplacedAt[victim];
-            if (last != 0 && block.timestamp < last + displaceCooldown) {
-                revert DisplaceCooldownActive(victim, last + displaceCooldown);
-            }
-        }
-
-        (uint256 fee, uint256 houseShare, uint256 victimShare) =
-            victim == msg.sender ? (0, 0, 0) : _displaceFee(oldSlot, newSlot);
-        if (msg.value < fee) revert InsufficientFee(fee, msg.value);
-
-        // Effects.
-        houseBalance += houseShare;
-        if (victim != msg.sender) lastDisplacedAt[victim] = block.timestamp;
-        cubeForSlot[oldSlot] = occupant;
-        cubeForSlot[newSlot] = cubeId;
-        other.slot = oldSlot;
-        data.slot = newSlot;
-
-        emit CubeMoved(cubeId, oldSlot, newSlot, msg.sender);
-        emit CubeMoved(occupant, newSlot, oldSlot, victim); // the displaced cube
-        emit MetadataUpdate(cubeId); // both cubes changed slot => colour/env/street changed
-        emit MetadataUpdate(occupant);
-        if (victimShare > 0 || houseShare > 0) emit DisplacementPaid(cubeId, victim, victimShare, houseShare);
-
-        // Interactions last: pay the victim (push, pull-fallback), then refund the mover.
-        _payout(victim, victimShare);
-        _refundExcess(fee);
-    }
-
-    /// @dev Displacement fee split. D = rarity the victim loses = weight(target) - weight(oldSlot);
-    ///      the house cut applies only when the mover grabs a higher tier (D > 0).
-    function _displaceFee(uint32 oldSlot, uint32 newSlot)
-        private
-        view
-        returns (uint256 fee, uint256 houseShare, uint256 victimShare)
-    {
-        uint256 wTarget = _biomeWeightForSlot(newSlot);
-        uint256 wOld = _biomeWeightForSlot(oldSlot);
-        uint256 d = wTarget > wOld ? wTarget - wOld : 0;
-        fee = baseFee + d * premiumPerPoint;
-        houseShare = d > 0 ? (fee * displaceHouseCutBps) / 10000 : 0;
-        victimShare = fee - houseShare;
-    }
-
-    /// @dev Send `amount` to `to`; on failure credit a withdrawable balance so a recipient
-    ///      that reverts on receive can't block the caller's action. Capped gas bounds griefing.
-    function _payout(address to, uint256 amount) private {
-        if (amount == 0) return;
-        (bool ok,) = payable(to).call{value: amount, gas: 30000}("");
-        if (!ok) owed[to] += amount;
-    }
-
-    /// @dev Return any msg.value above `fee` to the caller (fee already validated as <= msg.value).
-    function _refundExcess(uint256 fee) private {
-        uint256 excess = msg.value - fee;
-        if (excess > 0) _payout(msg.sender, excess);
-    }
-
-    /// @dev Fee-rarity weight of a slot's biome (street property).
-    function _biomeWeightForSlot(uint32 slot) private view returns (uint256) {
-        return biomeWeight[CubeEnv.idForStreet(uint256(slot) / 8)];
-    }
-
-    /// @dev How many of the 8 plots in `slot`'s street are cubes owned by `account`.
-    function _ownedInStreet(address account, uint32 slot) private view returns (uint256 count) {
-        uint32 base = (slot / 8) * 8;
-        for (uint32 k = 0; k < 8; k++) {
-            uint256 cid = cubeForSlot[base + k];
-            if (cid != 0 && _ownerOf(cid) == account) count++;
-        }
+        CubeWorldLib.moveCube(_world, _cubeData, cubeForSlot, cubeId, newSlot, totalSlots, _ownerOf(cubeId));
     }
 
     // ---- Fee quotes, admin knobs, treasury -----------------------------------
@@ -820,56 +654,45 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
         view
         returns (uint256 fee, address victim, uint256 victimShare, uint256 houseShare)
     {
-        uint256 occupant = cubeForSlot[newSlot];
-        if (occupant == 0) return (baseFee, address(0), 0, 0);
-        address v = _ownerOf(occupant);
-        if (v == _ownerOf(cubeId)) return (0, address(0), 0, 0); // free self-swap
-        (fee, houseShare, victimShare) = _displaceFee(_cubeData[cubeId].slot, newSlot);
-        victim = v;
+        return CubeWorldLib.quoteMove(_world, _cubeData, cubeForSlot, cubeId, newSlot, _ownerOf(cubeId));
     }
 
     /// @notice What a mergeStreet(street) would cost right now, plus the vacant-plot count.
     function quoteMerge(uint32 street) external view returns (uint256 fee, uint256 emptyPlots) {
-        uint256 base = uint256(street) * 8;
-        uint256 occ;
-        for (uint256 k = 0; k < 8; k++) {
-            if (cubeForSlot[uint32(base + k)] != 0) occ++;
-        }
-        emptyPlots = 8 - occ;
-        fee = emptyPlots * baseFee;
+        return CubeWorldLib.quoteMerge(_world, cubeForSlot, street);
     }
 
     function setBaseFee(uint256 v) external onlyOwner {
-        baseFee = v;
+        _world.baseFee = v;
         emit FeeKnobUpdated("baseFee", v);
     }
 
     function setPremiumPerPoint(uint256 v) external onlyOwner {
-        premiumPerPoint = v;
+        _world.premiumPerPoint = v;
         emit FeeKnobUpdated("premiumPerPoint", v);
     }
 
     function setBiomeWeight(uint8 biomeId, uint256 weight) external onlyOwner {
         if (biomeId > 5) revert BadBiomeId(biomeId);
-        biomeWeight[biomeId] = weight;
+        _world.biomeWeight[biomeId] = weight;
         emit FeeKnobUpdated(bytes32(uint256(biomeId)), weight);
     }
 
     function setDisplaceHouseCutBps(uint16 bps) external onlyOwner {
         if (bps > 10000) revert CutTooHigh(bps);
-        displaceHouseCutBps = bps;
+        _world.displaceHouseCutBps = bps;
         emit FeeKnobUpdated("displaceHouseCutBps", bps);
     }
 
     function setDisplaceCooldown(uint256 secs) external onlyOwner {
-        displaceCooldown = secs;
+        _world.displaceCooldown = secs;
         emit FeeKnobUpdated("displaceCooldown", secs);
     }
 
     /// @notice Sweep accrued house fees. Does NOT touch victim `owed` balances.
     function withdrawHouse(address to) external onlyOwner {
-        uint256 amt = houseBalance;
-        houseBalance = 0;
+        uint256 amt = _world.houseBalance;
+        _world.houseBalance = 0;
         (bool ok,) = payable(to).call{value: amt}("");
         if (!ok) revert WithdrawFailed();
         emit HouseWithdrawn(to, amt);
@@ -877,9 +700,9 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
 
     /// @notice Pull compensation credited when a direct displacement payout failed.
     function withdrawOwed() external nonReentrant {
-        uint256 amt = owed[msg.sender];
+        uint256 amt = _world.owed[msg.sender];
         if (amt == 0) revert NothingOwed();
-        owed[msg.sender] = 0;
+        _world.owed[msg.sender] = 0;
         (bool ok,) = payable(msg.sender).call{value: amt}("");
         if (!ok) revert WithdrawFailed();
         emit OwedWithdrawn(msg.sender, amt);
@@ -900,6 +723,103 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     function setCustomizesEnabled(bool enabled) external onlyOwner {
         customizesEnabled = enabled;
         emit CustomizesEnabledUpdated(enabled);
+    }
+
+    // ---- Marketplace / drop-page metadata -------------------------------------
+    // The read surface OpenSea's drop page + indexers expect from a SeaDrop token
+    // (the ISeaDropTokenContractMetadata subset that applies to us): maxSupply,
+    // contractURI (ERC-7572), and ERC-2981 royalties. SeaDrop itself never calls
+    // these — payment/limit enforcement reads getMintStats — but without them the
+    // hosted drop page can't show supply or royalties.
+
+    string private _contractURIValue;
+    address private _royaltyReceiver;
+    uint96 private _royaltyBps; // basis points out of 10_000
+    uint256 private _totalSupplyCount; // live token count (mints - burns)
+    bytes32 private _provenanceHashValue;
+
+    event ContractURIUpdated(string newContractURI); // ERC-7572
+    event RoyaltyInfoUpdated(address receiver, uint256 bps);
+    event ProvenanceHashUpdated(bytes32 previousHash, bytes32 newHash);
+
+    error InvalidRoyaltyBps(uint256 bps);
+    error ProvenanceHashFrozen();
+
+    /// @notice Tokens currently in existence (mints minus burns — merge burns its
+    ///         street's plot tokens). Indexers probe this on every ERC721A-style
+    ///         drop token, so expose it even though OZ ERC721 doesn't.
+    function totalSupply() external view returns (uint256) {
+        return _totalSupplyCount;
+    }
+
+    /// @dev Maintain the live count on every mint/burn (OZ v5 transfer hook).
+    function _update(address to, uint256 tokenId, address auth)
+        internal
+        override
+        returns (address from)
+    {
+        from = super._update(to, tokenId, auth);
+        if (from == address(0)) _totalSupplyCount++;
+        if (to == address(0)) _totalSupplyCount--;
+    }
+
+    /// @notice Token art is fully on-chain (tokenURI builds data: URIs) — there is
+    ///         no base URI. Exposed because SeaDrop tooling reads it.
+    function baseURI() external pure returns (string memory) {
+        return "";
+    }
+
+    function provenanceHash() external view returns (bytes32) {
+        return _provenanceHashValue;
+    }
+
+    /// @notice SeaDrop convention: the provenance hash commits to the art/pool
+    ///         ordering pre-drop and freezes once the first token exists.
+    function setProvenanceHash(bytes32 newProvenanceHash) external onlyOwner {
+        if (_nextCubeId != 1) revert ProvenanceHashFrozen();
+        emit ProvenanceHashUpdated(_provenanceHashValue, newProvenanceHash);
+        _provenanceHashValue = newProvenanceHash;
+    }
+
+    function royaltyAddress() external view returns (address) {
+        return _royaltyReceiver;
+    }
+
+    function royaltyBasisPoints() external view returns (uint256) {
+        return _royaltyBps;
+    }
+
+    /// @notice Genesis drop cap (the SeaDrop maxSupply). Post-mint external cubes
+    ///         also live on this contract, so `totalSupply`-style counts can exceed
+    ///         this; the DROP is bounded by it (see getMintStats).
+    function maxSupply() external view returns (uint256) {
+        return totalSlots;
+    }
+
+    function contractURI() external view returns (string memory) {
+        return _contractURIValue;
+    }
+
+    function setContractURI(string calldata newContractURI) external onlyOwner {
+        _contractURIValue = newContractURI;
+        emit ContractURIUpdated(newContractURI);
+    }
+
+    /// @notice ERC-2981 default royalty for every token.
+    function setDefaultRoyalty(address receiver, uint96 bps) external onlyOwner {
+        if (bps > 10_000) revert InvalidRoyaltyBps(bps);
+        _royaltyReceiver = receiver;
+        _royaltyBps = bps;
+        emit RoyaltyInfoUpdated(receiver, bps);
+    }
+
+    /// @notice ERC-2981: royalty for a sale of any token at `salePrice`.
+    function royaltyInfo(uint256, uint256 salePrice)
+        external
+        view
+        returns (address receiver, uint256 royaltyAmount)
+    {
+        return (_royaltyReceiver, (salePrice * _royaltyBps) / 10_000);
     }
 
     // ---- SeaDrop (OpenSea) genesis-mint integration --------------------------
@@ -1026,6 +946,7 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
     {
         return interfaceId == type(INonFungibleSeaDropToken).interfaceId
             || interfaceId == bytes4(0x49064906) // ERC-4906 (MetadataUpdate)
+            || interfaceId == bytes4(0x2a55205a) // ERC-2981 (royaltyInfo)
             || super.supportsInterface(interfaceId);
     }
 
@@ -1078,6 +999,13 @@ contract CubeNFT is ERC721, Ownable, ReentrancyGuard, INonFungibleSeaDropToken {
 
         _captureOrigin(cubeId, data);
         _reassignSource(cubeId, data, sourceContract, sourceTokenId); // claim requires unclaimed
+
+        // A per-cube payload override (from an earlier attested customize) would shadow
+        // the pool's source-keyed art forever — the cube would render its OLD art while
+        // traits and the claim registry report the new source (audit M-3). Clear it so
+        // the pool art shows through. (artStore is non-zero whenever a CC0 pool source
+        // passed _isPooledSource; guarded for the Normie-rebase-with-unset-store edge.)
+        if (artStore != address(0)) ICubeArtStore(artStore).clearCubePayload(cubeId);
 
         bool isNormie = sourceContract == normieContract;
         data.sourceKind = isNormie ? SOURCE_KIND_NORMIE : SOURCE_KIND_EXTERNAL_ERC721;

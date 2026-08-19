@@ -55,18 +55,24 @@ contract CubeRendererV2 is ICubeRenderer {
     }
 
     function tokenURI(uint256 tokenId) external view returns (string memory) {
-        return string.concat("data:application/json;utf8,", metadataJSON(tokenId));
+        // Base64 wrapper: raw JSON in a data URI carries unescaped `"{}` and
+        // spaces, which strict URI parsers (and some marketplace validators)
+        // reject. Base64 keeps every byte URI-safe end to end.
+        return string.concat(
+            "data:application/json;base64,", Base64.encode(bytes(metadataJSON(tokenId)))
+        );
     }
 
     function metadataJSON(uint256 tokenId) public view returns (string memory) {
         CubeNFT.CubeData memory data = cubes.resolvedCubeData(tokenId);
         string memory image = imageURI(tokenId);
+        bool isStreet = data.sourceKind == cubes.SOURCE_KIND_MERGED_STREET();
         return string.concat(
             "{",
-            '"name":"Blockcassone Cube #',
+            isStreet ? '"name":"TheBLOCK Street #' : '"name":"TheBLOCK #',
             tokenId.toString(),
             '",',
-            '"description":"A fully onchain Blockcassone Hilbert cube, rendered from contract-stored source facts and onchain renderer chunks.",',
+            '"description":"A fully onchain TheBLOCK Hilbert cube, rendered from contract-stored source facts and onchain renderer chunks.",',
             '"image":"',
             image,
             '",',
@@ -171,7 +177,10 @@ contract CubeRendererV2 is ICubeRenderer {
                 pds[k] = cubes.cubeDataUnchecked(plotIds[k]);
                 raws[k] = _rawImageBase64(plotIds[k], pds[k]);
             }
-            total += bytes(raws[k]).length + 192;
+            // Fixed-field cushion per plot: labels+seed(66) ≈ 190, plus slot/sourceTokenId/
+            // agentId which are uint256s (≤78 digits each) — 512 covers the worst case
+            // (the old 192 cushion violated the buffer contract for huge re-based ids).
+            total += bytes(raws[k]).length + 512;
         }
 
         bytes memory buf = StrBuf.alloc(total + 64);
@@ -275,7 +284,8 @@ contract CubeRendererV2 is ICubeRenderer {
             (, uint8 occ,) = cubes.streetPlots(tokenId);
             population = uint256(occ).toString();
         }
-        bytes memory buf = StrBuf.alloc(2048);
+        // 4KB: base traits ~1.4KB + up to 8 merged-plot source traits.
+        bytes memory buf = StrBuf.alloc(4096);
         buf.cat(_trait("plot", uint256(data.slot).toString()));
         buf.cat(",");
         buf.cat(_trait("region", regionForSlot(data.slot).toString()));
@@ -307,10 +317,27 @@ contract CubeRendererV2 is ICubeRenderer {
         buf.cat(_trait("Agentic", data.agentic ? "Y" : "N"));
         buf.cat(",");
         buf.cat(_trait("Agent ID", data.agentId.toString()));
-        buf.cat(",");
-        buf.cat(_trait("Renderer Version", "2"));
-        buf.cat(",");
-        buf.cat(_trait("Payload Version", uint256(data.payloadVersion).toString()));
+        // Renderer/payload versions are implementation internals (queryable via
+        // cubeData), not collector traits — deliberately NOT emitted.
+        if (isStreet) {
+            // A merged street lists every burned plot's source artwork — the
+            // provenance of what it absorbed. View-only; plot data is retained
+            // at merge time exactly for this.
+            (, , uint256[8] memory plots) = cubes.streetPlots(tokenId);
+            for (uint256 i = 0; i < 8; i++) {
+                if (plots[i] == 0) continue;
+                CubeNFT.CubeData memory pd = cubes.cubeDataUnchecked(plots[i]);
+                buf.cat(",");
+                buf.cat(
+                    _trait(
+                        string.concat("Plot ", i.toString(), " Source"),
+                        string.concat(
+                            _sourceArtLabel(pd.sourceContract), " #", pd.sourceTokenId.toString()
+                        )
+                    )
+                );
+            }
+        }
         return buf.str();
     }
 
@@ -330,7 +357,9 @@ contract CubeRendererV2 is ICubeRenderer {
         // Skip address(0) and codeless addresses: a name() call on a contract-less
         // address returns empty data that fails string-decode outside the catch.
         if (sourceContract == address(0) || sourceContract.code.length == 0) return "Unknown";
-        try ICollectionName(sourceContract).name() returns (string memory n) {
+        // Gas-capped: an untrusted (customized-source) contract must not be able to
+        // consume the whole render budget from inside name().
+        try ICollectionName(sourceContract).name{ gas: 200_000 }() returns (string memory n) {
             if (bytes(n).length > 0) return _jsonEscape(n);
         } catch { }
         return "Unknown";
@@ -397,12 +426,12 @@ contract CubeRendererV2 is ICubeRenderer {
 
     function _defaultHTMLHead() private pure returns (string memory) {
         return
-        "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><style>@font-face{font-family:'NormiesFont';src:url(data:font/woff2;base64,d09GMgABAAAAAAJcAAoAAAAACfgAAAISAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAABmAAPAqMfIocATYCJAMmCyQABCAFgkoHIBvBBwCeBXbLE2WILCc+GpqG29HsXqU0Hqp7fXt3KdrG6/gHi2AEAhiEkEbj0dK00sLzcM33r9KOI6lq1iCz6ZnPaBO5i20iXtJXLCTIHEl8S4h4CGmp7QANr0x1OoF7tVYtR/T+/19NZ9kFN5J2lebRa7jVPwb45rb8ZaiTJZ5YxgElEGLK2dQVWDoZW5D/TPQT1fqPImm2xeCv/xR0XvXNDfVmAdRZBZgBBSpMqQSmNDX0aYRi98pE55qZxzwdABgBC9hB4oWyBQENYEhnMmkMJoNDa5u1PO9HG6vIRTmf/dwfeJY5t7U+Onb2xnWfGGwn3e/4w7bCnwvZltgYex5/mJTbvtqcgjjReSZX0qP+fe5/IBaafxI21AORwEDOQLE+lnyBD8AezUszCXykD64t8Tj+bXZXhTwpRtKCBGo46z2d5PDF4dgvnDBabhAsBJh7VaNmef406p7qgCsMgRCKkUCD4qz6JJQCoUxd4lapRN/Qgs2SW9/T367bVkDzXSpOqaOYfg8goOL/3x9RqL4twV9wPv1XXn6ND5USSV/sNQ72G2LblArX+f+DcqTjPVDwq4EPnDQWwQp6IyJ5owhcGtWL3mhK30YX+b2XoXR6JrPHqlGp7UDtwIu9FVYZw2Q1aBQ2mslo5yhUDr3E6j9EWTZ5KUVv3dejRVOT2UAnxI8CFSisPmHzHGDU6Grfj9sAAA==) format('woff2');font-display:block}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020203;color:#ff98d9;font:13px monospace}canvas{width:100vw;height:100vh;display:block}.h{position:fixed;left:14px;bottom:12px;padding:9px 11px;border:2px solid #ff3ab8;background:#070208cc;text-shadow:0 0 10px #ff3ab8}</style></head><body><canvas id=c></canvas><div class=h id=h>Blockcassone</div>";
+        "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><style>@font-face{font-family:'NormiesFont';src:url(data:font/woff2;base64,d09GMgABAAAAAAJcAAoAAAAACfgAAAISAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAABmAAPAqMfIocATYCJAMmCyQABCAFgkoHIBvBBwCeBXbLE2WILCc+GpqG29HsXqU0Hqp7fXt3KdrG6/gHi2AEAhiEkEbj0dK00sLzcM33r9KOI6lq1iCz6ZnPaBO5i20iXtJXLCTIHEl8S4h4CGmp7QANr0x1OoF7tVYtR/T+/19NZ9kFN5J2lebRa7jVPwb45rb8ZaiTJZ5YxgElEGLK2dQVWDoZW5D/TPQT1fqPImm2xeCv/xR0XvXNDfVmAdRZBZgBBSpMqQSmNDX0aYRi98pE55qZxzwdABgBC9hB4oWyBQENYEhnMmkMJoNDa5u1PO9HG6vIRTmf/dwfeJY5t7U+Onb2xnWfGGwn3e/4w7bCnwvZltgYex5/mJTbvtqcgjjReSZX0qP+fe5/IBaafxI21AORwEDOQLE+lnyBD8AezUszCXykD64t8Tj+bXZXhTwpRtKCBGo46z2d5PDF4dgvnDBabhAsBJh7VaNmef406p7qgCsMgRCKkUCD4qz6JJQCoUxd4lapRN/Qgs2SW9/T367bVkDzXSpOqaOYfg8goOL/3x9RqL4twV9wPv1XXn6ND5USSV/sNQ72G2LblArX+f+DcqTjPVDwq4EPnDQWwQp6IyJ5owhcGtWL3mhK30YX+b2XoXR6JrPHqlGp7UDtwIu9FVYZw2Q1aBQ2mslo5yhUDr3E6j9EWTZ5KUVv3dejRVOT2UAnxI8CFSisPmHzHGDU6Grfj9sAAA==) format('woff2');font-display:block}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020203;color:#ff98d9;font:13px monospace}canvas{width:100vw;height:100vh;display:block}.h{position:fixed;left:14px;bottom:12px;padding:9px 11px;border:2px solid #ff3ab8;background:#070208cc;text-shadow:0 0 10px #ff3ab8}</style></head><body><canvas id=c></canvas><div class=h id=h>TheBLOCK</div>";
     }
 
     function _defaultHTMLScript() private pure returns (string memory) {
         return
-        "<script>(()=>{const T=window.BLOCKCASSONE_TOKEN,H=document.getElementById('h'),C=document.getElementById('c'),x=C.getContext('2d');C.width=innerWidth;C.height=innerHeight;x.fillStyle='#020203';x.fillRect(0,0,C.width,C.height);x.fillStyle='#ff98d9';x.font='700 18px monospace';x.fillText('Renderer asset chunks are not installed.',32,54);x.fillStyle='#aaffb2';x.font='14px monospace';x.fillText('Cube #'+T.tokenId+' / Normie #'+T.sourceTokenId+' / plot '+T.slot,32,84);H.textContent='Blockcassone renderer fallback';})();</script></body></html>";
+        "<script>(()=>{const T=window.BLOCKCASSONE_TOKEN,H=document.getElementById('h'),C=document.getElementById('c'),x=C.getContext('2d');C.width=innerWidth;C.height=innerHeight;x.fillStyle='#020203';x.fillRect(0,0,C.width,C.height);x.fillStyle='#ff98d9';x.font='700 18px monospace';x.fillText('Renderer asset chunks are not installed.',32,54);x.fillStyle='#aaffb2';x.font='14px monospace';x.fillText('Cube #'+T.tokenId+' / Normie #'+T.sourceTokenId+' / plot '+T.slot,32,84);H.textContent='TheBLOCK renderer fallback';})();</script></body></html>";
     }
 }
 

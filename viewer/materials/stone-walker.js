@@ -10,6 +10,7 @@
 import { hash1 }      from '../tree-walker.js';
 import { mat4, identity } from '../../renderer/src/math.js';
 import { buildCoreLineMesh, buildGlowLineMesh, planePerpFn } from './line-mesh.js';
+import { artCorners } from './plane-2d.js';
 import {
   normieIdForCube,
   makePlanePixelFn,
@@ -355,7 +356,7 @@ export function buildStoneWalker(motifIdx, hilbert, allPlanes, gl, meshes) {
     const vs = [(mx[0]-mn[0])/40, (mx[1]-mn[1])/40, (mx[2]-mn[2])/40];
 
     // Build filled-voxel array (intersection of all cube planes).
-    const pixFns = cubePlanes.map(p => makePlanePixelFn(p, mn, vs));
+    const pixFns = cubePlanes.map(p => makePlanePixelFn(p, mn, vs, artCorners(p)));
     const filled = buildFilledArray(cubePlanes, pixelArrays, pixFns);
     const filledCount = filled.reduce((s, v) => s + v, 0);
     if (filledCount === 0) { meshes[builtKey] = null; return []; }

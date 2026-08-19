@@ -39,7 +39,7 @@ contract CubeFeesTest is Test {
 
     function setUp() public {
         normies = new FeesMockNormies();
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 4096, OWNER);
         vm.startPrank(OWNER);
         cubes.setMovesEnabled(true);
         cubes.setMergesEnabled(true);

@@ -6,6 +6,12 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 
+// The viewer fans out many concurrent /api/chain-rpc eth_calls (thumbnails, previews), all
+// proxied through Node's built-in fetch (undici) on one shared global dispatcher. That trips
+// undici's default 10-listener "possible EventEmitter memory leak" warning on its socket pool —
+// legitimate concurrency, not a leak. Raise the ceiling so the console stays clean.
+require('events').EventEmitter.defaultMaxListeners = 100;
+
 const ROOT      = __dirname;                        // renderer/
 const REPO_ROOT = path.resolve(__dirname, '..');    // blockcassone/
 const PORT      = parseInt(process.env.PORT || '3000', 10);
@@ -44,7 +50,7 @@ loadDotEnv(ENV_PATH);
 
 // Route prefixes that should resolve from the repo root (outside renderer/).
 // Everything else resolves from renderer/.
-const REPO_PREFIXES = ['/viewer/', '/core/', '/public/', '/schema/', '/renderer/', '/data/', '/dist/'];
+const REPO_PREFIXES = ['/viewer/', '/core/', '/public/', '/schema/', '/renderer/', '/data/', '/dist/', '/tmp/'];
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -120,14 +126,78 @@ function writeDevMints(state) {
 }
 
 function readChainConfig() {
+  // The proxy's upstream RPC. Prefer a SERVER-ONLY env var so a key-bearing endpoint
+  // (e.g. Alchemy on Sepolia) never has to live in the browser-served chain-config.json
+  // — in proxied mode the deploy writes rpcUrl:"" there on purpose. Fall back to the
+  // config's rpcUrl only for local dev, where it's a non-secret 127.0.0.1 node.
+  loadDotEnv(ENV_PATH, { override: true });
+  const envRpc = process.env.BLOCKCASSONE_RPC_URL || process.env.BLOCKCASSONE_PROXY_RPC_URL;
   try {
     const configPath = path.join(REPO_ROOT, 'data', 'chain-config.json');
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     return {
-      rpcUrl: String(parsed.rpcUrl || 'http://127.0.0.1:8545'),
+      rpcUrl: String(envRpc || parsed.rpcUrl || 'http://127.0.0.1:8545'),
+      cubeNft: String(parsed.cubeNft || ''),
+      thumbnailRenderer: String(parsed.thumbnailRenderer || ''),
     };
   } catch (_) {
-    return { rpcUrl: 'http://127.0.0.1:8545' };
+    return { rpcUrl: String(envRpc || 'http://127.0.0.1:8545'), cubeNft: '', thumbnailRenderer: '' };
+  }
+}
+
+// Minimal eth_call over the upstream RPC (no viem dependency, so this works on a
+// bare local dev box). Returns the raw 0x-prefixed return data.
+async function ethCall(rpcUrl, to, data) {
+  const r = await devFetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || 'eth_call error');
+  return String(j.result || '0x');
+}
+
+const pad32 = (hex) => hex.replace(/^0x/, '').padStart(64, '0');
+
+// Decode a single ABI-encoded `string` return (offset, length, utf-8 bytes).
+function decodeAbiString(ret) {
+  const hex = ret.replace(/^0x/, '');
+  if (hex.length < 128) return '';
+  const len = parseInt(hex.slice(64, 128), 16);
+  const bytes = Buffer.from(hex.slice(128, 128 + len * 2), 'hex');
+  return bytes.toString('utf8');
+}
+
+// The REAL per-cube 2D thumbnail: cubeForSlot(slot) -> thumbnailSVG(cubeId) on-chain,
+// built from the SAME art bytes the 3D cube renders — so the two panels always match.
+// GET /api/thumbnail?slot=N  (or ?cube=ID)  ->  image/svg+xml
+async function handleThumbnail(req, res) {
+  try {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    const cfg = readChainConfig();
+    if (!cfg.thumbnailRenderer) { sendJson(res, 503, { error: 'thumbnailRenderer not configured' }); return; }
+    let cubeId = url.searchParams.get('cube');
+    if (!cubeId) {
+      const slot = Number(url.searchParams.get('slot'));
+      if (!Number.isInteger(slot) || slot < 0) { sendJson(res, 400, { error: 'bad slot' }); return; }
+      if (!cfg.cubeNft) { sendJson(res, 503, { error: 'cubeNft not configured' }); return; }
+      const ret = await ethCall(cfg.rpcUrl, cfg.cubeNft, '0x7bdf1f21' + pad32(slot.toString(16))); // cubeForSlot(uint32)
+      cubeId = BigInt(ret || '0x0').toString();
+    }
+    if (BigInt(cubeId) === 0n) { sendJson(res, 404, { error: 'no cube at slot' }); return; }
+    const svgRet = await ethCall(cfg.rpcUrl, cfg.thumbnailRenderer,
+      '0x1df76ecc' + pad32(BigInt(cubeId).toString(16))); // thumbnailSVG(uint256)
+    const svg = decodeAbiString(svgRet);
+    if (!svg) { sendJson(res, 502, { error: 'empty thumbnail' }); return; }
+    res.writeHead(200, {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=30',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end(svg);
+  } catch (err) {
+    sendJson(res, 502, { error: 'thumbnail failed', detail: String(err?.message || err) });
   }
 }
 
@@ -192,26 +262,68 @@ async function handleDevMints(req, res) {
   sendJson(res, 405, { error: 'Method not allowed' });
 }
 
-async function proxyOpenSea(req, res) {
-  loadDotEnv(ENV_PATH, { override: true });
-  const apiKey = process.env.OPENSEA_API_KEY;
-  if (!apiKey) {
-    sendJson(res, 500, { error: 'Missing OPENSEA_API_KEY in .env' });
-    return;
-  }
+// ---------- OpenSea API key: self-healing free "agent" key ----------
+// OpenSea issues instant, no-signup free keys via POST /api/v2/auth/keys (30-day expiry,
+// 3 creations/hr/IP — https://docs.opensea.io/reference/api-keys). We cache + persist one,
+// refresh it a day before expiry, and regenerate on a 401/403 — so the wallet-NFT proxy
+// keeps working with zero manual key rotation. A manually-set OPENSEA_API_KEY in .env is
+// used as a seed if present; otherwise a free key is generated on first need.
+const OPENSEA_KEY_FILE = path.join(REPO_ROOT, 'data', '.opensea-key.json');
+const OPENSEA_REFRESH_BUFFER_MS = 24 * 60 * 60 * 1000;
+let _osKey = null; // { apiKey, expiresAt }
+let _osKeyInflight = null;
 
+function _osKeyValid(rec) { return rec && rec.apiKey && (rec.expiresAt - Date.now() > OPENSEA_REFRESH_BUFFER_MS); }
+
+function _loadPersistedOsKey() {
+  try { const j = JSON.parse(fs.readFileSync(OPENSEA_KEY_FILE, 'utf8')); if (j && j.apiKey) return j; } catch (_) {}
+  return null;
+}
+
+async function generateOpenSeaKey() {
+  const r = await devFetch('https://api.opensea.io/api/v2/auth/keys', { method: 'POST', headers: { accept: 'application/json' } });
+  if (!r.ok) throw new Error(`auth/keys HTTP ${r.status}`);
+  const j = await r.json();
+  const apiKey = j.api_key || j.apiKey || j.key;
+  if (!apiKey) throw new Error('auth/keys returned no api_key');
+  const expiresAt = j.expires_at ? Date.parse(j.expires_at) : (Date.now() + 30 * 24 * 60 * 60 * 1000);
+  _osKey = { apiKey, expiresAt };
+  try {
+    fs.mkdirSync(path.dirname(OPENSEA_KEY_FILE), { recursive: true });
+    fs.writeFileSync(OPENSEA_KEY_FILE, JSON.stringify({ ..._osKey, generatedAt: new Date().toISOString(), raw: j }, null, 2));
+  } catch (_) { /* non-fatal */ }
+  console.log(`[opensea] generated free agent key, expires ${new Date(expiresAt).toISOString()}`);
+  return apiKey;
+}
+
+async function getOpenSeaKey(forceNew = false) {
+  if (!forceNew) {
+    if (_osKeyValid(_osKey)) return _osKey.apiKey;
+    const p = _loadPersistedOsKey();
+    if (_osKeyValid(p)) { _osKey = p; return p.apiKey; }
+    loadDotEnv(ENV_PATH, { override: true });
+    if (!_osKey && !p && process.env.OPENSEA_API_KEY) return process.env.OPENSEA_API_KEY; // manual seed
+  }
+  // Coalesce concurrent regenerations (rate-limited 3/hr/IP).
+  if (!_osKeyInflight) _osKeyInflight = generateOpenSeaKey().finally(() => { _osKeyInflight = null; });
+  return _osKeyInflight;
+}
+
+async function proxyOpenSea(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const upstreamPath = url.pathname.replace(/^\/api\/opensea\/?/, '');
   const upstream = new URL(`https://api.opensea.io/api/v2/${upstreamPath}`);
   upstream.search = url.search;
+  const call = (key) => devFetch(upstream, { headers: { accept: 'application/json', 'x-api-key': key } });
 
   try {
-    const upstreamRes = await devFetch(upstream, {
-      headers: {
-        'accept': 'application/json',
-        'x-api-key': apiKey,
-      },
-    });
+    let key = await getOpenSeaKey();
+    let upstreamRes = await call(key);
+    if (upstreamRes.status === 401 || upstreamRes.status === 403) {
+      // Key expired/invalid — regenerate once and retry.
+      key = await getOpenSeaKey(true);
+      upstreamRes = await call(key);
+    }
     const text = await upstreamRes.text();
     res.writeHead(upstreamRes.status, {
       'Content-Type': upstreamRes.headers.get('content-type') || 'application/json; charset=utf-8',
@@ -279,6 +391,69 @@ async function proxyChainRpc(req, res) {
       cause: err?.cause ? String(err.cause?.message || err.cause) : undefined,
       code: err?.cause?.code,
     });
+  }
+}
+
+// ---------- Attestation signer service (/api/attest) ----------
+// The FlatteningAttestation is signed by a server-held key (never the browser). The
+// client (viewer/preview-chain.js) builds the EXACT EIP-712 typed data it will submit,
+// POSTs it here, and gets back a signature. On local Anvil the client uses the node's
+// unlocked signer (eth_signTypedData_v4) instead and never reaches this route.
+//
+// SECURITY: this signs whatever attestation the client sends — i.e. a signing oracle,
+// acceptable for the Sepolia E2E stub (a throwaway signer key). For a real launch, the
+// service should independently verify the flattening and own the nonce/deadline before
+// signing, rather than trusting the client's payloadHash.
+//
+// viem is required LAZILY so the dev server still boots without it (only the Sepolia
+// signer path needs it — install with `npm i viem` on the VPS). Key from env:
+// BLOCKCASSONE_ATTESTATION_SIGNER_PK (or ATTEST_SIGNER_PK) — the PRIVATE key whose
+// address is the deploy-time BLOCKCASSONE_ATTESTATION_SIGNER.
+let _attestAccount = null;
+function getAttestAccount() {
+  if (_attestAccount) return _attestAccount;
+  const pk = process.env.BLOCKCASSONE_ATTESTATION_SIGNER_PK || process.env.ATTEST_SIGNER_PK;
+  if (!pk) throw new Error('Missing BLOCKCASSONE_ATTESTATION_SIGNER_PK in .env');
+  let privateKeyToAccount;
+  try { ({ privateKeyToAccount } = require('viem/accounts')); }
+  catch (_) { throw new Error('viem not installed for the signer service — run: npm i viem'); }
+  _attestAccount = privateKeyToAccount(pk.startsWith('0x') ? pk : '0x' + pk);
+  return _attestAccount;
+}
+
+// viem wants bigint for uint/int fields and a real bool; the client sends them as
+// strings over JSON, so coerce by the primaryType's field types before signing.
+function coerceTypedMessage(types, primaryType, message) {
+  const out = { ...message };
+  for (const f of (types[primaryType] || [])) {
+    if (out[f.name] == null) continue;
+    if (/^u?int\d*$/.test(f.type)) out[f.name] = BigInt(out[f.name]);
+    else if (f.type === 'bool' && typeof out[f.name] === 'string') out[f.name] = out[f.name] === 'true';
+  }
+  return out;
+}
+
+async function handleAttest(req, res) {
+  if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method not allowed' }); return; }
+  loadDotEnv(ENV_PATH, { override: true });
+  try {
+    const { typedData } = JSON.parse(await readRequestBody(req, 4_000_000));
+    if (!typedData || !typedData.domain || !typedData.message || !typedData.primaryType) {
+      sendJson(res, 400, { error: 'Missing typedData {domain, types, primaryType, message}' });
+      return;
+    }
+    const account = getAttestAccount();
+    const types = { ...typedData.types };
+    delete types.EIP712Domain; // viem derives the domain type itself
+    const signature = await account.signTypedData({
+      domain: typedData.domain,
+      types,
+      primaryType: typedData.primaryType,
+      message: coerceTypedMessage(types, typedData.primaryType, typedData.message),
+    });
+    sendJson(res, 200, { signature, signer: account.address });
+  } catch (err) {
+    sendJson(res, 500, { error: 'Attestation signing failed', detail: String(err?.message || err) });
   }
 }
 
@@ -455,8 +630,12 @@ const server = http.createServer((req, res) => {
   if (req.url === '/dev-config') {
     loadDotEnv(ENV_PATH, { override: true });
     sendJson(res, 200, {
-      openseaConfigured: Boolean(process.env.OPENSEA_API_KEY),
+      openseaConfigured: true, // the proxy self-generates a free OpenSea key on demand
       defaultWallet: process.env.OPENSEA_DEFAULT_WALLET || '',
+      // Public client value (safe to expose) — the SAME WalletConnect project id the
+      // allowlist build uses. Reads WALLETCONNECT_ID, falling back to the allowlist's
+      // WALLETCONNECT_PROJECT_ID name so either works.
+      walletConnectProjectId: process.env.WALLETCONNECT_ID || process.env.WALLETCONNECT_PROJECT_ID || '',
     });
     return;
   }
@@ -473,6 +652,16 @@ const server = http.createServer((req, res) => {
 
   if (req.url === '/api/chain-rpc') {
     proxyChainRpc(req, res);
+    return;
+  }
+
+  if (req.url === '/api/attest') {
+    handleAttest(req, res);
+    return;
+  }
+
+  if (req.url.startsWith('/api/thumbnail')) {
+    handleThumbnail(req, res);
     return;
   }
 
@@ -554,7 +743,8 @@ const server = http.createServer((req, res) => {
       // etc.) don't over-restrict module/worker execution. Never ship this.
       'Content-Security-Policy':
         "default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: http: https:; " +
-        "connect-src 'self' http: https:; " +
+        // wss: for the WalletConnect relay (relay.walletconnect.com) + explorer over https:.
+        "connect-src 'self' http: https: wss:; " +
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:;",
     });
     res.end(data);

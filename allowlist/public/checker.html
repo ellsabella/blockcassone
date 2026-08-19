@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>THE BLOCK · Allowlist Checker</title>
+<style>
+  @font-face {
+    font-family: 'NormiesFont';
+    src: url(data:font/otf;base64,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AV0BXgFfAWABYQFiAWMBZAFlAWYBZwFoAWkBagFrAWwHdW5pMDAyMQd1bmkwMDIyB3VuaTAwMjMHdW5pMDAyNAd1bmkwMDI1B3VuaTAwMjYHdW5pMDAyNwd1bmkwMDI4B3VuaTAwMjkHdW5pMDAyQQd1bmkwMDJCB3VuaTAwMkMHdW5pMDAyRAd1bmkwMDJFB3VuaTAwMkYHdW5pMDAzMAd1bmkwMDMxB3VuaTAwMzIHdW5pMDAzMwd1bmkwMDM0B3VuaTAwMzUHdW5pMDAzNgd1bmkwMDM3B3VuaTAwMzgHdW5pMDAzOQd1bmkwMDNBB3VuaTAwM0IHdW5pMDAzQwd1bmkwMDNEB3VuaTAwM0UHdW5pMDAzRgd1bmkwMDQwB3VuaTAwNDEHdW5pMDA0Mgd1bmkwMDQzB3VuaTAwNDQHdW5pMDA0NQd1bmkwMDQ2B3VuaTAwNDcHdW5pMDA0OAd1bmkwMDQ5B3VuaTAwNEEHdW5pMDA0Qgd1bmkwMDRDB3VuaTAwNEQHdW5pMDA0RQd1bmkwMDRGB3VuaTAwNTAHdW5pMDA1MQd1bmkwMDUyB3VuaTAwNTMHdW5pMDA1NAd1bmkwMDU1B3VuaTAwNTYHdW5pMDA1Nwd1bmkwMDU4B3VuaTAwNTkHdW5pMDA1QQd1bmkwMDVCB3VuaTAwNUMHdW5pMDA1RAd1bmkwMDVFB3VuaTAwNUYHdW5pMDA2MAd1bmkwMDYxB3VuaTAwNjIHdW5pMDA2Mwd1bmkwMDY0B3VuaTAwNjUHdW5pMDA2Ngd1bmkwMDY3B3VuaTAwNjgHdW5pMDA2OQd1bmkwMDZBB3VuaTAwNkIHdW5pMDA2Qwd1bmkwMDZEB3VuaTAwNkUHdW5pMDA2Rgd1bmkwMDcwB3VuaTAwNzEHdW5pMDA3Mgd1bmkwMDczB3VuaTAwNzQHdW5pMDA3NQd1bmkwMDc2B3VuaTAwNzcHdW5pMDA3OAd1bmkwMDc5B3VuaTAwN0EHdW5pMDA3Qgd1bmkwMDdDB3VuaTAwN0QHdW5pMDA3RQd1bmkwMDgwB3VuaTAwQjcHdW5pMDBCOAd1bmkwMEI5B3VuaTAwQzcHdW5pMDBENgd1bmkwMEQ3B3VuaTAwREMHdW5pMDBFNwd1bmkwMEY2B3VuaTAwRjcHdW5pMDBGQwd1bmkwMTMx) format('opentype');
+    font-display: swap;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  :root {
+    --bg: #030304; --ink: #c8c8cc; --pink: #ff3ab8; --pink-soft: #ff7dcc;
+    --green: #3aff8e; --line: rgba(255, 58, 184, 0.34); --line-hi: rgba(255, 58, 184, 0.82);
+  }
+  body { background: var(--bg); color: var(--ink); font-family: 'Courier New', monospace; overflow-x: hidden; }
+
+  .cube-bg {
+    position: fixed; inset: 0; width: 100%; height: 100%; border: 0;
+    transform: scale(1.5); transform-origin: center; pointer-events: none; z-index: 0;
+  }
+  .scrim {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    background:
+      radial-gradient(circle at 50% 34%, rgba(3, 3, 5, 0.14), rgba(3, 3, 5, 0.74) 60%, rgba(3, 3, 5, 0.95) 100%),
+      linear-gradient(0deg, rgba(3, 3, 5, 0.6), rgba(3, 3, 5, 0.3));
+  }
+
+  .wrap {
+    position: relative; z-index: 2; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px; padding: 44px 20px; text-align: center;
+  }
+  .eyebrow {
+    font-size: clamp(12px, 2.4vw, 17px); font-weight: 800; letter-spacing: clamp(3px, 1vw, 9px);
+    color: var(--pink-soft); text-transform: uppercase; text-shadow: 0 0 14px rgba(255, 58, 184, 0.5);
+  }
+  .blockword {
+    font-family: 'NormiesFont', 'Courier New', monospace;
+    font-size: clamp(48px, 12vw, 128px); font-weight: 800; letter-spacing: clamp(4px, 1.3vw, 15px);
+    color: #fff; line-height: 0.9; margin-top: -4px;
+    text-shadow: 0 0 28px rgba(255, 58, 184, 0.65), 0 0 70px rgba(255, 58, 184, 0.35);
+  }
+  .lead { font-size: clamp(13px, 2.5vw, 17px); color: var(--ink); letter-spacing: 1px; max-width: 460px; line-height: 1.5; }
+
+  /* ---- controls ---- */
+  .panel {
+    width: min(560px, 92vw); display: flex; flex-direction: column; gap: 14px; margin-top: 6px;
+  }
+  .cta {
+    font-family: inherit; cursor: pointer; color: #fff;
+    font-size: clamp(14px, 2.2vw, 18px); font-weight: 800; letter-spacing: 3px;
+    padding: 16px 30px; background: rgba(255, 58, 184, 0.16); border: 2px solid var(--line-hi);
+    box-shadow: 0 0 22px rgba(255, 58, 184, 0.28), inset 0 0 22px rgba(255, 58, 184, 0.08);
+    transition: box-shadow .18s, background .18s, transform .18s;
+  }
+  .cta:hover { background: rgba(255, 58, 184, 0.26); box-shadow: 0 0 30px rgba(255, 58, 184, 0.45), inset 0 0 22px rgba(255, 58, 184, 0.12); }
+  .cta:active { transform: translateY(1px); }
+  .connect { width: 100%; }
+  .connect.connected { border-color: rgba(58, 255, 142, 0.7); box-shadow: 0 0 22px rgba(58, 255, 142, 0.25), inset 0 0 22px rgba(58, 255, 142, 0.06); background: rgba(58, 255, 142, 0.12); }
+
+  .divider { display: flex; align-items: center; gap: 12px; color: rgba(200, 200, 204, 0.5); font-size: 12px; letter-spacing: 3px; text-transform: uppercase; }
+  .divider::before, .divider::after { content: ''; height: 1px; flex: 1; background: rgba(255, 255, 255, 0.12); }
+
+  .searchrow { display: flex; gap: 10px; }
+  .addr-input {
+    flex: 1 1 auto; min-width: 0; padding: 15px 16px; font-family: 'Courier New', monospace;
+    font-size: clamp(13px, 2vw, 16px); color: #fff; letter-spacing: 0.5px;
+    background: rgba(3, 3, 5, 0.6); border: 1.5px solid var(--line); outline: none;
+    transition: border-color .16s, box-shadow .16s;
+  }
+  .addr-input::placeholder { color: rgba(200, 200, 204, 0.4); letter-spacing: 0.5px; }
+  .addr-input:focus { border-color: var(--pink); box-shadow: 0 0 0 1px var(--pink), 0 0 16px rgba(255, 58, 184, 0.4); }
+  .go { flex: 0 0 auto; padding: 15px 28px; }
+
+  /* ---- result ---- */
+  .result {
+    width: min(560px, 92vw); margin-top: 8px; padding: 26px 24px;
+    border: 2px solid rgba(255, 255, 255, 0.14); background: rgba(3, 3, 5, 0.62);
+    backdrop-filter: blur(4px); display: none; flex-direction: column; gap: 12px;
+  }
+  .result.show { display: flex; }
+  .result-title { font-size: clamp(19px, 3.2vw, 27px); font-weight: 800; line-height: 1.3; color: #fff; }
+  .result-sub { font-size: clamp(14px, 2.2vw, 18px); color: var(--pink-soft); letter-spacing: 0.5px; }
+  .result-sub a { color: #fff; text-decoration: none; border-bottom: 1px solid var(--pink); }
+  .result-sub a:hover { color: var(--pink-soft); }
+  .result-addr { font-size: clamp(15px, 2.6vw, 21px); color: rgba(220, 220, 226, 0.82); word-break: break-all; letter-spacing: 0.5px; }
+
+  .result.gtd  { border-color: rgba(58, 255, 142, 0.6);  box-shadow: 0 0 40px rgba(58, 255, 142, 0.22); }
+  .result.gtd  .result-title { text-shadow: 0 0 22px rgba(58, 255, 142, 0.55); }
+  .result.gtd  .result-sub { color: #b8ffd6; }
+  .result.gtd  .result-sub a { border-bottom-color: var(--green); }
+  .result.fcfs { border-color: var(--line-hi); box-shadow: 0 0 40px rgba(255, 58, 184, 0.22); }
+  .result.fcfs .result-title { text-shadow: 0 0 22px rgba(255, 58, 184, 0.5); }
+  .result.none { border-color: rgba(255, 255, 255, 0.16); box-shadow: 0 0 30px rgba(0, 0, 0, 0.5); }
+  .result.none .result-title { color: var(--ink); }
+  .result.loading .result-title { color: var(--pink-soft); }
+
+  .reset { width: min(560px, 92vw); display: none; margin-top: 2px; }
+
+  /* ---- invalid popup ---- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+    background: rgba(3, 3, 5, 0.72); backdrop-filter: blur(3px); padding: 20px;
+  }
+  .overlay.show { display: flex; }
+  .popup {
+    width: min(400px, 92vw); padding: 30px 26px; text-align: center;
+    background: #0b0b10; border: 2px solid var(--line-hi);
+    box-shadow: 0 0 40px rgba(255, 58, 184, 0.4); display: flex; flex-direction: column; gap: 14px;
+  }
+  .popup-title { font-size: 22px; font-weight: 800; color: #fff; text-shadow: 0 0 18px rgba(255, 58, 184, 0.5); }
+  .popup-msg { font-size: 14px; color: var(--ink); line-height: 1.5; }
+  .popup .cta { align-self: center; padding: 12px 34px; font-size: 15px; }
+</style>
+</head>
+<body>
+  <iframe class="cube-bg" src="/cube-bg.html" title="" scrolling="no" tabindex="-1" aria-hidden="true"></iframe>
+  <div class="scrim"></div>
+
+  <div class="wrap">
+    <div class="eyebrow">Allowlist Checker</div>
+    <h1 class="blockword">BLOCKS</h1>
+    <p class="lead">Connect your wallet or paste an address to check your allowlist status.</p>
+
+    <div class="panel" id="panel">
+      <button class="cta connect" id="connect">CONNECT WALLET</button>
+      <div class="divider">or</div>
+      <div class="searchrow">
+        <input class="addr-input" id="addr" type="text" spellcheck="false" autocomplete="off"
+               placeholder="Paste an ETH address (0x…)" />
+        <button class="cta go" id="go">GO</button>
+      </div>
+    </div>
+
+    <div class="result" id="result">
+      <div class="result-title" id="result-title"></div>
+      <div class="result-sub" id="result-sub"></div>
+      <div class="result-addr" id="result-addr"></div>
+    </div>
+
+    <button class="cta reset" id="reset">CHECK ANOTHER WALLET</button>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="popup">
+      <div class="popup-title">Invalid ETH address</div>
+      <div class="popup-msg">An Ethereum address must start with <b>0x</b> and be <b>42 characters</b> long. Please check and try again.</div>
+      <button class="cta" id="popup-ok">OK</button>
+    </div>
+  </div>
+
+<script>
+  var FOLLOW = 'Follow <a href="https://x.com/bright_lightart" target="_blank" rel="noopener">@bright_lightart</a> for info &amp; drop timings';
+  var addr = document.getElementById('addr');
+  var result = document.getElementById('result');
+  var rTitle = document.getElementById('result-title');
+  var rSub = document.getElementById('result-sub');
+  var rAddr = document.getElementById('result-addr');
+  var overlay = document.getElementById('overlay');
+  var connectBtn = document.getElementById('connect');
+  var panel = document.getElementById('panel');
+  var resetBtn = document.getElementById('reset');
+
+  function isValid(s) { return /^0x[0-9a-fA-F]{40}$/.test((s || '').trim()); }
+
+  function showPopup() { overlay.classList.add('show'); }
+  function hidePopup() { overlay.classList.remove('show'); }
+  document.getElementById('popup-ok').onclick = hidePopup;
+  overlay.onclick = function (e) { if (e.target === overlay) hidePopup(); };
+
+  function render(tier, address) {
+    if (tier === 'loading') {
+      result.className = 'result show loading';
+      rTitle.textContent = 'Checking…'; rSub.innerHTML = ''; rAddr.textContent = '';
+      panel.style.display = 'none'; resetBtn.style.display = 'none';
+      return;
+    }
+    result.className = 'result show ' + (tier || 'none');
+    rAddr.textContent = address ? address : '';
+    if (tier === 'gtd') {
+      rTitle.textContent = 'Eligible for guaranteed spots';
+      rSub.innerHTML = FOLLOW;
+    } else if (tier === 'fcfs') {
+      rTitle.textContent = 'Eligible for FCFS list';
+      rSub.innerHTML = FOLLOW;
+    } else {
+      rTitle.textContent = 'Not Eligible :(';
+      rSub.innerHTML = '';
+    }
+    // A result is showing → collapse the search controls, offer "check another".
+    panel.style.display = 'none'; resetBtn.style.display = 'block';
+  }
+
+  // Reset back to the search view: clear input, result, and the connected state.
+  function showSearchMode() {
+    result.className = 'result'; resetBtn.style.display = 'none';
+    panel.style.display = 'flex';
+    addr.value = '';
+    connectBtn.classList.remove('connected'); connectBtn.textContent = 'CONNECT WALLET';
+    addr.focus();
+  }
+  resetBtn.onclick = showSearchMode;
+
+  // On a network/server error, show a neutral retry message — never a guessed tier.
+  function renderError(address) {
+    result.className = 'result show none';
+    rTitle.textContent = 'Couldn’t check right now — please try again.';
+    rSub.innerHTML = ''; rAddr.textContent = address || '';
+    panel.style.display = 'none'; resetBtn.style.display = 'block';
+  }
+
+  async function check(address) {
+    var a = (address || '').trim();
+    if (!isValid(a)) { showPopup(); return; }
+    render('loading');
+    try {
+      var r = await fetch('/api/allowlist-check?wallet=' + a);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var j = await r.json();
+      render(j.tier, a);
+    } catch (e) {
+      renderError(a);
+    }
+  }
+
+  document.getElementById('go').onclick = function () { check(addr.value); };
+  addr.addEventListener('keydown', function (e) { if (e.key === 'Enter') check(addr.value); });
+
+  connectBtn.onclick = async function () {
+    if (!window.ethereum) { addr.focus(); showPopupNoWallet(); return; }
+    try {
+      var accts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      if (accts && accts[0]) {
+        connectBtn.classList.add('connected');
+        connectBtn.textContent = accts[0].slice(0, 6) + '…' + accts[0].slice(-4);
+        addr.value = accts[0];
+        check(accts[0]);
+      }
+    } catch (e) { /* user rejected */ }
+  };
+  function showPopupNoWallet() {
+    document.querySelector('.popup-title').textContent = 'No wallet detected';
+    document.querySelector('.popup-msg').innerHTML = 'No browser wallet found. Install MetaMask / Rabby, or paste your address into the box.';
+    showPopup();
+  }
+
+  // ?state=gtd|fcfs|none|invalid — force a panel for visual review.
+  var qs = new URLSearchParams(location.search).get('state');
+  if (qs === 'invalid') showPopup();
+  else if (qs) render(qs, '0x1234abcd1234abcd1234abcd1234abcd1234abcd');
+</script>
+</body>
+</html>

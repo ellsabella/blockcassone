@@ -1,4 +1,4 @@
-# Blockcassone Contracts
+# TheBLOCK Contracts
 
 This folder contains the Foundry Solidity project. It is intentionally separate from the existing JavaScript renderer and viewer pipeline, but the dev viewer is now the primary place to prototype project-home, mint, world, and art requirements before they are moved into contracts.
 
@@ -47,7 +47,7 @@ Likely production mint contracts:
 - `AgentStatusRegistry`: current source-agent binding state. Genesis cubes keep
   their mint-time agent snapshot, but metadata/renderers should prefer the
   registry value once a current binding has been written onchain. This supports
-  Normies becoming agentic after Blockcassone mint.
+  Normies becoming agentic after TheBLOCK mint.
 - `NormieAdapter` / `MainnetNormieAdapter` are the onchain boundary for reading
   Normie source data directly from the canonical contracts. The adapter exposes
   owner, reveal/storage flags, raw image data, trait bytes, and renderer-friendly

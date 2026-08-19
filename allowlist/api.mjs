@@ -67,6 +67,35 @@ export function createApiHandler(env) {
     ? path.resolve(env.SUBMISSIONS_FILE)
     : path.join(REPO_ROOT, 'allowlist-submissions.jsonl');
 
+  // Cloudflare Turnstile — OFF until TURNSTILE_SECRET is set, so the site behaves exactly as today
+  // until you configure keys. When set, /api/allowlist-submit requires a valid token (stops bot
+  // registrations + interest spam). The read proxies are additionally gated only if
+  // TURNSTILE_GATE_PROXIES is truthy (they're already IP-rate-limited + Cloudflare-fronted).
+  const turnstileSecret = env.TURNSTILE_SECRET || '';
+  const gateProxies = /^(1|true|yes|on)$/i.test(env.TURNSTILE_GATE_PROXIES || '');
+
+  // Hard kill-switch: set REGISTRATION_CLOSED=1 to seal the allowlist. /api/allowlist-submit then
+  // rejects every POST (bots included) regardless of signature/captcha; reads (status/admin) stay up.
+  const registrationClosed = /^(1|true|yes|on)$/i.test(env.REGISTRATION_CLOSED || '');
+
+  // FCFS / GTD checker lists — plain address-per-line files, read SERVER-SIDE ONLY (never sent to
+  // the client). Live-editable: changes are picked up on the next request (mtime-cached). Point
+  // these at a writable dir (e.g. /var/lib/blockcassone) so /api/allowlist-add can append to them.
+  const gtdListFile = env.GTD_LIST_FILE ? path.resolve(env.GTD_LIST_FILE) : path.join(REPO_ROOT, 'gtd.txt');
+  const fcfsListFile = env.FCFS_LIST_FILE ? path.resolve(env.FCFS_LIST_FILE) : path.join(REPO_ROOT, 'fcfs.txt');
+  let _tierCache = null;
+  const _fileAddrs = fp => { try { return fs.readFileSync(fp, 'utf8').split('\n').map(l => l.trim().toLowerCase()).filter(l => /^0x[0-9a-f]{40}$/.test(l)); } catch { return []; } };
+  const _mtime = fp => { try { return fs.statSync(fp).mtimeMs; } catch { return 0; } };
+  function tierIndex() {
+    const key = `${_mtime(gtdListFile)}:${_mtime(fcfsListFile)}`;
+    if (_tierCache && _tierCache.key === key) return _tierCache;
+    const gtd = new Set(_fileAddrs(gtdListFile));
+    const fcfs = new Set(_fileAddrs(fcfsListFile));
+    for (const w of gtd) fcfs.delete(w); // GTD outranks FCFS
+    _tierCache = { key, gtd, fcfs };
+    return _tierCache;
+  }
+
   const submitLimited = makeLimiter(SUBMIT_MAX_PER_WINDOW);
   const alchemyLimited = makeLimiter(ALCHEMY_MAX_PER_WINDOW);
   const rpcLimited = makeLimiter(RPC_MAX_PER_WINDOW);
@@ -110,6 +139,22 @@ export function createApiHandler(env) {
     return signer.toLowerCase() === String(p.wallet).toLowerCase();
   }
 
+  // Verify a Cloudflare Turnstile token against siteverify. Passes (no-op) when the secret is
+  // unset. Tokens are single-use, so the client fetches a fresh one per protected request.
+  async function verifyTurnstile(token, ip) {
+    if (!turnstileSecret) return true;
+    if (typeof token !== 'string' || !token) return false;
+    try {
+      const form = new URLSearchParams({ secret: turnstileSecret, response: token });
+      if (ip) form.set('remoteip', ip);
+      const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+        method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form,
+      });
+      const j = await r.json().catch(() => ({}));
+      return j.success === true;
+    } catch { return false; }
+  }
+
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname;
@@ -119,6 +164,7 @@ export function createApiHandler(env) {
     if (p === '/api/alchemy-nft' || p.startsWith('/api/alchemy-nft/')) {
       if (!alchemyKey) return json(res, 500, { error: 'Missing ALCHEMY_KEY / Alchemy ETH_RPC_URL' }), true;
       if (alchemyLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
+      if (gateProxies && !(await verifyTurnstile(req.headers['cf-turnstile-token'], clientIp(req)))) return json(res, 403, { error: 'captcha failed' }), true;
       const rest = req.url.slice('/api/alchemy-nft'.length);
       if (rest.split('?')[0] !== ALCHEMY_ALLOWED_PATH) return json(res, 403, { error: 'endpoint not allowed' }), true;
       const now = Date.now();
@@ -140,6 +186,7 @@ export function createApiHandler(env) {
     if (p === '/api/mainnet-rpc') {
       if (!rpc) return json(res, 500, { error: 'Missing ETH_RPC_URL' }), true;
       if (rpcLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
+      if (gateProxies && !(await verifyTurnstile(req.headers['cf-turnstile-token'], clientIp(req)))) return json(res, 403, { error: 'captcha failed' }), true;
       let body;
       try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad body' }), true; }
       let parsed;
@@ -162,12 +209,40 @@ export function createApiHandler(env) {
       return json(res, 200, { registered: /^0x[0-9a-fA-F]{40}$/.test(w) ? isRegistered(w) : false }), true;
     }
 
+    // ---- allowlist tier check (public) — returns only a tier; the list stays server-side ----
+    if (p === '/api/allowlist-check') {
+      const w = String(url.searchParams.get('wallet') || '').trim();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(w)) return json(res, 400, { error: 'invalid address' }), true;
+      const lw = w.toLowerCase();
+      const idx = tierIndex();
+      const tier = idx.gtd.has(lw) ? 'gtd' : idx.fcfs.has(lw) ? 'fcfs' : null;
+      return json(res, 200, { address: lw, tier }), true;
+    }
+
+    // ---- speedy list update (admin) — append a wallet to gtd.txt / fcfs.txt, no redeploy ----
+    if (p === '/api/allowlist-add') {
+      if (!isAdmin(req)) return json(res, 403, { error: 'forbidden' }), true;
+      const w = String(url.searchParams.get('wallet') || '').trim().toLowerCase();
+      const tier = String(url.searchParams.get('tier') || '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(w)) return json(res, 400, { error: 'invalid address' }), true;
+      if (tier !== 'gtd' && tier !== 'fcfs') return json(res, 400, { error: 'tier must be gtd or fcfs' }), true;
+      const idx = tierIndex();
+      if (idx.gtd.has(w)) return json(res, 200, { ok: true, already: 'gtd', wallet: w }), true;
+      if (tier === 'fcfs' && idx.fcfs.has(w)) return json(res, 200, { ok: true, already: 'fcfs', wallet: w }), true;
+      try { fs.appendFileSync(tier === 'gtd' ? gtdListFile : fcfsListFile, w + '\n'); }
+      catch (e) { return json(res, 500, { error: 'write failed', detail: String(e) }), true; }
+      _tierCache = null; // force re-read on next check
+      return json(res, 200, { ok: true, added: w, tier }), true;
+    }
+
     // ---- allowlist submit (public, signed) — GTD art request OR register-interest ----
     if (p === '/api/allowlist-submit') {
       if (req.method !== 'POST') return json(res, 405, { error: 'POST only' }), true;
+      if (registrationClosed) return json(res, 403, { error: 'registration closed', closed: true }), true;
       if (submitLimited(clientIp(req))) return json(res, 429, { error: 'rate limited' }), true;
       let payload;
       try { payload = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: 'bad body' }), true; }
+      if (!(await verifyTurnstile(payload.turnstileToken, clientIp(req)))) return json(res, 403, { error: 'captcha failed' }), true;
       const wallet = String(payload.wallet || '');
       if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) return json(res, 400, { error: 'bad wallet' }), true;
       if (typeof payload.signature !== 'string' || !payload.signature.startsWith('0x'))

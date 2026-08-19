@@ -103,14 +103,50 @@ h2 { color: #fff; font-size: clamp(20px, 4vw, 30px); font-weight: 800; letter-sp
 .submitbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
 /* Register-interest CTA (non-holders / sub-threshold holders). */
-.interest { margin-top: 8px; padding-top: 18px; border-top: 1.5px solid var(--line); text-align: center; }
-.interest-row { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
+.interest { margin-top: 8px; padding-top: 20px; border-top: 1.5px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .handle-input {
   flex: 0 1 240px; padding: 12px 14px; font-size: 14px; color: var(--pink-soft);
   background: rgba(255, 58, 184, 0.06); border: 1.5px solid var(--line); outline: none;
 }
 .handle-input:focus { border-color: var(--pink); box-shadow: 0 0 0 1px var(--pink), 0 0 16px rgba(255, 58, 184, 0.4); }
 .handle-input::placeholder { color: #6a6a74; }
+
+/* ---- FCFS "Apply for Allowlist" view: fully centered stack ---- */
+.apply-fcfs { text-align: center; }
+.apply-title {
+  font-family: 'NormiesFont', 'Courier New', monospace; text-transform: uppercase;
+  font-size: clamp(30px, 6.5vw, 60px); letter-spacing: clamp(2px, 1vw, 8px); line-height: 1;
+  color: #fff; text-align: center; margin: 6px 0 22px;
+  text-shadow: 0 0 24px rgba(255, 58, 184, 0.6), 0 0 60px rgba(255, 58, 184, 0.32);
+}
+/* Two-line eligibility: dim reason, bright call-to-action, roomy spacing. */
+.eligibility { display: flex; flex-direction: column; gap: 16px; align-items: center; text-align: center; padding: 8px 8px 20px; line-height: 1.5; }
+.elig-dim { font-size: clamp(15px, 2.4vw, 20px); font-weight: 700; color: #fff; opacity: 0.5; }
+.elig-bright { font-size: clamp(16px, 2.6vw, 22px); font-weight: 800; color: #fff; text-shadow: 0 0 16px rgba(255, 58, 184, 0.45); }
+.entitle.centered { justify-content: center; }
+
+/* Seed-art update disclaimer under the candidate grid. */
+.disclaimer { font-size: 12px; color: #9a9aa4; text-align: center; margin: 2px 0 14px; line-height: 1.45; }
+
+/* Eligible/holder view — congrats heading + separated instruction sub-line. */
+.eligible-sub { font-size: clamp(17px, 3vw, 24px); font-weight: 700; color: var(--pink-soft); margin: -8px 0 18px; text-shadow: 0 0 12px rgba(255, 58, 184, 0.4); }
+.selcount { text-align: center; margin: 10px 0; font-size: 13px; }
+
+/* X-handle capture (holder view + FCFS interest CTA). */
+.handle-note { font-size: 16px; color: var(--pink-soft); margin-bottom: 6px; line-height: 1.45; text-align: center; }
+.handle-block { text-align: center; margin: 4px 0 18px; }
+.handle-block .handle-input { width: min(340px, 100%); flex: none; }
+/* Full-width input + primary button for the FCFS sign-to-register stack. */
+.handle-input.wide { width: 100%; flex: none; text-align: center; }
+.cta.wide { width: 100%; margin-top: 2px; }
+
+/* Interest confirmation: big thank-you, gap, then the follow line. */
+.thanks-msg { font-size: clamp(26px, 5vw, 42px); color: #fff; text-align: center; margin-bottom: 24px; text-shadow: 0 0 18px rgba(255, 58, 184, 0.5); }
+.follow-line { font-size: clamp(15px, 2.4vw, 20px); color: var(--pink-soft); text-align: center; }
+.follow-line a { color: #fff; text-decoration: underline; }
+
+/* BLOCKS hero on the post-registration view (a touch smaller than the landing hero). */
+.finished-title { font-size: clamp(44px, 11vw, 110px); margin-bottom: 2px; }
 
 .check {
   width: 56px; height: 56px; margin: 4px auto 14px; display: flex; align-items: center; justify-content: center;

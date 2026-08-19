@@ -43,7 +43,7 @@ contract CubeRendererV2Test is Test {
 
     function setUp() public {
         normies = new RendererV2MockNormies();
-        cubes = new CubeNFT("Blockcassone Cubes", "CUBE", address(normies), 4096, OWNER);
+        cubes = new CubeNFT("TheBLOCK", "BLOCK", address(normies), 4096, OWNER);
         agentRegistry = new AgentStatusRegistry(OWNER);
         assets = new RendererAssetStore(OWNER);
         store = new NonNormieArtStore(address(cubes), address(this)); // test acts as store owner
@@ -76,7 +76,7 @@ contract CubeRendererV2Test is Test {
         uint256 cubeId = cubes.mintNormieCube(6722, 1734, bytes32("seed"));
 
         string memory json = renderer.metadataJSON(cubeId);
-        assertTrue(_contains(json, '"name":"Blockcassone Cube #1"'));
+        assertTrue(_contains(json, '"name":"TheBLOCK #1"'));
         assertTrue(_contains(json, '"image":"data:image/svg+xml;base64,'));
         assertTrue(_contains(json, '"animation_url":"data:text/html;base64,'));
         assertTrue(_contains(json, '"trait_type":"plot","value":"1734"'));
@@ -88,7 +88,73 @@ contract CubeRendererV2Test is Test {
         assertTrue(_contains(json, '"trait_type":"Origin Collection","value":"Normies"'));
         assertTrue(_contains(json, '"trait_type":"Current Collection","value":"Normies"'));
         assertTrue(_contains(json, '"trait_type":"Source Token ID","value":"6722"'));
-        assertTrue(_contains(json, '"trait_type":"Renderer Version","value":"2"'));
+        // Implementation internals are deliberately NOT traits (user decision):
+        assertFalse(_contains(json, '"trait_type":"Renderer Version"'));
+        assertFalse(_contains(json, '"trait_type":"Payload Version"'));
+    }
+
+    // ---- Audit regressions (2026-08-16) -------------------------------------
+
+    /// M-2: a merged street whose LEADER is a CC0 cube must render the CC0 art in
+    /// its thumbnail (v1 previously fetched Normie storage with the CC0 token id).
+    function testMergedStreetThumbnailRendersCC0Leader() public {
+        // Distinctive CC0 payload: only cells 0 and 1599 lit (band 2 each) — the
+        // silhouette matches the two-corner path the Normie raw-bitmap test uses.
+        bytes memory payload = new bytes(400);
+        payload[0] = 0x02;
+        payload[399] = 0x80;
+        address ext = address(new RendererV2MockNormies()); // any contract with code
+        store.recordSourcePayload(ext, 777, payload); // test contract is store owner
+
+        bytes memory raw = new bytes(200); // filler Normies need to exist + be MINTER's
+        for (uint32 s = 1; s <= 4; s++) {
+            normies.mint(MINTER, 9000 + s, raw);
+        }
+        vm.startPrank(OWNER);
+        cubes.mintSnapshotExternalCubeFor(MINTER, ext, 777, 0, bytes32("s0"), 1); // slot 0 = leader
+        for (uint32 s = 1; s <= 4; s++) {
+            cubes.mintNormieCubeFor(MINTER, 9000 + s, s, bytes32(uint256(s)));
+        }
+        vm.stopPrank();
+
+        vm.prank(MINTER);
+        uint256 streetId = cubes.mergeStreet(0);
+
+        string memory svg = renderer.thumbnailSVG(streetId);
+        assertTrue(_contains(svg, '<path id="n" d="M0 0h1v1H0zM39 39h1v1H39z"/>'));
+    }
+
+    /// M-3: a per-cube payload override must be CLEARED on rebaseToPoolSource so the
+    /// pool's source-keyed art shows through (previously the stale override shadowed
+    /// it forever while traits reported the new source).
+    function testPoolRebaseClearsPerCubeOverride() public {
+        bytes memory overrideArt = new bytes(400);
+        overrideArt[0] = 0x01;
+        bytes memory poolArt = new bytes(400);
+        poolArt[10] = 0x02;
+
+        address ext = address(new RendererV2MockNormies());
+        store.recordSourcePayload(ext, 555, poolArt);
+
+        vm.prank(MINTER);
+        uint256 cube = cubes.mintNormieCube(6722, 8, bytes32("seed"));
+        store.recordTonalBands2Bit(cube, overrideArt); // per-cube override in place
+        assertEq(keccak256(store.payloadForCube(cube)), keccak256(overrideArt));
+
+        vm.prank(OWNER);
+        cubes.setArtStore(address(store));
+        vm.prank(MINTER);
+        cubes.rebaseToPoolSource(cube, ext, 555);
+
+        assertEq(keccak256(store.payloadForCube(cube)), keccak256(poolArt));
+    }
+
+    /// M-3 gate: only the token may clear a per-cube override.
+    function testClearCubePayloadOnlyToken() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(NonNormieArtStore.OnlyCubesToken.selector, address(this))
+        );
+        store.clearCubePayload(1);
     }
 
     function testAnimationHTMLInjectsCubeConfigAndRawNormieBytes() public {
@@ -120,20 +186,22 @@ contract CubeRendererV2Test is Test {
         // #00ff00 (matches the WebGL cube + the line-lab neon tuning); the figure
         // uses the additive-screen #nfN filter, fill="none" hoisted to the group.
         assertTrue(_contains(svg, '<use href="#o" stroke="#00ff00" stroke-width=".146" filter="url(#nfN)"'));
-        // Frame border traces the motif's unique-plane sides (slot 1734 -> TRB,
-        // open left) as separate subpaths.
-        assertTrue(_contains(svg, '<path d="M100 85H1100M1100 85V1085M100 1085H1100"'));
+        // Frame border is the fixed open-top ∪ (bottom + left + right, top open) so it stays
+        // continuous with the depth wireframe that always recedes over the top.
+        assertTrue(_contains(svg, '<path d="M100 1085H1100M100 85V1085M1100 85V1085"'));
         assertTrue(_contains(svg, '<path id="l" d='));
         // edge-point orbs: additive white-glow group at r=10 (soft core group r=6).
         assertTrue(_contains(svg, '<circle cx="100" cy="85" r="10"'));
         assertTrue(_contains(svg, '<filter id="nfN"'));
-        // forest strand layer: thin cores (per walker-rule colour) + turbulence
-        // tip-clouds. The wide blurred glow pass was dropped; strands are now a
-        // single thin core group (sw .7) in the #g filter, and clouds fill the
-        // per-colour gradient (#cg unique / #cg2 doubled) through the #pc filter.
-        assertTrue(_contains(svg, 'stroke-width=".7" opacity=".3" filter="url(#g)"'));
-        assertTrue(_contains(svg, 'filter="url(#pc)"'));
-        assertTrue(_contains(svg, 'fill="url(#cg') && _contains(svg, ')" filter="url(#pc)"'));
+        // 2.5D depth layers (the new line-only look): the receding side-plane group,
+        // the depth wireframe edges (top receders + back sides), and the yellow hot
+        // sections dashed along the whole Hilbert outline.
+        assertTrue(_contains(svg, 'opacity="0.76" fill="none"'));
+        assertTrue(_contains(svg, 'M100 85L240 225M1100 85L960 225M240 225L240 945M960 225L960 945'));
+        assertTrue(_contains(svg, 'stroke-dasharray="125 150 225 175 100 125 275 200"'));
+        // Glass + forest are removed from the 2D thumbnail.
+        assertFalse(_contains(svg, 'url(#gGlass)'));
+        assertFalse(_contains(svg, 'filter="url(#pc)"'));
         assertTrue(_contains(svg, '<use href="#l" stroke="#00ff00"'));
         assertFalse(_contains(svg, "Normie #6722"));
         assertFalse(_contains(svg, "cube #1"));
@@ -162,7 +230,7 @@ contract CubeRendererV2Test is Test {
         uint256 cubeId = cubes.mintNormieCube(6722, 8, bytes32("seed"));
 
         string memory uri = cubes.tokenURI(cubeId);
-        assertTrue(_startsWith(uri, "data:application/json;utf8,"));
+        assertTrue(_startsWith(uri, "data:application/json;base64,"));
     }
 
     function testAssetStoreChunksOverrideDefaultHTMLShell() public {

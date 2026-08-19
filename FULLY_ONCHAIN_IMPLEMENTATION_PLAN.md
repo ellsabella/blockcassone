@@ -1,8 +1,8 @@
-# Blockcassone Fully Onchain Implementation Plan
+# TheBLOCK Fully Onchain Implementation Plan
 
 ## Objective
 
-Blockcassone will mint one ERC-721 cube per accepted source NFT. After mint, each cube must be fully onchain in the strict sense: the token metadata, HTML renderer, renderer assets, cube identity, source identity, placement, seed, and all art inputs needed to reconstruct the cube must be recoverable from Solidity contracts.
+TheBLOCK will mint one ERC-721 cube per accepted source NFT. After mint, each cube must be fully onchain in the strict sense: the token metadata, HTML renderer, renderer assets, cube identity, source identity, placement, seed, and all art inputs needed to reconstruct the cube must be recoverable from Solidity contracts.
 
 The mint UI and the big-cube exploration website may be offchain. They can use indexers, OpenSea, image proxies, browser canvas extraction, and richer hosted tools. The individual minted cube must not require any of those systems after mint.
 
@@ -385,7 +385,7 @@ Population traits under consideration:
 
 These traits are dynamic and may change when cubes mint, move, or consolidate.
 
-The conceptual model is a city-like big block inhabited by the NFT entities that compose it. Source NFTs are not only visual inputs; they may represent agents, characters, tools, identities, or other entity-like contracts. At mint time, the offchain mint pipeline should capture any source-agent binding data exposed by OpenSea or source contracts and commit the observed fields onchain as a mint-time snapshot. Because Normies can become agentic after Blockcassone mint, current agent binding must also be updatable through onchain state.
+The conceptual model is a city-like big block inhabited by the NFT entities that compose it. Source NFTs are not only visual inputs; they may represent agents, characters, tools, identities, or other entity-like contracts. At mint time, the offchain mint pipeline should capture any source-agent binding data exposed by OpenSea or source contracts and commit the observed fields onchain as a mint-time snapshot. Because Normies can become agentic after TheBLOCK mint, current agent binding must also be updatable through onchain state.
 
 Agentic metadata requirements:
 

@@ -36,7 +36,7 @@ contract PreviewLiveNormie is Script {
         uint32 baseSlot = uint32(vm.envOr("SLOT", uint256(1)));
 
         CubeNFT cubes =
-            new CubeNFT("Blockcassone Cubes", "CUBE", NormieAddresses.NORMIES, 4096, msg.sender);
+            new CubeNFT("TheBLOCK", "BLOCK", NormieAddresses.NORMIES, 4096, msg.sender);
         CubeThumbnailRendererV1 thumb = new CubeThumbnailRendererV1(
             cubes,
             NormieAddresses.NORMIES_STORAGE,

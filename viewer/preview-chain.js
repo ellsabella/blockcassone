@@ -49,7 +49,12 @@ async function ethCall(cfg, to, data) {
 }
 
 async function thumbnailRendererAddress(cfg) {
-  if (!cfg.renderer) throw new Error('chain-config.json has no "renderer" address — deploy the contracts and point it at the local CubeRendererV2.');
+  // Prefer the CURRENT thumbnail renderer from chain-config (updated on each render redeploy) so
+  // every client 2D thumbnail uses the SAME renderer as the server's /api/thumbnail. Falling back
+  // to V2.thumbnailRenderer() reads V2's IMMUTABLE pointer, which lags behind a render-only
+  // redeploy and would show stale art.
+  if (cfg.thumbnailRenderer && /^0x[0-9a-fA-F]{40}$/.test(cfg.thumbnailRenderer)) return cfg.thumbnailRenderer;
+  if (!cfg.renderer) throw new Error('chain-config.json has no "thumbnailRenderer"/"renderer" address — deploy the render stack.');
   if (!thumbAddrPromise) {
     thumbAddrPromise = ethCall(cfg, cfg.renderer, '0x' + THUMBNAIL_RENDERER_SELECTOR)
       .then(r => '0x' + String(r).replace(/^0x/, '').slice(-40))
@@ -148,7 +153,7 @@ async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTok
     },
     primaryType: 'Attestation',
     domain: {
-      name: 'BlockcassoneFlattening',
+      name: 'TheBLOCKFlattening',
       version: '1',
       chainId: Number(cfg.chainId || 1),
       verifyingContract: cfg.flatteningAttestation,
@@ -166,14 +171,38 @@ async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTok
       deadline: att.deadline.toString(),
     },
   };
-  // Anvil accepts the typed data as an object; some builds want a JSON string.
   let signature;
-  try {
-    signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, typedData]);
-  } catch (e) {
-    signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, JSON.stringify(typedData)]);
+  if (cfg.directRpc) {
+    // Local dev: the Anvil node holds the unlocked attestation signer.
+    // Anvil accepts the typed data as an object; some builds want a JSON string.
+    try {
+      signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, typedData]);
+    } catch (e) {
+      signature = await rpcRaw(cfg, 'eth_signTypedData_v4', [cfg.attestationSigner, JSON.stringify(typedData)]);
+    }
+  } else {
+    // Sepolia / prod: the signer key lives server-side behind /api/attest. Send the
+    // EXACT typed data we'll submit so the returned signature covers this att verbatim.
+    signature = await attestViaService(typedData);
   }
   return { att, signature };
+}
+
+// POST the EIP-712 typed data to the server-side signer service and return the
+// signature. Used on any non-directRpc chain (Sepolia/prod) where no unlocked signer
+// exists. See renderer/server.js /api/attest.
+async function attestViaService(typedData) {
+  const res = await fetch('/api/attest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ typedData }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.error) {
+    throw new Error(`/api/attest failed: ${j.error || res.status}${j.detail ? ` — ${j.detail}` : ''}`);
+  }
+  if (!j.signature) throw new Error('/api/attest returned no signature');
+  return j.signature;
 }
 
 // Re-base cube `cubeId` (owned by `owner`) onto the wallet token
@@ -235,6 +264,14 @@ export function setTransactionSender(fn) { txSender = fn; }
 async function sendTx(cfg, from, to, data, label, value) {
   const tx = { from, to, data };
   if (value != null) tx.value = value; // hex quantity (e.g. '0x38d7ea4c68000'); omitted = 0
+  // Pre-flight: simulate via eth_call so a would-be revert surfaces its real reason HERE,
+  // instead of the wallet aborting with a cryptic "transaction gas limit too high" when its
+  // own gas estimate fails on a revert. Valid txs return and fall through to the real send.
+  try {
+    await rpcRaw(cfg, 'eth_call', [tx, 'latest']);
+  } catch (e) {
+    throw new Error(`${label || 'tx'} can't run: ${String(e?.message || e).replace(/execution reverted:?/i, '').trim() || 'it would revert on-chain'}`);
+  }
   const txHash = txSender
     ? await txSender(tx)
     : await rpcRaw(cfg, 'eth_sendTransaction', [tx]);
@@ -353,11 +390,30 @@ function decodeString(ret) {
   return new TextDecoder().decode(bytes);
 }
 
-// The on-chain thumbnail SVG of an existing cube (the owned-cubes row).
+// The on-chain thumbnail SVG of an existing cube — from the CURRENT thumbnail renderer (same as
+// /api/thumbnail), so every UI shows identical art.
 export async function cubeThumbnailSVG(cubeId) {
   const cfg = await loadConfig();
-  if (!cfg.renderer) throw new Error('chain-config.json has no "renderer" address');
-  return decodeString(await ethCall(cfg, cfg.renderer, '0x' + THUMBNAIL_SVG_SELECTOR + word(cubeId)));
+  const to = await thumbnailRendererAddress(cfg);
+  return decodeString(await ethCall(cfg, to, '0x' + THUMBNAIL_SVG_SELECTOR + word(cubeId)));
+}
+
+// The SAME cube rendered as if it sat at `slot` — a stateless MOVE preview (colours/geometry
+// follow the slot; art is the cube's real on-chain art). thumbnailSVGAtSlot(uint256,uint32).
+export async function thumbnailAtSlotSVG(cubeId, slot) {
+  const cfg = await loadConfig();
+  const to = await thumbnailRendererAddress(cfg);
+  return decodeString(await ethCall(cfg, to, '0xed957641' + word(cubeId) + word(slot)));
+}
+
+// A true 3D preview of the cube at a DIFFERENT slot (a proposed MOVE): reuse the cube's real
+// on-chain animation and rewrite only the slot in its token blob, so the engine repositions +
+// recolours it at the target slot. Works for every source kind.
+export async function movedAnimationURI(cubeId, newSlot) {
+  const base = await cubeAnimationURI(cubeId);
+  const html = decodeURIComponent(escape(atob(String(base).replace(/^data:text\/html;base64,/, ''))));
+  const out = html.replace(/(BLOCKCASSONE_TOKEN=\{[^}]*?slot:)\d+/, `$1${Number(newSlot)}`);
+  return 'data:text/html;base64,' + btoa(unescape(encodeURIComponent(out)));
 }
 
 // The cube's full on-chain animation (data:text/html;base64 …) — the real 3D that any cube
@@ -367,6 +423,25 @@ export async function cubeAnimationURI(cubeId) {
   const cfg = await loadConfig();
   if (!cfg.renderer) throw new Error('chain-config.json has no "renderer" address');
   return decodeString(await ethCall(cfg, cfg.renderer, '0x5209ec17' + word(cubeId)));
+}
+
+// A true 3D preview of a PROPOSED art change, BEFORE committing. There's no on-chain
+// preview-animation view, so we take the cube's REAL on-chain animation (the actual engine +
+// renderer chunks) and swap its window.BLOCKCASSONE_TOKEN blob: same seed/slot, but the
+// proposed tonal payload as an external source, so the engine renders the proposed art.
+// Returns a data:text/html;base64 URI for the 3D iframe. `payload` is the 400-byte tonal.
+export async function proposedAnimationURI(cubeId, { sourceContract, sourceTokenId, payload }) {
+  const base = await cubeAnimationURI(cubeId);
+  const html = decodeURIComponent(escape(atob(String(base).replace(/^data:text\/html;base64,/, '')))); // base64 → UTF-8
+  const grab = (re, dflt) => { const m = html.match(re); return m ? m[1] : dflt; };
+  const tokenId = grab(/BLOCKCASSONE_TOKEN=\{tokenId:(\d+)/, '0');
+  const slot = grab(/[,{]slot:(\d+)/, '0');
+  const seed = grab(/seed:'(0x[0-9a-fA-F]+)'/, '0x' + '0'.repeat(64));
+  const normieStorage = grab(/normieStorage:'(0x[0-9a-fA-F]+)'/, '0x0000000000000000000000000000000000000000');
+  let bin = ''; for (let i = 0; i < payload.length; i++) bin += String.fromCharCode(payload[i]);
+  const blob = `window.BLOCKCASSONE_TOKEN={tokenId:${tokenId},slot:${slot},sourceKind:2,sourceContract:'${sourceContract}',sourceTokenId:${sourceTokenId},normieStorage:'${normieStorage}',agentic:false,agentId:0,seed:'${seed}',raw:'',tonal:'${btoa(bin)}'};`;
+  const out = html.replace(/window\.BLOCKCASSONE_TOKEN=\{[\s\S]*?\};/, blob);
+  return 'data:text/html;base64,' + btoa(unescape(encodeURIComponent(out))); // UTF-8 → base64
 }
 
 // Cubes minted on the local chain. For dev, optionally filter by owner; the
@@ -454,6 +529,23 @@ async function artStoreAddress(cfg) {
 export async function poolSources() {
   if (_poolCache) return _poolCache;
   const cfg = await loadConfig();
+
+  // Prefer the config-declared pool: each entry {contract,startId,count} expands to its
+  // token-id range. This needs no eth_getLogs, so it works on rate-limited RPCs (Alchemy's
+  // free tier caps getLogs at a 10-block range, which the full-history scan below blows past
+  // on a public chain). The deploy writes cc0Pool; older/local configs fall back to logs.
+  if (Array.isArray(cfg.cc0Pool) && cfg.cc0Pool.length) {
+    const out = [];
+    for (const p of cfg.cc0Pool) {
+      const start = Number(p.startId);
+      const count = Math.max(1, Number(p.count || 1));
+      const contract = String(p.contract || '').toLowerCase();
+      const name = p.name || '';
+      for (let i = 0; i < count; i++) out.push({ sourceContract: contract, sourceTokenId: String(start + i), sourceName: name });
+    }
+    return (_poolCache = out);
+  }
+
   const store = await artStoreAddress(cfg);
   const logs = await rpcNode(cfg, 'eth_getLogs', [{
     address: store, fromBlock: 'earliest', toBlock: 'latest',
@@ -468,6 +560,34 @@ export async function poolSources() {
     if (!seen.has(k)) { seen.add(k); out.push({ sourceContract, sourceTokenId }); }
   }
   return (_poolCache = out);
+}
+
+// The on-chain sourceKey preimage: keccak256(abi.encode(chainId, contract, tokenId)),
+// byte-identical to CubeNFT.sourceKey. Returns 64-hex (no 0x).
+function sourceClaimKey(cfg, sourceContract, sourceTokenId) {
+  const chainId = Number(cfg.chainId || 1);
+  const preimage = word(chainId) + addrWord(sourceContract) + word(sourceTokenId);
+  return keccak256(hexToBytes(preimage));
+}
+
+// True if a pool source is already claimed by a cube (CubeNFT.cubeForSourceKey != 0).
+export async function isPoolSourceClaimed(sourceContract, sourceTokenId) {
+  const cfg = await loadConfig();
+  if (!cfg.cubeNft) return false;
+  const key = sourceClaimKey(cfg, sourceContract, sourceTokenId);
+  const ret = await ethCall(cfg, cfg.cubeNft, '0xdd597020' + key); // cubeForSourceKey(bytes32)
+  return !/^0x0*$/.test(String(ret || '0x0')); // nonzero cubeId => claimed
+}
+
+// poolSources() minus any already claimed on-chain — the "spin the wheel" should only ever
+// offer sources a cube can actually take. Uniqueness is still enforced on commit; this just
+// stops the UI proposing a source that would revert with SourceAlreadyClaimed.
+export async function unclaimedPoolSources() {
+  const all = await poolSources();
+  const claimed = await Promise.all(
+    all.map(s => isPoolSourceClaimed(s.sourceContract, s.sourceTokenId).catch(() => false))
+  );
+  return all.filter((_, i) => !claimed[i]);
 }
 
 // The committed 400-byte tonal payload of a pool source (Uint8Array; empty if none).
