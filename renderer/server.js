@@ -70,6 +70,10 @@ const MIME = {
 };
 
 async function devFetch(url, options = {}) {
+  // Dev-box TLS workaround ONLY: in production (NODE_ENV=production, as set by the
+  // systemd unit) outbound TLS is always verified — the proxy talks to key-bearing
+  // RPC endpoints and must not be MITM-able.
+  if (process.env.NODE_ENV === 'production') return fetch(url, options);
   const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   try {
@@ -137,11 +141,12 @@ function readChainConfig() {
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     return {
       rpcUrl: String(envRpc || parsed.rpcUrl || 'http://127.0.0.1:8545'),
+      chainId: Number(parsed.chainId || 0),
       cubeNft: String(parsed.cubeNft || ''),
       thumbnailRenderer: String(parsed.thumbnailRenderer || ''),
     };
   } catch (_) {
-    return { rpcUrl: String(envRpc || 'http://127.0.0.1:8545'), cubeNft: '', thumbnailRenderer: '' };
+    return { rpcUrl: String(envRpc || 'http://127.0.0.1:8545'), chainId: 0, cubeNft: '', thumbnailRenderer: '' };
   }
 }
 
@@ -373,17 +378,37 @@ async function proxyChainRpc(req, res) {
   try {
     const body = await readRequestBody(req, 4_000_000);
     const config = readChainConfig();
-    const upstreamRes = await devFetch(config.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-    });
-    const text = await upstreamRes.text();
-    res.writeHead(upstreamRes.status, {
-      'Content-Type': upstreamRes.headers.get('content-type') || 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    });
-    res.end(text);
+    // Fallback pool (SITE_DEPLOY "RPC provisioning" #3): if the primary answers 429
+    // (Alchemy throughput cap) or 5xx, or is unreachable, retry against publicnode.
+    // MAINNET ONLY — a fallback must never answer for a local/Sepolia chain.
+    const upstreams = [config.rpcUrl];
+    const fallback = process.env.BLOCKCASSONE_FALLBACK_RPC_URL || 'https://ethereum-rpc.publicnode.com';
+    if (config.chainId === 1 && fallback && fallback !== config.rpcUrl) upstreams.push(fallback);
+    let lastErr = null;
+    for (let i = 0; i < upstreams.length; i++) {
+      const isLast = i === upstreams.length - 1;
+      try {
+        const upstreamRes = await devFetch(upstreams[i], {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+        if (!isLast && (upstreamRes.status === 429 || upstreamRes.status >= 500)) {
+          lastErr = new Error(`upstream ${i} status ${upstreamRes.status}`);
+          continue;
+        }
+        const text = await upstreamRes.text();
+        res.writeHead(upstreamRes.status, {
+          'Content-Type': upstreamRes.headers.get('content-type') || 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.end(text);
+        return;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error('no upstream responded');
   } catch (err) {
     sendJson(res, 502, {
       error: 'Chain RPC proxy failed',
