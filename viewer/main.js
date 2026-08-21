@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260821-6';
+const VIEWER_BUILD = '20260821-7';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -905,6 +905,9 @@ function updateOwnerInventory(ownerLabel) {
       updateScopeButtons();
       openCubeDetail(cube.slot);
       setOrbitTargetToSelection();
+      // Zoom right in: frame the picked cube so it mostly fills the viewport.
+      const { mn, mx } = cubeAABBFor(cube.slot);
+      orbit.setDistance(Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) * 2.4);
     });
     ownerInventoryListEl.append(button);
   }
@@ -1667,12 +1670,9 @@ function resolveDisplayOwner() {
 // Focus the resolved display owner's first Normie — opens the list + cube detail + thumbnail.
 // Never blanks: falls back to any minted cube only if no Normies exist at all.
 function focusDefaultOwner() {
-  // Prefer the connected wallet, then the dev test wallet (MY_WALLET) — whichever
-  // actually owns cubes here — so the view opens on YOUR cubes, not an arbitrary
-  // Normie holder. Falls back to the deterministic Normie-owner pick, then any cube.
-  for (const addr of [connectedAddress, MY_WALLET]) {
-    if (addr && focusOwnerFirstCube(addr)) return;
-  }
+  // Default LOAD view: a showcase owner at neighbourhood level — deliberately NOT
+  // the connected wallet, so every arrival sees the same curated first view.
+  // Connecting (or "MY CUBES") jumps to your own cubes explicitly.
   const owner = resolveDisplayOwner();
   if (owner) { focusCubeAndOwner(normieOwnersMap().get(owner)[0]); return; }
   const cubes = getMintedCubes();
@@ -1692,9 +1692,10 @@ function pickDefaultFocus() {
 mountConnectButton(document.getElementById('wallet-connect'), {
   onChange: (addr) => {
     connectedAddress = normalizeAddress(addr) || null;
-    // Re-resolve the displayed owner (connected wallet if it holds Normies, else keep a
-    // Normie-owner). Never blanks the view on a stray/already-connected wallet.
-    focusDefaultOwner();
+    // Connecting is an explicit action — jump to YOUR cubes if you own any;
+    // otherwise keep/restore the showcase view. (The load default never picks
+    // the connected wallet; this is the deliberate way in.)
+    if (!connectedAddress || !focusOwnerFirstCube(connectedAddress)) focusDefaultOwner();
   },
 });
 

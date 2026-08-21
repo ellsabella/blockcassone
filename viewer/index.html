@@ -61,16 +61,27 @@
       overflow: hidden;
     }
     .legacy-hidden { display: none !important; }
-    /* Current-view label, centred in the header — Normie font, vivid-green neon glow (landing-page look). */
+    /* Current-view label, centred in the header — same aesthetic as the nav links:
+       hero pixel font, pale, pink glow. */
     #view-label {
       position: absolute;
       left: 50%; top: 50%; transform: translate(-50%, -50%);
       font-family: 'NormiesFont', 'Courier New', monospace;
       font-size: 22px; letter-spacing: 0.04em; white-space: nowrap;
-      color: rgb(0, 255, 0);
-      text-shadow: 0 0 6px rgba(0, 255, 0, 0.9), 0 0 15px rgba(0, 255, 0, 0.6), 0 0 30px rgba(0, 255, 0, 0.4);
+      color: #fff;
+      text-shadow: 0 0 6px rgba(255, 58, 184, 0.9), 0 0 22px rgba(255, 58, 184, 0.6), 0 0 46px rgba(255, 58, 184, 0.3);
       pointer-events: none;
     }
+    /* Load fade — solid page-background overlay that fades out over 1.5s so the
+       scene builds behind it instead of popping in (paired with the landing's
+       fade-to-black on ENTER). Opacity animates on the compositor, so it keeps
+       fading even while the main thread is busy building the world. */
+    #load-fade {
+      position: fixed; inset: 0; z-index: 60; background: #020203;
+      pointer-events: none;
+      animation: loadFadeOut 1.5s ease 0.1s forwards;
+    }
+    @keyframes loadFadeOut { to { opacity: 0; visibility: hidden; } }
     #site-nav { display: flex; gap: 24px; align-items: center; }
     #site-nav .nav-link {
       /* Hero aesthetic: landing-hero pixel font, pale, with a pink glow. */
@@ -735,6 +746,7 @@
     <path id="selection-link-path"></path>
     <path id="map-link-path"></path>
   </svg>
+  <div id="load-fade" aria-hidden="true"></div>
   <div id="main-axis" class="axis-gizmo" aria-hidden="true"></div>
   <div id="nft-label">NFT: none</div>
   <div id="hud">
@@ -888,8 +900,8 @@
   <script src="/public/linestyles.js"></script>
   <script src="/public/planes.js"></script>
   <script src="/public/blocks.js"></script>
-  <script src="/viewer/vendor/wallet-widget.js?v=20260821-6"></script>
-  <script type="module" src="./main.js?v=20260821-6"></script>
-  <script type="module" src="./nav-gate.js?v=20260821-6"></script>
+  <script src="/viewer/vendor/wallet-widget.js?v=20260821-7"></script>
+  <script type="module" src="./main.js?v=20260821-7"></script>
+  <script type="module" src="./nav-gate.js?v=20260821-7"></script>
 </body>
 </html>
