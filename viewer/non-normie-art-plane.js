@@ -348,7 +348,7 @@ export function buildNonNormieWalker(plane, allPlanes, gl, meshes) {
     if (cellSegs.length === 0) {
       meshes[walkerKey] = null;
       meshes[walkerGlowKey] = null;
-      console.info(`[non-normie-walker] plane ${plane.id} cube ${motifIdx}: no walk segments`, {
+      void (`[non-normie-walker] plane ${plane.id} cube ${motifIdx}: no walk segments`, {
         candidates: candidates.length,
         walks: nWalks,
       });
@@ -376,7 +376,7 @@ export function buildNonNormieWalker(plane, allPlanes, gl, meshes) {
     meshes[walkerKey]     = buildWalkCoreMeshWS(gl, flat, n, WALK_CORE_WIDTH);
     meshes[walkerGlowKey] = buildWalkGlowMeshWS(gl, flat, n, WALK_GLOW_WIDTH);
 
-    console.info(`[non-normie-walker] plane ${plane.id} cube ${motifIdx}: built random walks`, {
+    void (`[non-normie-walker] plane ${plane.id} cube ${motifIdx}: built random walks`, {
       planeAxis: plane.axis,
       nft: `${nft.contract}:${nft.tokenId}`,
       kind: grid.kind || 'pixel',
@@ -641,7 +641,7 @@ export function buildNonNormieArtworkPlane(plane, allPlanes, gl, meshes) {
 
   if (meshes[lineKey] === undefined) {
     const segs = getOutlineSegs(grid);
-    console.info(`[non-normie-art] cube ${motifIdx}: building artwork outline`, {
+    void (`[non-normie-art] cube ${motifIdx}: building artwork outline`, {
       planeId: plane.id,
       planeAxis: plane.axis,
       nft: `${nft.contract}:${nft.tokenId}`,
@@ -675,7 +675,7 @@ export function buildNonNormieArtworkPlane(plane, allPlanes, gl, meshes) {
         halfSize: bounds.halfSize,
       };
       meshes[voxelKey] = buildArtworkVoxelMesh(gl, motifIdx, allPlanes, bounds, grid, meshes);
-      console.info(`[non-normie-art] cube ${motifIdx}: building 3D intersection voxels`, {
+      void (`[non-normie-art] cube ${motifIdx}: building 3D intersection voxels`, {
         planeId: plane.id,
         nft: `${nft.contract}:${nft.tokenId}`,
         kind: grid.kind || 'pixel',

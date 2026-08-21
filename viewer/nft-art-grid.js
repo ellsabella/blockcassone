@@ -101,7 +101,7 @@ async function loadVideoFrameFromBlob(blob) {
     canvas.height = height;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, width, height);
-    console.debug(`[nft-grid] extracted video frame ${width}x${height}`, { duration, targetTime });
+    void (`[nft-grid] extracted video frame ${width}x${height}`, { duration, targetTime });
     return canvas;
   } finally {
     URL.revokeObjectURL(url);
@@ -156,7 +156,7 @@ async function loadImageFromProxyResponse(res, normalizedUrl) {
   const isVideo = contentType.startsWith('video/') || /\.(?:mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(normalizedUrl);
 
   if (isVideo) {
-    console.debug(`[nft-grid] video media detected; extracting representative frame`, normalizedUrl);
+    void (`[nft-grid] video media detected; extracting representative frame`, normalizedUrl);
     return loadVideoFrameFromBlob(await res.blob());
   }
 
@@ -164,11 +164,11 @@ async function loadImageFromProxyResponse(res, normalizedUrl) {
     const svgText = await res.text();
     const embedded = embeddedRasterUrlFromSvg(svgText);
     if (embedded) {
-      console.debug(`[nft-grid] SVG contains embedded raster; sampling raster directly`, normalizedUrl);
+      void (`[nft-grid] SVG contains embedded raster; sampling raster directly`, normalizedUrl);
       return loadImageFromUrl(embedded);
     }
 
-    console.debug(`[nft-grid] SVG has no embedded raster; rasterizing SVG wrapper`, normalizedUrl);
+    void (`[nft-grid] SVG has no embedded raster; rasterizing SVG wrapper`, normalizedUrl);
     return loadImageFromDataUrl(svgTextToDataUrl(svgText));
   }
 
@@ -992,11 +992,11 @@ function inferPixelGrid(sample) {
 export async function imageUrlToBinaryGrid(imageUrl) {
   if (!imageUrl) throw new Error('NFT has no image URL');
   const normalizedUrl = normalizeMediaUrl(imageUrl);
-  console.debug(`[nft-grid] fetch media`, { imageUrl, normalizedUrl });
+  void (`[nft-grid] fetch media`, { imageUrl, normalizedUrl });
   const res = await fetch(proxiedImageUrl(normalizedUrl));
   if (!res.ok) throw new Error(`image fetch failed: ${res.status}`);
   const img = await loadImageFromProxyResponse(res, normalizedUrl);
-  console.debug(`[nft-grid] decoded image ${img.width}x${img.height}`, normalizedUrl);
+  void (`[nft-grid] decoded image ${img.width}x${img.height}`, normalizedUrl);
 
   const rawSample = drawForAnalysis(img);
   const cropResult = cropToContent(rawSample);
@@ -1020,7 +1020,7 @@ export async function imageUrlToBinaryGrid(imageUrl) {
     // Computed here while the full-res colour grid is still available.
     smooth.bgBands40 = bandsFromBackgroundKey(smooth.colors, SMOOTH_GRID_SIZE);
     delete smooth.colors;
-    console.info(`[nft-grid] smooth art grid ready`, {
+    void (`[nft-grid] smooth art grid ready`, {
       normalizedUrl,
       imageSize: `${sample.w}x${sample.h}`,
       crop: cropDiag,
@@ -1063,7 +1063,7 @@ export async function imageUrlToBinaryGrid(imageUrl) {
   }
 
   const normalized = normalizeCellGrid(pixelGrid.colors, pixelGrid.gridW, pixelGrid.gridH);
-  console.info(`[nft-grid] pixel art grid ready`, {
+  void (`[nft-grid] pixel art grid ready`, {
     normalizedUrl,
     imageSize: `${sample.w}x${sample.h}`,
     crop: cropDiag,
