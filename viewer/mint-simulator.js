@@ -89,19 +89,26 @@ function sourceKeyFromRecord(record) {
 function cubeFromRecord(record) {
   const source = record.source || {};
   const sourceKind = record.sourceKind === 'normie' ? 'normie' : (record.sourceKind === 'cc0' ? 'cc0' : 'external');
+  // Collection name: from the record if it carries one, else resolved from the
+  // genesis collection table by source contract — so snapshot-loaded cubes label
+  // "1337 skulls #6173" / "Chain Runners #…" instead of a bare "Source #…".
+  const contractLc = String(source.contract || '').toLowerCase();
+  const collectionName = record.cc0?.projectName
+    || GENESIS_COLLECTIONS.find(c => c.contract.toLowerCase() === contractLc)?.name
+    || '';
   const nft = {
     chain: source.chain,
     chainId: Number(source.chainId || 0),
-    contract: String(source.contract || '').toLowerCase(),
+    contract: contractLc,
     tokenId: String(source.tokenId || ''),
-    name: record.cc0?.projectName ? `${record.cc0.projectName} Seed #${source.tokenId || '?'}` : `${sourceKind === 'normie' ? 'Normie' : 'Source'} #${source.tokenId || '?'}`,
-    collection: record.cc0?.projectName || '',
+    name: record.cc0?.projectName ? `${record.cc0.projectName} Seed #${source.tokenId || '?'}` : `${sourceKind === 'normie' ? 'Normie' : (collectionName || 'Source')} #${source.tokenId || '?'}`,
+    collection: collectionName,
     imageUrl: '',
     isNormie: sourceKind === 'normie',
     isCC0Seed: sourceKind === 'cc0',
     normieId: sourceKind === 'normie' ? Number(source.tokenId) : null,
     cc0ProjectId: record.cc0?.projectId || '',
-    cc0ProjectName: record.cc0?.projectName || '',
+    cc0ProjectName: record.cc0?.projectName || collectionName,
     cc0License: record.cc0?.license || '',
     cc0Provenance: record.cc0?.provenance || '',
     isSvgArt: false,
