@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260821-5';
+const VIEWER_BUILD = '20260821-6';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -315,6 +315,7 @@ let selectedNeighbourhoodIdx = null;
 let selectedRegionIdx = null;
 let ownerFocusEnabled = false;
 let ownerFocusAddress = '';
+let _ownerInvKey = ''; // owner-inventory diff key (declared here: the fn runs during module init)
 let ownerFocusLabelVersion = 0;
 let ownerFocusMotifCache = new Set();
 const lightsSelectedEl = document.getElementById('lights-selected');
@@ -839,7 +840,6 @@ function refreshOwnerFocusLabel() {
   });
 }
 
-let _ownerInvKey = '';
 function updateOwnerInventory(ownerLabel) {
   if (!ownerInventoryEl || !ownerInventoryListEl) return;
   if (!ownerFocusEnabled || !ownerFocusAddress) {
