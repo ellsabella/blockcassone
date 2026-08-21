@@ -14,6 +14,10 @@
 import { createInstancedBillboardMesh } from './instanced-mesh.js';
 import { environmentIdForStreet } from '../core/cube-env.js';
 import { crystalTintForEnv } from './crystal-biome.js';
+import { disposeMeshGL } from '../renderer/src/geometry.js';
+
+// mkBase -> currently live epoch-suffixed mesh key (stale epochs are disposed).
+const _liveImpostorKeys = new Map();
 import { mat4, identity } from '../renderer/src/math.js';
 
 // Center + max-axis extent of a slot's 8 raw Hilbert vertices (same as entry.js's
@@ -82,7 +86,18 @@ export function buildImpostorCloud(gl, hilbert, meshes, opts = {}) {
   const items = [];
   for (const [key, b] of buckets) {
     if (!b.data.length) continue;
-    const mk = `${keyPrefix}-${key}-${start}-${end}`;
+    // Mesh key carries a mint-epoch so dots refresh when new cubes land (the old
+    // epoch-less key kept stale dots at freshly minted slots until scope change).
+    // NOTE: keyed on occupancy COUNT — revisit if move mechanics reshuffle slots
+    // without changing the count (moves also trigger full mesh clears today).
+    const mkBase = `${keyPrefix}-${key}-${start}-${end}`;
+    const mk = `${mkBase}-e${occupiedSlots.size}`;
+    const prev = _liveImpostorKeys.get(mkBase);
+    if (prev && prev !== mk && meshes[prev] !== undefined) {
+      disposeMeshGL(gl, meshes[prev]);
+      delete meshes[prev];
+    }
+    _liveImpostorKeys.set(mkBase, mk);
     if (meshes[mk] === undefined) meshes[mk] = createInstancedBillboardMesh(gl, new Float32Array(b.data));
     const transform = mat4(); identity(transform);
     items.push({

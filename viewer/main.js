@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260821-4';
+const VIEWER_BUILD = '20260821-5';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -839,16 +839,34 @@ function refreshOwnerFocusLabel() {
   });
 }
 
+let _ownerInvKey = '';
 function updateOwnerInventory(ownerLabel) {
   if (!ownerInventoryEl || !ownerInventoryListEl) return;
-  ownerInventoryListEl.replaceChildren();
   if (!ownerFocusEnabled || !ownerFocusAddress) {
+    _ownerInvKey = '';
+    ownerInventoryListEl.replaceChildren();
     ownerInventoryEl.classList.remove('open', 'mine');
     ownerInventoryEl.setAttribute('aria-hidden', 'true');
     if (ownerInventoryMineEl) ownerInventoryMineEl.hidden = true;
     return;
   }
   const cubes = ownerFocusedCubes();
+  const me = loadedWalletAddress();
+  const isMine = !!me && !!ownerFocusAddress && me.toLowerCase() === ownerFocusAddress.toLowerCase();
+  // Diff-gate: this rebuilt the whole button list on EVERY data callback — a
+  // 200-cube owner re-created hundreds of buttons repeatedly during load. When
+  // only the selection changed, just retoggle the active highlight.
+  const invKey = `${ownerFocusAddress}|${cubes.map(c => c.slot).join(',')}|${isMine}|${ownerLabel || ''}`;
+  if (invKey === _ownerInvKey) {
+    for (const btn of ownerInventoryListEl.children) {
+      btn.classList.toggle('active', Number(btn.dataset.slot) === selectedMotifIdx);
+    }
+    ownerInventoryEl.classList.add('open');
+    ownerInventoryEl.setAttribute('aria-hidden', 'false');
+    return;
+  }
+  _ownerInvKey = invKey;
+  ownerInventoryListEl.replaceChildren();
   if (ownerInventoryTitleEl) {
     const eyebrow = document.createElement('span');
     eyebrow.className = 'oi-eyebrow';
@@ -862,8 +880,6 @@ function updateOwnerInventory(ownerLabel) {
     ownerInventoryTitleEl.replaceChildren(eyebrow, idEl, countEl);
   }
   // Viewing OUR OWN cubes? Turn the panel green + hide the "Show mine" button.
-  const me = loadedWalletAddress();
-  const isMine = !!me && !!ownerFocusAddress && me.toLowerCase() === ownerFocusAddress.toLowerCase();
   ownerInventoryEl.classList.toggle('mine', isMine);
   if (ownerInventoryMineEl) ownerInventoryMineEl.hidden = isMine || !me;
   for (const cube of cubes) {
@@ -2854,8 +2870,10 @@ function detailedEmptyMotifSet() {
   if (mode !== 'BIG') return new Set();
   if (!detailMaterialsReady) return new Set(); // biomes need the crystal/glass shaders loaded first
   if (mainViewScope === 'block') return new Set(); // full-Block overview: cloud only, no 4096 detailed biomes
-  // Biomes ALWAYS show (street/neighbourhood/region). Selection just BRIGHTENS the focused
-  // ones (see emptyBiomeDimForMotif) — e.g. double-click a cube → its neighbourhood lights up.
+  // H1 LOD: region overview is ALSO cloud-only — 512 detailed biomes were ~7k draw
+  // calls/frame + a ~43-pass scaffold fill on cold entry. Detailed biomes render at
+  // the close scopes (street/neighbourhood, ≤64 slots), which is where they read.
+  if (mainViewScope === 'region') return new Set();
   return motifSetForRange(mainScopeStart(), mainScopeCount());
 }
 
@@ -2974,10 +2992,15 @@ function rebuildScene() {
   const cubeCtxMap = {};
   const motifsForCtx = new Set([...motifsToRender, ...fullArtworkMotifs, p0.hierarchy.motifIndex]);
   if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) motifsForCtx.add(selectedMotifIdx);
+  // Mirror-slice cache: recompute only when the minted set changes, not per rebuild.
+  if (_cubeCtxEpoch !== mintedCount()) { _cubeCtxCache.clear(); _cubeCtxEpoch = mintedCount(); }
   for (const motifIdx of motifsForCtx) {
-    cubeCtxMap[motifIdx] = {
-      slicesByAxis: computeMirrorSlices(motifIdx, hilbert, planesForMotif(motifIdx)),
-    };
+    let ctx = _cubeCtxCache.get(motifIdx);
+    if (!ctx) {
+      ctx = { slicesByAxis: computeMirrorSlices(motifIdx, hilbert, planesForMotif(motifIdx)) };
+      _cubeCtxCache.set(motifIdx, ctx);
+    }
+    cubeCtxMap[motifIdx] = ctx;
   }
   // --- Per-cube items ---
   for (const motifIdx of motifsToRender) {
@@ -3111,9 +3134,12 @@ function rebuildScene() {
         }
         _emptySlotCache.set(motifIdx, base);
       }
-      const items = cloneSceneItems(base);
-      applyDim(items, emptyBiomeDimForMotif(motifIdx));
-      sceneItems.push(...items);
+      // Draw-time dim — no clones (the clone+mutate model copied ~15 items × up
+      // to 512 slots × every rebuild pass). Cached uniforms stay pristine; the
+      // dim multiplies at upload.
+      const slotDim = emptyBiomeDimForMotif(motifIdx);
+      for (const it of base) it.dim = slotDim;
+      sceneItems.push(...base);
     }
   }
 
@@ -3238,6 +3264,8 @@ const startT = performance.now();
 // recreated by every rebuildScene, so this computes once per rebuild instead of
 // 4 filters × 3 viewports × 60fps. (Do not mutate scene arrays outside rebuilds.)
 const _partitionCache = new WeakMap();
+// Uniforms the draw-time `item.dim` multiplies (mirror of applyDim's set).
+const DIM_UNIFORMS = new Set(['uLineOpacity', 'uAlpha', 'uOpacity', 'uLightScale']);
 function partitionItems(items) {
   let p = _partitionCache.get(items);
   if (!p) {
@@ -3365,9 +3393,19 @@ function drawScene(items, cam, t) {
       if (item.awakenedLights) lastPtPos = null; // pos buffer was the per-item awakened one
       // Uniform entries cached on the item — items are rebuilt each rebuildScene,
       // so this is one allocation per item per rebuild instead of per frame.
+      // item.dim (draw-time dim) multiplies the opacity-family uniforms at upload —
+      // replaces the old clone+applyDim model for cached scaffold items + cloud fade.
       const uEntries = item._uniformEntries || (item._uniformEntries = Object.entries(item.uniforms || {}));
-      for (const [name, value] of uEntries) {
-        setUniformByName(gl, L[name], name, value);
+      const itemDim = item.dim;
+      if (itemDim !== undefined && itemDim !== 1) {
+        for (const [name, value] of uEntries) {
+          const v = (typeof value === 'number' && DIM_UNIFORMS.has(name)) ? value * itemDim : value;
+          setUniformByName(gl, L[name], name, v);
+        }
+      } else {
+        for (const [name, value] of uEntries) {
+          setUniformByName(gl, L[name], name, value);
+        }
       }
 
       if (item.samplers) {
@@ -3641,7 +3679,9 @@ function frame() {
     const d = orbit.state.distance;
     const u = Math.min(1, Math.max(0, (d - 12) / 28)); // 0 at dist≤12 (close) → 1 at ≥40 (wide)
     const fade = u * u * (3 - 2 * u);
-    for (const it of _cloudItems) it.uniforms.uOpacity = (it._baseOpacity ?? 0.42) * fade;
+    // Fade via the draw-time dim channel — mutating uniforms per frame no longer
+    // reaches the GPU now that uniform entries are cached per item.
+    for (const it of _cloudItems) it.dim = fade;
   }
 
   drawScene(sceneItems, mainCam, t);
