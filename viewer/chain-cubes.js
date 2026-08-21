@@ -1,6 +1,7 @@
 import { NORMIES_CONTRACT } from './wallet-nfts.js';
 import { compactNormieArtFromRaw, compactNonNormieArt } from './art-snapshot.js';
 import { startRpc, recordHydration } from './perf-metrics.js';
+import { fetchWorldSnapshot } from './snapshot-fetch.js';
 
 const SELECTORS = {
   nextCubeId: '0xfee34352',
@@ -182,9 +183,7 @@ function recordFromChain(config, cubeId, owner, dataHex) {
 // live chain scan. Guards against a stale snapshot from a different deployment.
 async function loadSnapshotRecords(config) {
   try {
-    const res = await fetch('/data/world-snapshot.json', { cache: 'no-store' });
-    if (!res.ok) return null;
-    const snap = await res.json();
+    const snap = await fetchWorldSnapshot();
     if (!snap || !Array.isArray(snap.records)) return null;
     if (snap.cubeNft && config.cubeNft &&
         String(snap.cubeNft).toLowerCase() !== String(config.cubeNft).toLowerCase()) {

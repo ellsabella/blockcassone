@@ -1264,7 +1264,7 @@ function openCubeDetail(motifIdx, { preserveStreet = false } = {}) {
   highlightInventorySlot(motifIdx);
   updateStreetStats();
   setOrbitTargetToSelection();
-  rebuildScene();
+  scheduleRebuild(); // coalesces with callers that rebuild right after (focus flows)
 }
 
 function activateOwnerFocusFor(address) {
@@ -1309,7 +1309,9 @@ function closeCubeDetail() {
   updateSvgThumb(null);
   cubeDetailOpen = false;
   updateStreetStats();
-  rebuildScene();
+  // Scheduled (not sync): callers that rebuild right after (deselect click,
+  // focus flows) coalesce to ONE rebuild — rebuildScene() cancels this.
+  scheduleRebuild();
 }
 
 if (mintSuccessCloseBtn) mintSuccessCloseBtn.addEventListener('click', closeMintSuccess);
@@ -2096,6 +2098,10 @@ function clearGeneratedMeshes() {
   for (const key of Object.keys(meshes)) {
     if (key !== 'wireBox' && key !== 'solidBox' && key !== 'selectionWireBox' && key !== 'selectionBrackets' && key !== 'worldMapGrid') delete meshes[key];
   }
+  // The empty-slot scaffold cache holds items referencing generated mesh keys —
+  // without this, cached slots silently stop rendering after a wallet load /
+  // reset (drawScene skips items whose mesh no longer exists).
+  _emptySlotCache.clear();
 }
 
 // ---------- Materials ----------
@@ -2688,8 +2694,16 @@ function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
 function bigModeDimForMotif(motifIdx) {
   if (mode !== 'BIG') return 1.0;
   if (ownerFocusEnabled && ownerFocusAddress && ownerFocusedMotifSet().has(motifIdx)) return 1.0; // no boost
+  // Owner emphasis: the CONNECTED wallet's cubes read at full brightness; every
+  // other minted cube at half. Applies at the region scope and the full-block
+  // default view (street/neighbourhood selections keep their tighter dims, and
+  // with no wallet loaded the whole world tones down uniformly).
+  const ownDim = () => {
+    const me = _rebuildWalletAddr;
+    return me && ownerAddressForSlot(motifIdx) === me ? 1.0 : 0.5;
+  };
   if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
-    return regionIndexForMotif(motifIdx) === selectedRegionIdx ? 1.0 : 0.16;
+    return regionIndexForMotif(motifIdx) === selectedRegionIdx ? ownDim() : 0.16;
   }
   if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
     return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? 1.0 : 0.20;
@@ -2697,9 +2711,10 @@ function bigModeDimForMotif(motifIdx) {
   if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
     return streetIndexForMotif(motifIdx) === selectedStreetIdx ? 1.0 : 0.32;
   }
-  return selectedMotifIdx !== null && selectedMotifIdx !== undefined && motifIdx !== selectedMotifIdx
-    ? 0.60
-    : 1.0;
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
+    return motifIdx === selectedMotifIdx ? 1.0 : 0.60;
+  }
+  return ownDim();
 }
 
 function buildSelectionOverlayItems() {
@@ -2848,10 +2863,25 @@ function fullArtworkMotifSet() {
 // triggering a full rebuildScene() apiece (~8 heavy rebuilds per load). Collapse
 // any burst within a frame into a single rebuild on the next animation frame.
 let _rebuildScheduled = false;
+let _rebuildWalletAddr = ''; // cached once per rebuildScene() for per-motif dim checks
 function scheduleRebuild() {
   if (_rebuildScheduled) return;
   _rebuildScheduled = true;
-  requestAnimationFrame(() => { _rebuildScheduled = false; rebuildScene(); });
+  requestAnimationFrame(() => {
+    if (!_rebuildScheduled) return; // a synchronous rebuild already ran — pending one is stale
+    _rebuildScheduled = false;
+    rebuildScene();
+  });
+}
+
+// Data-ready events (wallet NFTs, art hydration, normie fetches) trickle in for
+// seconds on big wallets — each used to trigger its own full rebuild (the
+// historical rAF-violation / "press Reset" symptom). Trailing-debounce them:
+// one rebuild ~200ms after the burst quiets, not one per arrival.
+let _dataRebuildTimer = 0;
+function scheduleRebuildDebounced(delayMs = 200) {
+  clearTimeout(_dataRebuildTimer);
+  _dataRebuildTimer = setTimeout(() => { _dataRebuildTimer = 0; scheduleRebuild(); }, delayMs);
 }
 
 // Per-slot cache for the static empty-world scaffold. The biome / Hilbert /
@@ -2871,6 +2901,8 @@ function cloneSceneItems(items) {
 
 function rebuildScene() {
   const _rebuildStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  _rebuildScheduled = false; // running now — cancel any pending scheduled rebuild (kills double-rebuilds)
+  _rebuildWalletAddr = loadedWalletAddress(); // hoisted: read once per rebuild, not per motif (DOM read)
   _scaffoldIncomplete = false;
   sceneItems = [];
   detailSceneItems = [];
@@ -3033,7 +3065,13 @@ function rebuildScene() {
         if (builtThisRebuild >= SCAFFOLD_BUILD_BUDGET) { _scaffoldIncomplete = true; continue; }
         base = emptySlotItemsFor(motifIdx);
         builtThisRebuild++;
-        if (_emptySlotCache.size >= EMPTY_SLOT_CACHE_CAP) _emptySlotCache.clear();
+        if (_emptySlotCache.size >= EMPTY_SLOT_CACHE_CAP) {
+          // Evict the oldest quarter (Map preserves insertion order) instead of
+          // nuking everything — a wholesale clear made region-touring re-run all
+          // the expensive biome/voxel builds from scratch.
+          let evict = EMPTY_SLOT_CACHE_CAP >> 2;
+          for (const k of _emptySlotCache.keys()) { if (evict-- <= 0) break; _emptySlotCache.delete(k); }
+        }
         _emptySlotCache.set(motifIdx, base);
       }
       const items = cloneSceneItems(base);
@@ -3102,10 +3140,10 @@ function rebuildScene() {
 
 // Trigger a scene rebuild when normie pixel data arrives so 3D voxel meshes
 // get built once their pixel data is available.
-setDataReadyCallback(() => scheduleRebuild());
-setBannerDataReadyCallback(() => scheduleRebuild());
-setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); scheduleRebuild(); });
-setMintDataReadyCallback(() => { _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); applyMintedCubeSeeds(); scheduleRebuild(); });
+setDataReadyCallback(() => scheduleRebuildDebounced());
+setBannerDataReadyCallback(() => scheduleRebuildDebounced());
+setWalletDataReadyCallback(() => { _updateWalletStatus(); _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); scheduleRebuildDebounced(); });
+setMintDataReadyCallback(() => { _updateMintStatus(); refreshOwnerFocusLabel(); updateCubeDetailInfo(); updateStreetStats(); applyMintedCubeSeeds(); scheduleRebuildDebounced(); });
 
 // Recompute edge points for real minted cubes from their on-chain seed, so a
 // minted cube's unique-plane grown points match its on-chain 2D thumbnail.
