@@ -5,6 +5,7 @@ import {
 } from './wallet-nfts.js';
 import { compactNormieArt } from './art-snapshot.js';
 import { loadChainMintRecords } from './chain-cubes.js';
+import { fetchWorldSnapshot } from './snapshot-fetch.js';
 import { snapshotAllNormieIds, snapshotHasEntries, snapshotNormieIdsForWallet } from './normie-snapshot.js';
 import {
   fetchNormiePixels,
@@ -18,6 +19,7 @@ import { hashInt as hash1 } from './tree-walker.js';
 let minted = [];
 let mintedNormieIds = new Set();
 let occupiedSlots = new Set();
+let cubeBySlot = new Map();
 let onMintReady = null;
 let mintStateSource = 'dev';
 
@@ -45,14 +47,11 @@ async function loadCC0ArtPool() {
   if (cc0PoolCache) return cc0PoolCache;
   const pool = {};
   try {
-    const res = await fetch('/data/world-snapshot.json', { cache: 'no-store' });
-    if (res.ok) {
-      const snap = await res.json();
-      for (const r of (snap?.records || [])) {
-        if (r.sourceKind !== 'external' || !r.art) continue;
-        const c = String(r.source?.contract || '').toLowerCase();
-        (pool[c] = pool[c] || []).push({ tokenId: r.source.tokenId, art: r.art });
-      }
+    const snap = await fetchWorldSnapshot();
+    for (const r of (snap?.records || [])) {
+      if (r.sourceKind !== 'external' || !r.art) continue;
+      const c = String(r.source?.contract || '').toLowerCase();
+      (pool[c] = pool[c] || []).push({ tokenId: r.source.tokenId, art: r.art });
     }
   } catch { /* no snapshot -> CC0 collections simply won't be drawable */ }
   cc0PoolCache = pool;
@@ -127,13 +126,17 @@ function cubeFromRecord(record) {
 function rebuildIndexes() {
   mintedNormieIds = new Set();
   occupiedSlots = new Set();
+  cubeBySlot = new Map();
   for (const cube of minted) {
     occupiedSlots.add(cube.slot);
+    cubeBySlot.set(cube.slot, cube);
     if (cube.sourceKind === 'normie' && cube.nft.normieId !== null && cube.nft.normieId !== undefined) {
       mintedNormieIds.add(cube.nft.normieId);
     }
   }
 }
+
+const _hydratedNormieArtIds = new Set(); // normie art is immutable per id — hydrate once, ever
 
 function setMintedFromRecords(records) {
   minted = (records || [])
@@ -141,7 +144,14 @@ function setMintedFromRecords(records) {
     .filter(cube => Number.isInteger(cube.cubeId) && Number.isInteger(cube.slot))
     .sort((a, b) => a.cubeId - b.cubeId);
   for (const cube of minted) {
-    if (cube.nft?.isNormie && cube.nft.art?.k === 'n') hydrateNormieArtSnapshot(cube.nft.art);
+    if (cube.nft?.isNormie && cube.nft.art?.k === 'n') {
+      const id = cube.nft.normieId;
+      if (id !== null && id !== undefined) {
+        if (_hydratedNormieArtIds.has(id)) continue; // skip re-unpacking 4,800 bits per cube on every reload
+        _hydratedNormieArtIds.add(id);
+      }
+      hydrateNormieArtSnapshot(cube.nft.art);
+    }
   }
   rebuildIndexes();
 }
@@ -206,7 +216,9 @@ export function mintedStateSource() {
 }
 
 export function getMintedCubeForSlot(slot) {
-  return minted.find(cube => cube.slot === slot) || null;
+  // O(1): called per motif per rebuild (dim policy, category checks) — a linear
+  // find here made rebuilds O(minted²) at scale.
+  return cubeBySlot.get(slot) || null;
 }
 
 export function isMintedSlot(slot) {
