@@ -2693,28 +2693,26 @@ function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
 
 function bigModeDimForMotif(motifIdx) {
   if (mode !== 'BIG') return 1.0;
-  if (ownerFocusEnabled && ownerFocusAddress && ownerFocusedMotifSet().has(motifIdx)) return 1.0; // no boost
-  // Owner emphasis: the CONNECTED wallet's cubes read at full brightness; every
-  // other minted cube at half. Applies at the region scope and the full-block
-  // default view (street/neighbourhood selections keep their tighter dims, and
-  // with no wallet loaded the whole world tones down uniformly).
+  if (ownerFocusEnabled && ownerFocusAddress && ownerFocusedMotifSet().has(motifIdx)) return 0.85;
+  // Owner emphasis — holds on load AND across every selection/navigation state:
+  // the connected wallet's cubes at 0.85, all other minted cubes at 0.25. Only
+  // the individually selected cube reads at full brightness. Out-of-scope dims
+  // (deep background) keep their existing levels.
   const ownDim = () => {
     const me = _rebuildWalletAddr;
-    return me && ownerAddressForSlot(motifIdx) === me ? 1.0 : 0.5;
+    return me && ownerAddressForSlot(motifIdx) === me ? 0.85 : 0.25;
   };
   if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
     return regionIndexForMotif(motifIdx) === selectedRegionIdx ? ownDim() : 0.16;
   }
   if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
-    // The load-time default focus lands here (neighbourhood selected) — owner
-    // emphasis must apply on load too, not only at region/block.
     return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? ownDim() : 0.20;
   }
   if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
-    return streetIndexForMotif(motifIdx) === selectedStreetIdx ? 1.0 : 0.32;
+    return streetIndexForMotif(motifIdx) === selectedStreetIdx ? ownDim() : 0.16;
   }
   if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) {
-    return motifIdx === selectedMotifIdx ? 1.0 : 0.60;
+    return motifIdx === selectedMotifIdx ? 1.0 : ownDim();
   }
   return ownDim();
 }
