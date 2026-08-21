@@ -49,5 +49,6 @@ export function createInstancedBillboardMesh(gl, instanceData) {
     vao,
     instanceCount: (instanceData.length / 6) | 0,
     mode: 'INSTANCED',
+    glBuffers: [cornerBuf, instBuf], // disposed by disposeMeshGL on regeneration
   };
 }

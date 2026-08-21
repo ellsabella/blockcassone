@@ -136,9 +136,11 @@ export function createQuad() {
 export function createMeshGL(gl, mesh) {
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
+  const glBuffers = []; // retained for disposeMeshGL — VAO-only refs leak on delete
 
   const addAttr = (data, loc, size) => {
     const buf = gl.createBuffer();
+    glBuffers.push(buf);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(loc);
@@ -163,6 +165,7 @@ export function createMeshGL(gl, mesh) {
     }
     indexType = indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
     const idxBuf = gl.createBuffer();
+    glBuffers.push(idxBuf);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
     indexCount = indices.length;
@@ -176,7 +179,16 @@ export function createMeshGL(gl, mesh) {
     indexType,
     vertexCount: mesh.positions.length / 3,
     mode: glMode,
+    glBuffers,
   };
+}
+
+// Free a createMeshGL mesh's GPU resources. Without this, regenerating meshes
+// (wallet loads, resets, scope churn) leaks every VBO/VAO permanently.
+export function disposeMeshGL(gl, meshGL) {
+  if (!meshGL) return;
+  for (const buf of meshGL.glBuffers || []) gl.deleteBuffer(buf);
+  if (meshGL.vao) gl.deleteVertexArray(meshGL.vao);
 }
 
 // ------------------------------------------------------------

@@ -1,7 +1,7 @@
 // TheBLOCK viewer — dev tool for previewing artwork.
 
 import { mat4, identity, v3Normalize, vec3, multiply, invert } from '../renderer/src/math.js';
-import { createBox, createWireframeBox, createMeshGL }         from '../renderer/src/geometry.js';
+import { createBox, createWireframeBox, createMeshGL, disposeMeshGL } from '../renderer/src/geometry.js';
 import { loadMaterial }                                        from '../renderer/src/materials.js';
 import { faceOnCamera }                                        from './camera.js';
 import { createOrbitCamera }                                   from './orbit-camera.js';
@@ -72,7 +72,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260821-2';
+const VIEWER_BUILD = '20260821-3';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -2101,7 +2101,10 @@ const meshes = {
 
 function clearGeneratedMeshes() {
   for (const key of Object.keys(meshes)) {
-    if (key !== 'wireBox' && key !== 'solidBox' && key !== 'selectionWireBox' && key !== 'selectionBrackets' && key !== 'worldMapGrid') delete meshes[key];
+    if (key !== 'wireBox' && key !== 'solidBox' && key !== 'selectionWireBox' && key !== 'selectionBrackets' && key !== 'worldMapGrid') {
+      disposeMeshGL(gl, meshes[key]); // free VBOs/VAO — deleting the key alone leaked them
+      delete meshes[key];
+    }
   }
   // The empty-slot scaffold cache holds items referencing generated mesh keys —
   // without this, cached slots silently stop rendering after a wallet load /
@@ -3205,13 +3208,50 @@ sse.onmessage = (e) => {
 // ---------- Render loop (placeholder — Phase B will add the cameras + passes) ----------
 const startT = performance.now();
 
+// Blend-partition cache, keyed on the items ARRAY identity — scene arrays are
+// recreated by every rebuildScene, so this computes once per rebuild instead of
+// 4 filters × 3 viewports × 60fps. (Do not mutate scene arrays outside rebuilds.)
+const _partitionCache = new WeakMap();
+function partitionItems(items) {
+  let p = _partitionCache.get(items);
+  if (!p) {
+    p = { opaque: [], alpha: [], alphaOverlay: [], additive: [] };
+    for (const it of items) {
+      if (!it.blend || it.blend === 'opaque') p.opaque.push(it);
+      else if (it.blend === 'additive') p.additive.push(it);
+      else if (it.transparentLayer) p.alphaOverlay.push(it);
+      else p.alpha.push(it);
+    }
+    _partitionCache.set(items, p);
+  }
+  return p;
+}
+
+// Memoized light-colour buffers scaled by intensity — the per-item per-frame
+// Float32Array allocation here was the main GC-pressure source (most minted
+// cubes carry lightIntensityScale 0.7 via baseline softening).
+const _scaledLightCache = new WeakMap();
+function scaledLightBuf(buf, scale) {
+  let byScale = _scaledLightCache.get(buf);
+  if (!byScale) { byScale = new Map(); _scaledLightCache.set(buf, byScale); }
+  let arr = byScale.get(scale);
+  if (!arr) {
+    arr = new Float32Array(buf.length);
+    for (let i = 0; i < buf.length; i++) arr[i] = buf[i] * scale;
+    byScale.set(scale, arr);
+  }
+  return arr;
+}
+
+const _camRightScratch = new Float32Array(3);
+const _camUpScratch = new Float32Array(3);
+
 function drawScene(items, cam, t) {
-  const camRight = new Float32Array([cam.view[0], cam.view[4], cam.view[8]]);
-  const camUp = new Float32Array([cam.view[1], cam.view[5], cam.view[9]]);
-  const opaqueItems = items.filter(it => !it.blend || it.blend === 'opaque');
-  const alphaItems = items.filter(it => it.blend === 'alpha' && !it.transparentLayer);
-  const alphaOverlayItems = items.filter(it => it.blend === 'alpha' && it.transparentLayer);
-  const additiveItems = items.filter(it => it.blend === 'additive');
+  _camRightScratch[0] = cam.view[0]; _camRightScratch[1] = cam.view[4]; _camRightScratch[2] = cam.view[8];
+  _camUpScratch[0] = cam.view[1]; _camUpScratch[1] = cam.view[5]; _camUpScratch[2] = cam.view[9];
+  const camRight = _camRightScratch;
+  const camUp = _camUpScratch;
+  const { opaque: opaqueItems, alpha: alphaItems, alphaOverlay: alphaOverlayItems, additive: additiveItems } = partitionItems(items);
 
   function drawItems(drawList, blendMode) {
     if (blendMode === 'additive') {
@@ -3236,6 +3276,8 @@ function drawScene(items, cam, t) {
     let currentProg = null;
     let L = null;
     let cullEnabled = (blendMode === 'opaque');
+    let lastPtPos = null; // last-uploaded light buffers for the CURRENT program —
+    let lastPtCol = null; // skip redundant uniform3fv when unchanged between items
     for (const item of drawList) {
       const mat = materialsMap[item.material];
       if (!mat) continue;
@@ -3254,6 +3296,7 @@ function drawScene(items, cam, t) {
         gl.useProgram(mat.program);
         currentProg = mat.program;
         L = mat.locations;
+        lastPtPos = null; lastPtCol = null; // new program = new uniform state
         if (L.uView) gl.uniformMatrix4fv(L.uView, false, cam.view);
         if (L.uProj) gl.uniformMatrix4fv(L.uProj, false, cam.proj);
         if (L.uCamPos) gl.uniform3fv(L.uCamPos, cam.pos);
@@ -3285,17 +3328,19 @@ function drawScene(items, cam, t) {
         const baseLight = item.desaturate ? grayLightCol : lightCol;
         gl.uniform3f(L.uLightCol, baseLight[0] * lightScale, baseLight[1] * lightScale, baseLight[2] * lightScale);
       }
-      if (ptPosLoc) gl.uniform3fv(ptPosLoc, pointPosBuf);
+      if (ptPosLoc && pointPosBuf !== lastPtPos) { gl.uniform3fv(ptPosLoc, pointPosBuf); lastPtPos = pointPosBuf; }
       if (ptColLoc) {
-        if (lightScale === 1.0) {
-          gl.uniform3fv(ptColLoc, pointColBuf);
-        } else {
-          const scaled = new Float32Array(pointColBuf.length);
-          for (let i = 0; i < pointColBuf.length; i++) scaled[i] = pointColBuf[i] * lightScale;
-          gl.uniform3fv(ptColLoc, scaled);
-        }
+        // Awakened buffers mutate in place per item — never trust identity for them.
+        const colToUpload = lightScale === 1.0 ? pointColBuf
+          : item.awakenedLights ? (() => { for (let i = 0; i < pointColBuf.length; i++) pointColBuf[i] *= lightScale; return pointColBuf; })()
+          : scaledLightBuf(pointColBuf, lightScale);
+        if (item.awakenedLights || colToUpload !== lastPtCol) { gl.uniform3fv(ptColLoc, colToUpload); lastPtCol = item.awakenedLights ? null : colToUpload; }
       }
-      for (const [name, value] of Object.entries(item.uniforms || {})) {
+      if (item.awakenedLights) lastPtPos = null; // pos buffer was the per-item awakened one
+      // Uniform entries cached on the item — items are rebuilt each rebuildScene,
+      // so this is one allocation per item per rebuild instead of per frame.
+      const uEntries = item._uniformEntries || (item._uniformEntries = Object.entries(item.uniforms || {}));
+      for (const [name, value] of uEntries) {
         setUniformByName(gl, L[name], name, value);
       }
 
