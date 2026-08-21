@@ -6,7 +6,11 @@ let _snapPromise = null;
 
 export function fetchWorldSnapshot() {
   if (!_snapPromise) {
-    _snapPromise = fetch('/data/world-snapshot.json', { cache: 'no-store' })
+    // cache: 'default' (NOT no-store) so the landing page's <link rel="prefetch">
+    // of this file is actually honored — the viewer then reads it from cache and
+    // the neighbourhood is ready the moment the fade lifts. The server caps
+    // freshness via Cache-Control max-age.
+    _snapPromise = fetch('/data/world-snapshot.json', { cache: 'default' })
       .then(res => (res.ok ? res.json() : null))
       .catch(() => null);
   }

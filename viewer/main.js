@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260821-7';
+const VIEWER_BUILD = '20260821-8';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -3233,6 +3233,16 @@ function applyMintedCubeSeeds() {
   }
 }
 
+// Release the load-fade overlay AFTER the focused scene has actually drawn
+// (two rAFs = the rebuild's frame has been presented). Hard timeout so a failed
+// data load can never leave the user staring at black.
+function releaseLoadFade() {
+  const el = document.getElementById('load-fade');
+  if (!el || el.classList.contains('done')) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('done')));
+}
+setTimeout(releaseLoadFade, 7000);
+
 loadMintSimulation()
   .then(cubes => {
     if (cubes.length > 0) {
@@ -3246,8 +3256,9 @@ loadMintSimulation()
     _updateNftLabel();
     refreshOwnerFocusLabel();
     rebuildScene();
+    releaseLoadFade();
   })
-  .catch(err => log(`saved mints unavailable: ${String(err?.message || err)}`));
+  .catch(err => { log(`saved mints unavailable: ${String(err?.message || err)}`); releaseLoadFade(); });
 
 // ---------- SSE hot-reload ----------
 const sse = new EventSource('/shader-changes');

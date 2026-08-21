@@ -761,9 +761,13 @@ const server = http.createServer((req, res) => {
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
+    // World snapshot: briefly cacheable (60s) so the landing page's prefetch is
+    // honored and the viewer opens with the data already local. The indexer
+    // refreshes every 2 min, so staleness is bounded and harmless.
+    const cacheControl = rel === '/data/world-snapshot.json' ? 'public, max-age=60' : 'no-store';
     res.writeHead(200, {
       'Content-Type':   MIME[ext] || 'application/octet-stream',
-      'Cache-Control':  'no-store',
+      'Cache-Control':  cacheControl,
       // Permissive dev-only CSP so embedded browsers (VSCode Simple Browser,
       // etc.) don't over-restrict module/worker execution. Never ship this.
       'Content-Security-Policy':
