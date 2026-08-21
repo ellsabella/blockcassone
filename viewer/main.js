@@ -2919,6 +2919,8 @@ function fullArtworkMotifSet() {
 // any burst within a frame into a single rebuild on the next animation frame.
 let _rebuildScheduled = false;
 let _rebuildWalletAddr = ''; // cached once per rebuildScene() for per-motif dim checks
+const _cubeCtxCache = new Map(); // mirror-slice cache, per motif — cleared when the minted set changes
+let _cubeCtxEpoch = -1;
 function scheduleRebuild() {
   if (_rebuildScheduled) return;
   _rebuildScheduled = true;
