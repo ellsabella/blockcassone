@@ -211,6 +211,11 @@ export function getMintedCubes() {
   return minted.slice();
 }
 
+// Non-copying accessors for per-frame hot paths — treat as READ-ONLY.
+export function mintedCount() {
+  return minted.length;
+}
+
 export function mintedStateSource() {
   return mintStateSource;
 }

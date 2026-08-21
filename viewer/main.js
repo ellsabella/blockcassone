@@ -33,6 +33,7 @@ import { assignCubeEdgePoints, assignMotifEdgePoints, placeholderSeed } from '/c
 import {
   getMintedCubeForSlot,
   getMintedCubes,
+  mintedCount,
   isMintedSlot,
   loadMintSimulation,
   mintSimulationLoaded,
@@ -72,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260821-3';
+const VIEWER_BUILD = '20260821-4';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -971,6 +972,9 @@ function updateCubeDetailInfo() {
   }
 }
 
+// Occupied-count cache: recompute only when the street or mint count changes —
+// this ran a full minted-array copy + filter EVERY FRAME while a street was open.
+const _streetStatsCache = { street: -1, mintedLen: -1, occupied: 0, rectKey: '' };
 function updateStreetStats() {
   if (!streetStatsEl) return;
   if (selectedStreetIdx === null || selectedStreetIdx === undefined || !cubeDetailOpen || !cubeDetailEl) {
@@ -978,14 +982,23 @@ function updateStreetStats() {
     return;
   }
   const rect = cubeDetailEl.getBoundingClientRect();
-  streetStatsEl.style.left = `${rect.left}px`;
-  streetStatsEl.style.top = `${rect.top}px`;
-  streetStatsEl.style.width = `${rect.width}px`;
-  streetStatsEl.style.height = `${rect.height}px`;
-  const occupied = getMintedCubes().filter(cube => streetIndexForMotif(cube.slot) === selectedStreetIdx).length;
-  if (streetStatOccupiedEl) streetStatOccupiedEl.textContent = `occupied ${occupied}/8`;
-  if (streetStatTypeEl) streetStatTypeEl.textContent = environmentForStreet(selectedStreetIdx);
-  if (streetStatIndexEl) streetStatIndexEl.textContent = `street ${selectedStreetIdx}`;
+  const rectKey = `${rect.left}|${rect.top}|${rect.width}|${rect.height}`;
+  if (rectKey !== _streetStatsCache.rectKey) {
+    _streetStatsCache.rectKey = rectKey;
+    streetStatsEl.style.left = `${rect.left}px`;
+    streetStatsEl.style.top = `${rect.top}px`;
+    streetStatsEl.style.width = `${rect.width}px`;
+    streetStatsEl.style.height = `${rect.height}px`;
+  }
+  const mLen = mintedCount();
+  if (_streetStatsCache.street !== selectedStreetIdx || _streetStatsCache.mintedLen !== mLen) {
+    _streetStatsCache.street = selectedStreetIdx;
+    _streetStatsCache.mintedLen = mLen;
+    _streetStatsCache.occupied = getMintedCubes().filter(cube => streetIndexForMotif(cube.slot) === selectedStreetIdx).length;
+    if (streetStatOccupiedEl) streetStatOccupiedEl.textContent = `occupied ${_streetStatsCache.occupied}/8`;
+    if (streetStatTypeEl) streetStatTypeEl.textContent = environmentForStreet(selectedStreetIdx);
+    if (streetStatIndexEl) streetStatIndexEl.textContent = `street ${selectedStreetIdx}`;
+  }
   streetStatsEl.classList.add('open');
 }
 
@@ -1000,13 +1013,20 @@ function axisScreenVector(view, axis) {
   return [x / len, -y / len];
 }
 
+const _gizmoKeyCache = new WeakMap(); // el -> last rendered orientation key
 function updateAxisGizmo(el, cam, scale = 28) {
   if (!el || !cam?.view) return;
   const axes = [
     { label: 'X', color: '#ff4fae', dir: axisScreenVector(cam.view, [1, 0, 0]) },
     { label: 'Y', color: '#3cff78', dir: axisScreenVector(cam.view, [0, 1, 0]) },
     { label: 'Z', color: '#62a8ff', dir: axisScreenVector(cam.view, [0, 0, 1]) },
-  ].sort((a, b) => {
+  ];
+  // Dirty-check: rebuilding this SVG via innerHTML every frame (×3 gizmos) was
+  // constant DOM churn even with a static camera.
+  const key = axes.map(a => `${a.dir[0].toFixed(3)},${a.dir[1].toFixed(3)}`).join('|') + `|${scale}`;
+  if (_gizmoKeyCache.get(el) === key) return;
+  _gizmoKeyCache.set(el, key);
+  axes.sort((a, b) => {
     // Draw the more vertical/up-facing axis last so labels remain legible when
     // directions overlap in shallow camera angles.
     return Math.abs(a.dir[1]) - Math.abs(b.dir[1]);
@@ -1159,11 +1179,17 @@ function updateSelectionLink(VP) {
   const c1 = [start[0] + (end[0] - start[0]) * 0.42, start[1]];
   const c2 = [end[0] - 38, end[1]];
   const color = selectionLinkColor();
-  selectionLinkPathEl.setAttribute('d', `M ${start[0].toFixed(1)} ${start[1].toFixed(1)} C ${c1[0].toFixed(1)} ${c1[1].toFixed(1)}, ${c2[0].toFixed(1)} ${c2[1].toFixed(1)}, ${end[0].toFixed(1)} ${end[1].toFixed(1)}`);
-  selectionLinkPathEl.style.stroke = color.stroke;
-  selectionLinkPathEl.style.filter = color.filter;
+  const d = `M ${start[0].toFixed(1)} ${start[1].toFixed(1)} C ${c1[0].toFixed(1)} ${c1[1].toFixed(1)}, ${c2[0].toFixed(1)} ${c2[1].toFixed(1)}, ${end[0].toFixed(1)} ${end[1].toFixed(1)}`;
+  // Skip DOM writes when nothing moved (static camera + static panel).
+  if (_lastSelectionLinkD !== d) {
+    _lastSelectionLinkD = d;
+    selectionLinkPathEl.setAttribute('d', d);
+    selectionLinkPathEl.style.stroke = color.stroke;
+    selectionLinkPathEl.style.filter = color.filter;
+  }
   selectionLinkEl.classList.add('active');
 }
+let _lastSelectionLinkD = '';
 
 function nearestProjectedAnchor(box, VP, rect, target) {
   let best = null;
