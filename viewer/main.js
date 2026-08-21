@@ -2706,7 +2706,9 @@ function bigModeDimForMotif(motifIdx) {
     return regionIndexForMotif(motifIdx) === selectedRegionIdx ? ownDim() : 0.16;
   }
   if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
-    return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? 1.0 : 0.20;
+    // The load-time default focus lands here (neighbourhood selected) — owner
+    // emphasis must apply on load too, not only at region/block.
+    return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? ownDim() : 0.20;
   }
   if (selectedStreetIdx !== null && selectedStreetIdx !== undefined) {
     return streetIndexForMotif(motifIdx) === selectedStreetIdx ? 1.0 : 0.32;
@@ -2832,12 +2834,15 @@ function emptyBiomeDimForMotif(motifIdx) {
     );
   }
   if (selectedNeighbourhoodIdx !== null && selectedNeighbourhoodIdx !== undefined) {
-    return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? 0.59 : (
+    // Halved (0.59/0.46 → 0.30/0.23): biomes are backdrop — "everything except
+    // the owner's cubes" tones down 50%, and biomes dominate what glows at
+    // region zoom while the world is part-minted.
+    return neighbourhoodIndexForMotif(motifIdx) === selectedNeighbourhoodIdx ? 0.30 : (
       mainViewScope === 'street' ? 0.38 : mainViewScope === 'neighbourhood' ? 0.13 : 0.055
     );
   }
   if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
-    return regionIndexForMotif(motifIdx) === selectedRegionIdx ? 0.46 : (
+    return regionIndexForMotif(motifIdx) === selectedRegionIdx ? 0.23 : (
       mainViewScope === 'street' ? 0.38 : mainViewScope === 'neighbourhood' ? 0.13 : 0.055
     );
   }
