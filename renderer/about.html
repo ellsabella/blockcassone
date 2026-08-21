@@ -23,7 +23,7 @@
       linear-gradient(0deg, rgba(2, 2, 3, 0.62), rgba(2, 2, 3, 0.34));
   }
 
-  .wrap { position: relative; z-index: 2; min-height: 100vh; display: flex; justify-content: center; padding: 6vh 20px 9vh; }
+  .wrap { position: relative; z-index: 2; min-height: 100vh; display: flex; justify-content: center; padding: calc(4vh + 52px) 20px 9vh; }
   .box {
     width: min(780px, 100%);
     background: rgba(2, 6, 4, 0.82);
@@ -64,11 +64,37 @@
 
   .back { display: inline-block; margin-top: 34px; color: var(--green-dim); letter-spacing: 0.1em; text-decoration: none; border: 1px solid var(--line); padding: 10px 20px; }
   .back:hover { color: #fff; border-color: var(--line-hi); }
+
+  /* Shared site header — same links/behavior as the Explorer's #site-nav:
+     EXPLORER · ABOUT · OPENSEA, current page underlined. Extend with UPDATE /
+     STREETS when those mechanics go live. */
+  .top-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 3;
+    display: flex; gap: 24px; align-items: center; padding: 12px 22px;
+    background: rgba(2, 6, 4, 0.72); backdrop-filter: blur(3px);
+    border-bottom: 1px solid var(--line);
+  }
+  .top-nav a {
+    /* Hero aesthetic: landing-hero pixel font, pale, with a pink glow — same header as the Explorer. */
+    font-family: 'NormiesFont', 'Courier New', monospace;
+    color: #fff; text-decoration: none; font-size: 17px; font-weight: 400;
+    letter-spacing: .06em; text-transform: uppercase; padding: 4px 2px;
+    border-bottom: 2px solid transparent;
+    text-shadow: 0 0 6px rgba(255, 58, 184, 0.9), 0 0 22px rgba(255, 58, 184, 0.6), 0 0 46px rgba(255, 58, 184, 0.3);
+  }
+  .top-nav a:hover { border-bottom-color: rgba(255, 58, 184, 0.7); text-shadow: 0 0 6px rgba(255, 58, 184, 1), 0 0 26px rgba(255, 58, 184, 0.8); }
+  .top-nav a[aria-current="page"] { border-bottom-color: rgba(255, 58, 184, 0.9); }
 </style>
 </head>
 <body>
   <iframe class="cube-bg" src="/cube-bg.html" title="" scrolling="no" tabindex="-1" aria-hidden="true"></iframe>
   <div class="scrim"></div>
+
+  <nav class="top-nav">
+    <a href="/viewer/">EXPLORER</a>
+    <a href="/about" aria-current="page">ABOUT</a>
+    <a href="https://opensea.io/collection/theblock-by-ella/overview" target="_blank" rel="noopener">OPENSEA &#8599;</a>
+  </nav>
 
   <div class="wrap">
     <article class="box">
@@ -120,7 +146,7 @@
       <p>The reference is the stacked city, a population housed in one dense structure instead of spread out flat. We are pioneers at the beginning of the new age of digital identity. Do we speedrun towards pyramid megastructures, vertical canyons of glass and steel, flying cars in lanes above, the ground lost somewhere far below?</p>
       <p>LA 2019. Trantor. Mega City One. NEOM. None are yet real, but is that where we're going?</p>
 
-      <a class="back" href="/">&larr; BACK TO THE BLOCK</a>
+      <a class="back" href="/viewer/">&larr; BACK TO EXPLORER</a>
     </article>
   </div>
 </body>
