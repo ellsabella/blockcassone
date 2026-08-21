@@ -74,7 +74,7 @@ export async function fetchNormieOwner(id) {
 }
 
 export async function fetchNormieBurnedInfo(id) {
-  console.debug(`[normies] burned-history probe skipped for id ${id}`);
+  void (`[normies] burned-history probe skipped for id ${id}`);
   return null;
 }
 

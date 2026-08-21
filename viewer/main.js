@@ -72,8 +72,13 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260806-1';
-if (typeof window !== 'undefined') console.log('[viewer] build', VIEWER_BUILD);
+const VIEWER_BUILD = '20260821-1';
+if (typeof window !== 'undefined') {
+  console.log(
+    `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
+    'color:#ff3ab8;font-weight:bold;font-size:14px;text-shadow:0 0 6px rgba(255,58,184,.6)'
+  );
+}
 
 const canvas = document.getElementById('gl');
 const logEl  = document.getElementById('log');
@@ -102,7 +107,7 @@ if (ownerInventoryMineEl) {
 
 const logLines = [];
 function log(msg) {
-  console.log(msg);
+  // HUD-only (#log element) — console mirroring scrubbed for a clean console.
   logLines.push(msg);
   while (logLines.length > 10) logLines.shift();
   if (logEl) logEl.textContent = logLines.join('\n');
@@ -3134,6 +3139,17 @@ function rebuildScene() {
   const cnt = {};
   for (const it of sceneItems) cnt[it.material] = (cnt[it.material] || 0) + 1;
   log(`scene: ${sceneItems.length} items | ${Object.entries(cnt).map(([m, n]) => `${m}=${n}`).join(', ')}`);
+  // Dim diagnostics — one line per rebuild: what the owner-emphasis policy is
+  // actually applying, so a stale-cache or wrong-state deploy is obvious at a glance.
+  {
+    let own = 0, other = 0;
+    for (const cube of getMintedCubes()) {
+      const dim = bigModeDimForMotif(cube.slot);
+      if (dim >= 0.84 || dim === 1.0) own++; else other++;
+    }
+    const sel = `r=${selectedRegionIdx ?? '-'} n=${selectedNeighbourhoodIdx ?? '-'} s=${selectedStreetIdx ?? '-'} m=${selectedMotifIdx ?? '-'}`;
+    console.log(`[dim ${VIEWER_BUILD}] wallet=${_rebuildWalletAddr || 'none'} bright(0.85+)=${own} dimmed=${other} scope=${mainViewScope} sel(${sel})`);
+  }
   const _rebuildEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
   noteRebuild(_rebuildEnd - _rebuildStart, sceneItems.length + detailSceneItems.length + miniMapSceneItems.length);
   // Deferred some slot builds to stay within the per-frame budget — continue

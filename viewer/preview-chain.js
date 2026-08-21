@@ -448,7 +448,7 @@ export async function proposedAnimationURI(cubeId, { sourceContract, sourceToken
 // returned cubes are the candidate targets to overwrite (cubeId + seed + slot).
 export async function loadOwnedCubes(owner) {
   const result = await loadChainMintRecords();
-  console.info('[preview-chain] loadChainMintRecords →', {
+  void ('[preview-chain] loadChainMintRecords →', {
     enabled: result?.enabled,
     cubeNft: result?.config?.cubeNft,
     count: result?.records?.length || 0,

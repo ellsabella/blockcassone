@@ -73,7 +73,6 @@ export function build3DVoxels(motifIdx, hilbert, allPlanes, gl, meshes) {
 
   const planePix = cubePlanes.map(plane => getPlanePixelArray(plane, allPlanes));
   if (planePix.some(p => !p)) {
-    console.log(`[normies] motif ${motifIdx}: waiting for ${planePix.filter(p => !p).length}/${cubePlanes.length} grids`);
     return [];
   }
 
@@ -218,7 +217,6 @@ export function build3DVoxels(motifIdx, hilbert, allPlanes, gl, meshes) {
 
     meshes[key2] = null;
     meshes[key3] = buildVoxelMesh(gl, centers3, alphas3, variants3, voxelSize);
-    console.log(`[normies] motif ${motifIdx} (${maxScore} planes, axes: ${cubePlanes.map(p=>p.axis).join(',')}): score3=${centers3.length} bands=[${bandCounts.join(',')}] thresholds=[${bandThresholds.map(t=>t.toFixed(2)).join(',')}]`);
   }
 
   const items     = [];

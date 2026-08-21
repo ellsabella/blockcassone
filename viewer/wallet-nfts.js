@@ -236,7 +236,7 @@ export async function loadWalletNfts(address, chain = 'ethereum') {
     let cursor = null;
     do {
       const page = await fetchWalletPage(cleanAddress, chain, cursor);
-      console.debug(`[wallet-nfts] OpenSea page`, {
+      void (`[wallet-nfts] OpenSea page`, {
         count: (page.nfts || []).length,
         next: page.next || null,
       });
@@ -245,7 +245,7 @@ export async function loadWalletNfts(address, chain = 'ethereum') {
     } while (cursor);
 
     const nfts = rawNfts.map(n => normalizeNft(n, chain));
-    console.info(`[wallet-nfts] loaded ${nfts.length} NFTs`, {
+    void (`[wallet-nfts] loaded ${nfts.length} NFTs`, {
       normies: nfts.filter(n => n.isNormie).length,
       nonNormies: nfts.filter(n => !n.isNormie).length,
       sample: nfts.slice(0, 6).map(n => ({
@@ -315,7 +315,7 @@ export async function loadWalletNftsAcrossChains(address, chains = DEFAULT_WALLE
       let cursor = null;
       do {
         const page = await fetchWalletPage(cleanAddress, chain, cursor);
-        console.debug(`[wallet-nfts] OpenSea page`, {
+        void (`[wallet-nfts] OpenSea page`, {
           chain,
           count: (page.nfts || []).length,
           next: page.next || null,
@@ -341,7 +341,7 @@ export async function loadWalletNftsAcrossChains(address, chains = DEFAULT_WALLE
     String(a.tokenId).localeCompare(String(b.tokenId), undefined, { numeric: true })
   );
 
-  console.info(`[wallet-nfts] loaded ${allNfts.length} NFTs across chains`, {
+  void (`[wallet-nfts] loaded ${allNfts.length} NFTs across chains`, {
     chains: uniqueChains,
     chainErrors,
     normies: allNfts.filter(n => n.isNormie).length,
@@ -433,7 +433,7 @@ export function getWalletAssignmentForCube(motifIdx) {
   const logKey = `${motifIdx}:${nftKey(nft)}`;
   if (!assignmentLogCache.has(logKey)) {
     assignmentLogCache.add(logKey);
-    console.debug(`[wallet-nfts] cube ${motifIdx} assigned NFT`, {
+    void (`[wallet-nfts] cube ${motifIdx} assigned NFT`, {
       idx,
       contract: nft.contract,
       tokenId: nft.tokenId,
@@ -529,14 +529,14 @@ export function ensureNonNormieGridFetched(motifIdx) {
       hydrateNftDetailForNft(nft);
       if (!missingImageLogCache.has(key)) {
         missingImageLogCache.add(key);
-        console.info(`[wallet-nfts] cube ${motifIdx} hydrating saved non-Normie media`, nft);
+        void (`[wallet-nfts] cube ${motifIdx} hydrating saved non-Normie media`, nft);
       }
       return;
     }
     if (!missingImageLogCache.has(key)) {
       missingImageLogCache.add(key);
       if (nft.unsupportedMedia) {
-        console.info(`[wallet-nfts] cube ${motifIdx} non-Normie has video/animation media only but no usable URL`, nft);
+        void (`[wallet-nfts] cube ${motifIdx} non-Normie has video/animation media only but no usable URL`, nft);
       } else {
         console.warn(`[wallet-nfts] cube ${motifIdx} non-Normie has no image URL`, nft);
       }
@@ -547,7 +547,7 @@ export function ensureNonNormieGridFetched(motifIdx) {
   if (gridCache.has(key) || gridFetchCache.has(key)) return;
   const mediaUrl = gridMediaUrlForNft(nft);
 
-  console.info(`[wallet-nfts] cube ${motifIdx} converting artwork grid`, {
+  void (`[wallet-nfts] cube ${motifIdx} converting artwork grid`, {
     key,
     imageUrl: nft.imageUrl,
     animationUrl: nft.animationUrl || '',
@@ -558,7 +558,7 @@ export function ensureNonNormieGridFetched(motifIdx) {
   const p = imageUrlToBinaryGrid(mediaUrl)
     .then(grid => {
       gridCache.set(key, grid);
-      console.info(`[wallet-nfts] artwork grid ready for ${key}`, {
+      void (`[wallet-nfts] artwork grid ready for ${key}`, {
         discarded: !!grid.discarded,
         reason: grid.reason || null,
         kind: grid.kind || null,
