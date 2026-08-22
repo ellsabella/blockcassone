@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-2';
+const VIEWER_BUILD = '20260822-3';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1504,11 +1504,15 @@ function updateXShareButton() {
   if (!sharePostXBtn) return;
   const usable = _xShareEnabled && _shareState && _shareState.shareId;
   sharePostXBtn.style.display = usable ? '' : 'none';
+  // Demote the legacy intent button whenever the direct API path is live — the two
+  // labels were near-identical ("Post to X" vs "Post on X ↗") and users clicked
+  // the tab-opening one expecting the direct post.
+  if (sharePostBtn) sharePostBtn.textContent = usable ? 'Manual: open X composer ↗' : 'Post on X ↗';
   if (!usable) return;
   sharePostXBtn.disabled = false;
   sharePostXBtn.textContent = (_xStatus && _xStatus.connected)
-    ? (_xStatus.username ? `Post to X as @${_xStatus.username}` : 'Post to X')
-    : 'Connect X & Post';
+    ? (_xStatus.username ? `⚡ Post to X as @${_xStatus.username}` : '⚡ Post to X')
+    : '⚡ Connect X & Post';
 }
 
 // Open /api/x/login in a popup; resolves true when the callback page posts 'x-auth-ok'.
