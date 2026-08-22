@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-4';
+const VIEWER_BUILD = '20260822-5';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1409,7 +1409,7 @@ const sharePanelImg = document.getElementById('share-panel-img');
 const sharePanelTextEl = document.getElementById('share-panel-text');
 const sharePanelHintEl = sharePanelEl ? sharePanelEl.querySelector('.share-hint') : null;
 const shareDownloadBtn = document.getElementById('share-download');
-const sharePostBtn = document.getElementById('share-post');
+// (single-flow composer: the only post action is #share-post-x)
 const shareCloseBtn = document.getElementById('share-close');
 let _shareState = null; // { blob, url, fname, intent }
 
@@ -1470,13 +1470,11 @@ async function shareCubeOnX() {
   const url = blob ? URL.createObjectURL(blob) : null;
   _shareState = { blob, url, fname, intent, shareId, text, cardUrl };
   if (sharePanelImg) { sharePanelImg.src = url || ''; sharePanelImg.style.display = url ? 'block' : 'none'; }
-  if (sharePanelTextEl) sharePanelTextEl.value = text; // editable draft — the panel IS the composer
+  // Editable draft — the panel IS the composer. Prefill includes the card link so
+  // what you see is exactly what posts (image attaches automatically on post).
+  if (sharePanelTextEl) sharePanelTextEl.value = cardUrl ? `${text}\n${cardUrl}` : text;
   if (sharePanelHintEl) {
-    sharePanelHintEl.textContent = imageCopied
-      ? 'Image copied! Post on X opens the composer — press Ctrl+V (⌘V on Mac) to attach the image, then Post.'
-      : (cardUrl
-        ? 'Post on X opens the composer with your text. Download the image and drag it into the tweet to attach it.'
-        : 'Snapshot ready to download — drag it into the X composer to attach it.');
+    sharePanelHintEl.textContent = 'Edit your text, then Post — the image attaches automatically.';
   }
   if (shareDownloadBtn) shareDownloadBtn.disabled = !blob;
   updateXShareButton();
@@ -1502,17 +1500,13 @@ async function fetchXStatus() {
 
 function updateXShareButton() {
   if (!sharePostXBtn) return;
-  const usable = _xShareEnabled && _shareState && _shareState.shareId;
-  sharePostXBtn.style.display = usable ? '' : 'none';
-  // Demote the legacy intent button whenever the direct API path is live — the two
-  // labels were near-identical ("Post to X" vs "Post on X ↗") and users clicked
-  // the tab-opening one expecting the direct post.
-  if (sharePostBtn) sharePostBtn.textContent = usable ? 'Manual: open X composer ↗' : 'Post on X ↗';
-  if (!usable) return;
+  // Single-flow composer: ONE post button, always present. Direct API post when
+  // configured; graceful downgrade to the intent composer otherwise.
   sharePostXBtn.disabled = false;
-  sharePostXBtn.textContent = (_xStatus && _xStatus.connected)
-    ? (_xStatus.username ? `⚡ Post to X as @${_xStatus.username}` : '⚡ Post to X')
-    : '⚡ Connect X & Post';
+  const direct = _xShareEnabled && _shareState && _shareState.shareId;
+  sharePostXBtn.textContent = direct && _xStatus && _xStatus.connected && _xStatus.username
+    ? `Post to X as @${_xStatus.username}`
+    : 'Post to X';
 }
 
 // Open /api/x/login in a popup; resolves true when the callback page posts 'x-auth-ok'.
@@ -1538,14 +1532,23 @@ function openXLoginPopup() {
 function setShareHintFallback(prefix) {
   if (!sharePanelHintEl) return;
   sharePanelHintEl.textContent =
-    `${prefix} You can still use "Post on X ↗" (the image is on your clipboard — Ctrl+V to attach) or Download.`;
+    `${prefix} Try again — or Download the image and post it yourself (it's also on your clipboard: Ctrl+V in X).`;
 }
 
 async function postDirectlyToX() {
-  if (!_shareState || !_shareState.shareId) return;
+  if (!_shareState) return;
   const { shareId } = _shareState;
-  // Post the REVIEWED text — whatever the user edited in the panel's textarea.
+  // Post the REVIEWED text — whatever the user edited in the panel's textarea
+  // (prefilled with text + card link, so what you see is what posts).
   const text = (sharePanelTextEl && sharePanelTextEl.value.trim()) || _shareState.text;
+  // No direct-post capability (server unconfigured / snapshot upload failed):
+  // graceful downgrade — same button, opens the X composer with the draft text
+  // (the image is on the clipboard; hint explains the paste).
+  if (!_xShareEnabled || !shareId) {
+    window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+    if (sharePanelHintEl) sharePanelHintEl.textContent = 'Composer opened — press Ctrl+V (⌘V) there to attach the image.';
+    return;
+  }
 
   if (!_xStatus || !_xStatus.connected) {
     if (sharePanelHintEl) sharePanelHintEl.textContent = 'Connecting to X — approve access in the popup…';
@@ -1598,16 +1601,8 @@ if (shareDownloadBtn) shareDownloadBtn.addEventListener('click', () => {
   a.href = _shareState.url; a.download = _shareState.fname;
   document.body.appendChild(a); a.click(); a.remove();
 });
-if (sharePostBtn) sharePostBtn.addEventListener('click', () => {
-  // Rebuild the intent from the (possibly edited) draft text at click time.
-  const edited = sharePanelTextEl && sharePanelTextEl.value.trim();
-  let intent = (_shareState && _shareState.intent) || 'https://x.com/compose/tweet';
-  if (edited && _shareState) {
-    intent = `https://x.com/intent/tweet?text=${encodeURIComponent(edited)}` +
-      (_shareState.cardUrl ? `&url=${encodeURIComponent(_shareState.cardUrl)}` : '');
-  }
-  window.open(intent, '_blank', 'noopener,noreferrer');
-});
+// (Legacy separate intent button removed — the single "Post to X" flow covers
+// direct posting and, when direct posting is unavailable, the composer fallback.)
 if (shareCloseBtn) shareCloseBtn.addEventListener('click', closeSharePanel);
 if (sharePanelEl) sharePanelEl.addEventListener('click', e => { if (e.target === sharePanelEl) closeSharePanel(); });
 if (cubeDetailResizeEl && cubeDetailEl) {
