@@ -861,7 +861,7 @@ async function xUploadMedia(session, buf, mediaType) {
     const text = await r.text();
     let j = {}; try { j = JSON.parse(text); } catch (_) {}
     if (!r.ok) {
-      const e = new Error(`media ${fields.command} failed (HTTP ${r.status})`);
+      const e = new Error(`media ${fields.command || 'upload'} failed (HTTP ${r.status})`);
       e.status = r.status;
       e.detail = j?.errors?.[0]?.message || j?.detail || j?.error || text.slice(0, 200);
       e.resetHeader = r.headers.get('x-rate-limit-reset');
