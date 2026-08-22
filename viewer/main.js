@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-1';
+const VIEWER_BUILD = '20260822-2';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1394,13 +1394,14 @@ function captureCubeDetailImage() {
   });
 }
 
-// Upload the snapshot to our server; returns a public card URL (…/s/<id>) that X can unfurl.
+// Upload the snapshot to our server; returns the share id + a public card URL (…/s/<id>)
+// that X can unfurl. The id is also what /api/x/post attaches for the one-click direct post.
 async function uploadShareImage(blob, slot) {
   const res = await fetch(`/s?slot=${slot}`, { method: 'POST', headers: { 'Content-Type': 'image/webp' }, body: blob });
   if (!res.ok) throw new Error(`upload ${res.status}`);
   const data = await res.json();
   if (!data || !data.id) throw new Error('no id in response');
-  return `${location.origin}/s/${data.id}`;
+  return { id: data.id, cardUrl: `${location.origin}/s/${data.id}` };
 }
 
 const sharePanelEl = document.getElementById('share-panel');
@@ -1456,14 +1457,18 @@ async function shareCubeOnX() {
     } catch (err) { log(`clipboard copy failed: ${err.message}`); }
   }
   let cardUrl = null;
-  if (blob) { try { cardUrl = await uploadShareImage(blob, slot); } catch (err) { log(`share upload failed: ${err.message}`); } }
+  let shareId = null;
+  if (blob) {
+    try { const up = await uploadShareImage(blob, slot); cardUrl = up.cardUrl; shareId = up.id; }
+    catch (err) { log(`share upload failed: ${err.message}`); }
+  }
   const intent = cardUrl
     ? `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(cardUrl)}`
     : `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
 
   if (_shareState && _shareState.url) URL.revokeObjectURL(_shareState.url);
   const url = blob ? URL.createObjectURL(blob) : null;
-  _shareState = { blob, url, fname, intent };
+  _shareState = { blob, url, fname, intent, shareId, text };
   if (sharePanelImg) { sharePanelImg.src = url || ''; sharePanelImg.style.display = url ? 'block' : 'none'; }
   if (sharePanelTextEl) sharePanelTextEl.textContent = text;
   if (sharePanelHintEl) {
@@ -1474,8 +1479,111 @@ async function shareCubeOnX() {
         : 'Snapshot ready to download — drag it into the X composer to attach it.');
   }
   if (shareDownloadBtn) shareDownloadBtn.disabled = !blob;
+  updateXShareButton();
   if (sharePanelEl) { sharePanelEl.classList.add('open'); sharePanelEl.setAttribute('aria-hidden', 'false'); }
+  // One-click direct post (server OAuth): refresh connection status once the panel is up.
+  if (_xShareEnabled && shareId) fetchXStatus().then(updateXShareButton).catch(() => {});
 }
+
+// ---- One-click "post to X" via the server's OAuth session (/api/x/*) ------------------------
+// Available only when the server exposes xShareEnabled (X_CLIENT_ID configured). Everything
+// above (clipboard copy, download, intent link) stays intact as the always-visible fallback.
+const sharePostXBtn = document.getElementById('share-post-x');
+let _xShareEnabled = false; // set from /dev-config
+let _xStatus = null;        // { connected, username? } from /api/x/status
+
+async function fetchXStatus() {
+  try {
+    const r = await fetch('/api/x/status');
+    _xStatus = r.ok ? await r.json() : null;
+  } catch (_) { _xStatus = null; }
+  return _xStatus;
+}
+
+function updateXShareButton() {
+  if (!sharePostXBtn) return;
+  const usable = _xShareEnabled && _shareState && _shareState.shareId;
+  sharePostXBtn.style.display = usable ? '' : 'none';
+  if (!usable) return;
+  sharePostXBtn.disabled = false;
+  sharePostXBtn.textContent = (_xStatus && _xStatus.connected)
+    ? (_xStatus.username ? `Post to X as @${_xStatus.username}` : 'Post to X')
+    : 'Connect X & Post';
+}
+
+// Open /api/x/login in a popup; resolves true when the callback page posts 'x-auth-ok'.
+function openXLoginPopup() {
+  return new Promise((resolve) => {
+    const w = window.open('/api/x/login', 'x-auth', 'popup,width=600,height=700');
+    if (!w) { resolve(false); return; }
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('message', onMsg);
+      clearInterval(poll); clearTimeout(timer);
+      resolve(ok);
+    };
+    const onMsg = (e) => { if (e.data === 'x-auth-ok') finish(true); };
+    window.addEventListener('message', onMsg);
+    const poll = setInterval(() => { if (w.closed) setTimeout(() => finish(false), 400); }, 500);
+    const timer = setTimeout(() => finish(false), 180000);
+  });
+}
+
+function setShareHintFallback(prefix) {
+  if (!sharePanelHintEl) return;
+  sharePanelHintEl.textContent =
+    `${prefix} You can still use "Post on X ↗" (the image is on your clipboard — Ctrl+V to attach) or Download.`;
+}
+
+async function postDirectlyToX() {
+  if (!_shareState || !_shareState.shareId) return;
+  const { shareId, text } = _shareState;
+
+  if (!_xStatus || !_xStatus.connected) {
+    if (sharePanelHintEl) sharePanelHintEl.textContent = 'Connecting to X — approve access in the popup…';
+    const ok = await openXLoginPopup();
+    await fetchXStatus();
+    updateXShareButton();
+    if (!ok || !_xStatus || !_xStatus.connected) {
+      setShareHintFallback('X connection was not completed.');
+      return;
+    }
+  }
+
+  if (sharePostXBtn) { sharePostXBtn.disabled = true; sharePostXBtn.textContent = 'Posting…'; }
+  try {
+    const r = await fetch('/api/x/post', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shareId, text }),
+    });
+    const j = await r.json().catch(() => null);
+    if (r.ok && j && j.ok && j.tweetUrl) {
+      if (sharePanelHintEl) {
+        sharePanelHintEl.textContent = '';
+        const a = document.createElement('a');
+        a.href = j.tweetUrl; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.textContent = 'Posted! View on X ↗';
+        sharePanelHintEl.appendChild(a);
+      }
+      if (sharePostXBtn) { sharePostXBtn.textContent = 'Posted ✓'; sharePostXBtn.disabled = true; }
+      log(`posted to X: ${j.tweetUrl}`);
+      return;
+    }
+    const reason = (j && j.reason) || `HTTP ${r.status}`;
+    const extra = j && j.resetAt ? ` (limit resets ${new Date(j.resetAt).toLocaleTimeString()})` : '';
+    if (r.status === 401) _xStatus = { connected: false };
+    setShareHintFallback(`Direct post failed: ${reason}${extra}.`);
+    updateXShareButton();
+  } catch (err) {
+    setShareHintFallback(`Direct post failed: ${err.message}.`);
+    updateXShareButton();
+  }
+}
+
+if (sharePostXBtn) sharePostXBtn.addEventListener('click', postDirectlyToX);
 
 if (cubeDetailShareBtn) cubeDetailShareBtn.addEventListener('click', shareCubeOnX);
 if (shareDownloadBtn) shareDownloadBtn.addEventListener('click', () => {
@@ -1945,6 +2053,7 @@ fetch('/dev-config')
   .then(cfg => {
     if (cfg?.defaultWallet && walletAddressInput) walletAddressInput.value = cfg.defaultWallet;
     if (!cfg?.openseaConfigured) log('OpenSea: add OPENSEA_API_KEY to .env to load wallet NFTs');
+    _xShareEnabled = !!cfg?.xShareEnabled; // server-side X OAuth app configured → one-click post
     _updateWalletStatus();
   })
   .catch(() => _updateWalletStatus());

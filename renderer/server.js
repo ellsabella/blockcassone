@@ -615,6 +615,328 @@ Redirecting to <a href="${deep}" style="color:#90d0ff">THE BLOCK</a>…
   res.end(html);
 }
 
+// ---------- One-click Post-to-X (OAuth 2.0 Authorization Code + PKCE) ----------
+// No server-side token store: the X access/refresh tokens live ONLY in an AES-256-GCM
+// encrypted httpOnly cookie ("xauth"). The PKCE code_verifier + state ride a short-lived
+// encrypted cookie ("xoauth") across the redirect. Requires X_CLIENT_ID in .env; if
+// X_CLIENT_SECRET is also set the token endpoint is called with Basic auth (confidential
+// client), otherwise as a public client. Tokens are NEVER logged.
+const X_AUTH_COOKIE   = 'xauth';
+const X_LOGIN_COOKIE  = 'xoauth';
+const X_KEY_FILE      = path.join(SHARES_DIR, '.x-cookie-key');
+const X_AUTH_MAX_AGE  = 30 * 24 * 3600; // cookie lifetime (s) — refresh token keeps it usable
+const X_TOKEN_URL     = 'https://api.x.com/2/oauth2/token';
+const X_MEDIA_URL     = 'https://api.x.com/2/media/upload';
+const X_SCOPES        = 'tweet.read tweet.write users.read media.write offline.access';
+
+let _xCookieKey = null;
+function getXCookieKey() {
+  if (_xCookieKey) return _xCookieKey;
+  const hex = process.env.X_COOKIE_KEY || '';
+  if (/^[0-9a-fA-F]{64}$/.test(hex)) { _xCookieKey = Buffer.from(hex, 'hex'); return _xCookieKey; }
+  // No explicit key: derive one from X_CLIENT_ID + a random salt persisted next to the
+  // shares (chmod 600), so server restarts keep existing cookies decryptable.
+  let salt = '';
+  try { salt = fs.readFileSync(X_KEY_FILE, 'utf8').trim(); } catch (_) {}
+  if (!/^[0-9a-f]{64}$/.test(salt)) {
+    salt = crypto.randomBytes(32).toString('hex');
+    try { fs.writeFileSync(X_KEY_FILE, salt + '\n', { mode: 0o600 }); } catch (_) {}
+  }
+  _xCookieKey = crypto.createHash('sha256').update(`${process.env.X_CLIENT_ID || ''}|${salt}`).digest();
+  return _xCookieKey;
+}
+
+// value = base64url( iv(12) | gcmTag(16) | ciphertext )
+function sealXCookie(payload) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getXCookieKey(), iv);
+  const ct = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ct]).toString('base64url');
+}
+function openXCookie(value) {
+  try {
+    const raw = Buffer.from(String(value || ''), 'base64url');
+    if (raw.length < 29) return null;
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getXCookieKey(), raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    const pt = Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]);
+    return JSON.parse(pt.toString('utf8'));
+  } catch (_) { return null; } // wrong key / tampered / not ours → treated as absent
+}
+
+function parseCookies(req) {
+  const out = {};
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const eq = part.indexOf('=');
+    if (eq > 0) out[part.slice(0, eq).trim()] = part.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+// Public origin as the browser sees it (behind the Caddy proxy or direct).
+function requestBase(req) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`).split(',')[0].trim();
+  const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const proto = fwdProto || (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host) ? 'http' : 'https');
+  return { base: `${proto}://${host}`, secure: proto === 'https' };
+}
+
+function xCookieHeader(name, value, { maxAge, secure } = {}) {
+  const parts = [`${name}=${value}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
+  if (maxAge !== undefined) parts.push(`Max-Age=${maxAge}`);
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+// GET /api/x/login → 302 to X's authorize page; verifier+state stashed in the xoauth cookie.
+function handleXLogin(req, res) {
+  loadDotEnv(ENV_PATH, { override: true });
+  const clientId = process.env.X_CLIENT_ID;
+  if (!clientId) { sendJson(res, 503, { ok: false, reason: 'X sharing not configured — set X_CLIENT_ID in .env' }); return; }
+  const { base, secure } = requestBase(req);
+  const verifier  = crypto.randomBytes(32).toString('base64url'); // 43 chars, RFC 7636 range
+  const state     = crypto.randomBytes(16).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const redirectUri = `${base}/api/x/callback`;
+  const auth = new URL('https://x.com/i/oauth2/authorize');
+  auth.searchParams.set('response_type', 'code');
+  auth.searchParams.set('client_id', clientId);
+  auth.searchParams.set('redirect_uri', redirectUri);
+  auth.searchParams.set('scope', X_SCOPES);
+  auth.searchParams.set('state', state);
+  auth.searchParams.set('code_challenge', challenge);
+  auth.searchParams.set('code_challenge_method', 'S256');
+  res.writeHead(302, {
+    Location: auth.toString(),
+    'Set-Cookie': xCookieHeader(X_LOGIN_COOKIE, sealXCookie({ v: verifier, s: state, r: redirectUri, ts: Date.now() }), { maxAge: 600, secure }),
+    'Cache-Control': 'no-store',
+  });
+  res.end();
+}
+
+// POST to the token endpoint. Public client → client_id in the body; confidential
+// client (X_CLIENT_SECRET set) → HTTP Basic auth as well.
+async function xTokenRequest(params) {
+  const clientId = process.env.X_CLIENT_ID || '';
+  const secret   = process.env.X_CLIENT_SECRET || '';
+  const body = new URLSearchParams({ ...params, client_id: clientId });
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  if (secret) headers.Authorization = 'Basic ' + Buffer.from(`${clientId}:${secret}`).toString('base64');
+  const r = await devFetch(X_TOKEN_URL, { method: 'POST', headers, body: body.toString() });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) {
+    throw new Error(`token endpoint HTTP ${r.status}: ${j.error_description || j.error || 'no access_token'}`);
+  }
+  return j;
+}
+
+function xClosePopupHtml(message, ok) {
+  const notify = ok ? `try{window.opener&&window.opener.postMessage('x-auth-ok','*')}catch(e){}` : '';
+  return `<!doctype html><html><head><meta charset="utf-8"><title>THE BLOCK — X</title></head>
+<body style="background:#05060a;color:#cfe8ff;font-family:system-ui,sans-serif;padding:24px">${message}
+<script>${notify}window.close();</script></body></html>`;
+}
+
+// GET /api/x/callback → verify state, exchange the code, set the encrypted xauth cookie,
+// notify the opener and close the popup.
+async function handleXCallback(req, res) {
+  loadDotEnv(ENV_PATH, { override: true });
+  const { base, secure } = requestBase(req);
+  const url = new URL(req.url, base);
+  const login = openXCookie(parseCookies(req)[X_LOGIN_COOKIE]);
+  const code  = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const fail = (msg) => {
+    res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(xClosePopupHtml(`X connection failed: ${msg} — close this window and try again.`, false));
+  };
+  if (url.searchParams.get('error')) { fail(url.searchParams.get('error_description') || url.searchParams.get('error')); return; }
+  if (!login || !code || !state || state !== login.s) { fail('login state mismatch or expired'); return; }
+  try {
+    const tok = await xTokenRequest({ grant_type: 'authorization_code', code, redirect_uri: login.r, code_verifier: login.v });
+    const payload = {
+      at: tok.access_token,
+      rt: tok.refresh_token || '',
+      exp: Date.now() + (Number(tok.expires_in) || 7200) * 1000,
+      un: '', // username cached lazily by /api/x/status
+    };
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Set-Cookie': [
+        xCookieHeader(X_AUTH_COOKIE, sealXCookie(payload), { maxAge: X_AUTH_MAX_AGE, secure }),
+        xCookieHeader(X_LOGIN_COOKIE, '', { maxAge: 0, secure }),
+      ],
+    });
+    res.end(xClosePopupHtml('Connected to X — you can close this window.', true));
+  } catch (err) {
+    console.warn(`[x] token exchange failed: ${String(err?.message || err)}`); // message never contains tokens
+    fail('token exchange failed');
+  }
+}
+
+function readXSession(req) {
+  const payload = openXCookie(parseCookies(req)[X_AUTH_COOKIE]);
+  return payload && payload.at ? payload : null;
+}
+
+function setXSessionCookie(res, session, secure) {
+  const { _dirty, ...payload } = session;
+  res.setHeader('Set-Cookie', xCookieHeader(X_AUTH_COOKIE, sealXCookie(payload), { maxAge: X_AUTH_MAX_AGE, secure }));
+}
+
+// Bearer fetch with a one-shot refresh-token retry on 401. Mutates `session` in place and
+// marks it _dirty when the cookie must be re-issued.
+async function xApiFetch(session, url, options = {}) {
+  const call = () => devFetch(url, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${session.at}` } });
+  let r = await call();
+  if (r.status === 401 && session.rt) {
+    try {
+      const tok = await xTokenRequest({ grant_type: 'refresh_token', refresh_token: session.rt });
+      session.at = tok.access_token;
+      if (tok.refresh_token) session.rt = tok.refresh_token; // X rotates refresh tokens
+      session.exp = Date.now() + (Number(tok.expires_in) || 7200) * 1000;
+      session._dirty = true;
+      r = await call();
+    } catch (_) { /* refresh failed — surface the original 401 */ }
+  }
+  return r;
+}
+
+// GET /api/x/status → { connected, username? }. Username is cached inside the cookie
+// payload so we only hit GET /2/users/me once per connection (rate limit is tight).
+async function handleXStatus(req, res) {
+  loadDotEnv(ENV_PATH, { override: true });
+  const { secure } = requestBase(req);
+  const session = readXSession(req);
+  if (!session) { sendJson(res, 200, { connected: false }); return; }
+  if (session.un) { sendJson(res, 200, { connected: true, username: session.un }); return; }
+  try {
+    const r = await xApiFetch(session, 'https://api.x.com/2/users/me');
+    if (!r.ok) {
+      // 401 after refresh attempt → dead session; 429 → still connected, just uncached name.
+      if (r.status === 429) { sendJson(res, 200, { connected: true }); return; }
+      sendJson(res, 200, { connected: false });
+      return;
+    }
+    const j = await r.json().catch(() => ({}));
+    session.un = String(j?.data?.username || '');
+    session._dirty = true;
+    setXSessionCookie(res, session, secure);
+    sendJson(res, 200, { connected: true, username: session.un || undefined });
+  } catch (_) {
+    sendJson(res, 200, { connected: false });
+  }
+}
+
+// Minimal multipart/form-data encoder (Node stdlib only). Buffer values become file parts.
+function xMultipart(fields) {
+  const boundary = '----xshare' + crypto.randomBytes(12).toString('hex');
+  const parts = [];
+  for (const [name, value] of Object.entries(fields)) {
+    if (value === undefined || value === null) continue;
+    if (Buffer.isBuffer(value)) {
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"; filename="media"\r\nContent-Type: application/octet-stream\r\n\r\n`));
+      parts.push(value, Buffer.from('\r\n'));
+    } else {
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${String(value)}\r\n`));
+    }
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+// v2 media id lives at data.id; keep v1.1-shaped fallbacks in case the endpoint answers
+// with the legacy shape (the chunked INIT/APPEND/FINALIZE protocol is the same).
+const xMediaId = (j) => String(j?.data?.id || j?.data?.media_id_string || j?.media_id_string || j?.id || '');
+
+async function xUploadMedia(session, buf, mediaType) {
+  const post = async (fields) => {
+    const { body, contentType } = xMultipart(fields);
+    const r = await xApiFetch(session, X_MEDIA_URL, { method: 'POST', headers: { 'Content-Type': contentType }, body });
+    const text = await r.text();
+    let j = {}; try { j = JSON.parse(text); } catch (_) {}
+    if (!r.ok) {
+      const e = new Error(`media ${fields.command} failed (HTTP ${r.status})`);
+      e.status = r.status;
+      e.detail = j?.errors?.[0]?.message || j?.detail || j?.error || text.slice(0, 200);
+      e.resetHeader = r.headers.get('x-rate-limit-reset');
+      throw e;
+    }
+    return j;
+  };
+  const init = await post({ command: 'INIT', total_bytes: String(buf.length), media_type: mediaType, media_category: 'tweet_image' });
+  const id = xMediaId(init);
+  if (!id) throw new Error('media INIT returned no media id');
+  const CHUNK = 1024 * 1024;
+  for (let off = 0, seg = 0; off < buf.length; off += CHUNK, seg++) {
+    await post({ command: 'APPEND', media_id: id, segment_index: String(seg), media: buf.subarray(off, Math.min(off + CHUNK, buf.length)) });
+  }
+  const fin = await post({ command: 'FINALIZE', media_id: id });
+  // tweet_image normally finalizes synchronously; poll STATUS briefly if X says otherwise.
+  let info = fin?.data?.processing_info || fin?.processing_info;
+  for (let i = 0; info && info.state && info.state !== 'succeeded' && i < 10; i++) {
+    if (info.state === 'failed') throw new Error('X media processing failed');
+    await new Promise(r2 => setTimeout(r2, Math.min((Number(info.check_after_secs) || 1) * 1000, 5000)));
+    const st = await xApiFetch(session, `${X_MEDIA_URL}?command=STATUS&media_id=${id}`);
+    const sj = await st.json().catch(() => ({}));
+    info = sj?.data?.processing_info || sj?.processing_info;
+  }
+  return xMediaId(fin) || id;
+}
+
+// POST /api/x/post {shareId, text} → uploads shares/<shareId>.webp as tweet media and
+// creates the tweet. Returns {ok:true, tweetUrl} or {ok:false, reason, resetAt?}.
+async function handleXPost(req, res) {
+  if (req.method !== 'POST') { sendJson(res, 405, { ok: false, reason: 'method not allowed' }); return; }
+  loadDotEnv(ENV_PATH, { override: true });
+  if (!process.env.X_CLIENT_ID) { sendJson(res, 503, { ok: false, reason: 'X sharing not configured — set X_CLIENT_ID in .env' }); return; }
+  const { secure } = requestBase(req);
+  const session = readXSession(req);
+  if (!session) { sendJson(res, 401, { ok: false, reason: 'not connected to X' }); return; }
+  try {
+    let parsed = {};
+    try { parsed = JSON.parse(await readRequestBody(req, 100_000) || '{}'); } catch (_) {}
+    const shareId = String(parsed.shareId || '');
+    if (!SHARE_ID_RE.test(shareId)) { sendJson(res, 400, { ok: false, reason: 'bad shareId' }); return; }
+    const imgPath = path.join(SHARES_DIR, `${shareId}.webp`);
+    if (!fs.existsSync(imgPath)) { sendJson(res, 404, { ok: false, reason: 'snapshot expired — reopen the share panel' }); return; }
+    const buf = fs.readFileSync(imgPath);
+    const text = String(parsed.text || '').slice(0, 280);
+
+    const mediaId = await xUploadMedia(session, buf, 'image/webp');
+    const r = await xApiFetch(session, 'https://api.x.com/2/tweets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, media: { media_ids: [mediaId] } }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (session._dirty) setXSessionCookie(res, session, secure);
+    if (r.status === 429) {
+      const reset = Number(r.headers.get('x-rate-limit-reset') || r.headers.get('x-app-limit-24hour-reset') || 0);
+      sendJson(res, 429, { ok: false, reason: 'X rate limit reached', resetAt: reset ? new Date(reset * 1000).toISOString() : undefined });
+      return;
+    }
+    if (r.status === 401) { sendJson(res, 401, { ok: false, reason: 'X session expired — reconnect' }); return; }
+    if (!r.ok || !j?.data?.id) {
+      sendJson(res, 502, { ok: false, reason: String(j?.detail || j?.errors?.[0]?.message || j?.title || `tweet failed (HTTP ${r.status})`) });
+      return;
+    }
+    const tweetUrl = session.un
+      ? `https://x.com/${session.un}/status/${j.data.id}`
+      : `https://x.com/i/web/status/${j.data.id}`;
+    console.log(`[x] posted share ${shareId} → tweet ${j.data.id}`);
+    sendJson(res, 200, { ok: true, tweetUrl });
+  } catch (err) {
+    if (session._dirty) { try { setXSessionCookie(res, session, secure); } catch (_) {} }
+    const status = err?.status === 429 ? 429 : (err?.status === 401 ? 401 : 502);
+    const payload = { ok: false, reason: String(err?.detail || err?.message || err) };
+    if (err?.status === 429 && err.resetHeader) payload.resetAt = new Date(Number(err.resetHeader) * 1000).toISOString();
+    if (status === 401) payload.reason = 'X session expired — reconnect';
+    sendJson(res, status, payload);
+  }
+}
+
 // Ensure shaders/ exists so fs.watch can attach to it.
 const shadersDir = path.join(ROOT, 'shaders');
 if (!fs.existsSync(shadersDir)) {
@@ -661,8 +983,19 @@ const server = http.createServer((req, res) => {
       // allowlist build uses. Reads WALLETCONNECT_ID, falling back to the allowlist's
       // WALLETCONNECT_PROJECT_ID name so either works.
       walletConnectProjectId: process.env.WALLETCONNECT_ID || process.env.WALLETCONNECT_PROJECT_ID || '',
+      // One-click Post-to-X available only when the server has an X OAuth2 app configured.
+      xShareEnabled: !!process.env.X_CLIENT_ID,
     });
     return;
+  }
+
+  // One-click Post-to-X: OAuth login/callback + status + direct post.
+  {
+    const xPath = req.url.split('?')[0];
+    if (xPath === '/api/x/login')    { handleXLogin(req, res); return; }
+    if (xPath === '/api/x/callback') { handleXCallback(req, res); return; }
+    if (xPath === '/api/x/status')   { handleXStatus(req, res); return; }
+    if (xPath === '/api/x/post')     { handleXPost(req, res); return; }
   }
 
   if (req.url.startsWith('/api/opensea/')) {

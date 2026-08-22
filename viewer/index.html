@@ -256,6 +256,13 @@
       background: rgba(29, 60, 90, 0.8); font-weight: 800;
     }
     #share-post:hover { background: rgba(40, 82, 120, 0.9); }
+    /* One-click direct post (server OAuth) — primary action when available. */
+    #share-post-x {
+      border-color: rgba(29, 155, 240, 0.95); color: #fff;
+      background: rgba(29, 155, 240, 0.55); font-weight: 800;
+    }
+    #share-post-x:hover { background: rgba(29, 155, 240, 0.8); }
+    #share-post-x:disabled { opacity: 0.6; cursor: default; }
     #selection-link { display: none !important; } /* connecting lines off (distracting) */
     #controls {
       min-width: 272px;
@@ -888,6 +895,7 @@
       <pre id="share-panel-text"></pre>
       <p class="share-hint">Post on X opens the composer with your text and this cube attached as a preview card. You can also download the image.</p>
       <div class="panel-row" style="margin-top:12px;justify-content:flex-end;">
+        <button id="share-post-x" style="display:none">Post to X</button>
         <button id="share-download">Download image</button>
         <button id="share-post">Post on X ↗</button>
         <button id="share-close">Close</button>
@@ -902,8 +910,8 @@
   <script src="/public/linestyles.js"></script>
   <script src="/public/planes.js"></script>
   <script src="/public/blocks.js"></script>
-  <script src="/viewer/vendor/wallet-widget.js?v=20260822-1"></script>
-  <script type="module" src="./main.js?v=20260822-1"></script>
-  <script type="module" src="./nav-gate.js?v=20260822-1"></script>
+  <script src="/viewer/vendor/wallet-widget.js?v=20260822-2"></script>
+  <script type="module" src="./main.js?v=20260822-2"></script>
+  <script type="module" src="./nav-gate.js?v=20260822-2"></script>
 </body>
 </html>
