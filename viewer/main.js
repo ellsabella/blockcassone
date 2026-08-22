@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-5';
+const VIEWER_BUILD = '20260822-6';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1552,10 +1552,16 @@ async function postDirectlyToX() {
 
   if (!_xStatus || !_xStatus.connected) {
     if (sharePanelHintEl) sharePanelHintEl.textContent = 'Connecting to X — approve access in the popup…';
-    const ok = await openXLoginPopup();
-    await fetchXStatus();
+    await openXLoginPopup();
+    // Trust the SERVER's verdict, not the popup plumbing: X's COOP severs
+    // window.opener, so the popup's success message often can't reach us even
+    // when authorization worked (the cookie is set regardless). Poll briefly.
+    for (let i = 0; i < 3 && !(_xStatus && _xStatus.connected); i++) {
+      await fetchXStatus();
+      if (!(_xStatus && _xStatus.connected)) await new Promise(r => setTimeout(r, 700));
+    }
     updateXShareButton();
-    if (!ok || !_xStatus || !_xStatus.connected) {
+    if (!_xStatus || !_xStatus.connected) {
       setShareHintFallback('X connection was not completed.');
       return;
     }
