@@ -869,24 +869,14 @@ async function xUploadMedia(session, buf, mediaType) {
     }
     return j;
   };
-  const init = await post({ command: 'INIT', total_bytes: String(buf.length), media_type: mediaType, media_category: 'tweet_image' });
-  const id = xMediaId(init);
-  if (!id) throw new Error('media INIT returned no media id');
-  const CHUNK = 1024 * 1024;
-  for (let off = 0, seg = 0; off < buf.length; off += CHUNK, seg++) {
-    await post({ command: 'APPEND', media_id: id, segment_index: String(seg), media: buf.subarray(off, Math.min(off + CHUNK, buf.length)) });
-  }
-  const fin = await post({ command: 'FINALIZE', media_id: id });
-  // tweet_image normally finalizes synchronously; poll STATUS briefly if X says otherwise.
-  let info = fin?.data?.processing_info || fin?.processing_info;
-  for (let i = 0; info && info.state && info.state !== 'succeeded' && i < 10; i++) {
-    if (info.state === 'failed') throw new Error('X media processing failed');
-    await new Promise(r2 => setTimeout(r2, Math.min((Number(info.check_after_secs) || 1) * 1000, 5000)));
-    const st = await xApiFetch(session, `${X_MEDIA_URL}?command=STATUS&media_id=${id}`);
-    const sj = await st.json().catch(() => ({}));
-    info = sj?.data?.processing_info || sj?.processing_info;
-  }
-  return xMediaId(fin) || id;
+  // SIMPLE (non-chunked) upload: current v2 /2/media/upload expects the file in a
+  // `media` multipart field directly — the legacy command-style INIT/APPEND/FINALIZE
+  // protocol at this path gets rejected with "Missing media field in JSON". Our
+  // snapshots (~200KB) are far under the 5MB image cap, so one shot is correct.
+  const up = await post({ media: buf, media_category: 'tweet_image', media_type: mediaType });
+  const id = xMediaId(up);
+  if (!id) throw new Error('media upload returned no media id');
+  return id;
 }
 
 // POST /api/x/post {shareId, text} → uploads shares/<shareId>.webp as tweet media and
