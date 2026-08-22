@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260821-9';
+const VIEWER_BUILD = '20260822-1';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1441,7 +1441,20 @@ async function shareCubeOnX() {
     }
   }
 
-  // DESKTOP: upload for the unfurl card, then present the panel (image + download + post).
+  // DESKTOP: copy the image to the clipboard (paste = guaranteed attached media —
+  // X's web composer accepts pasted images, while link-card previews have become
+  // unreliable), plus upload for the unfurl card as a bonus.
+  let imageCopied = false;
+  if (blob && navigator.clipboard && window.ClipboardItem) {
+    try {
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement('canvas');
+      c.width = bmp.width; c.height = bmp.height;
+      c.getContext('2d').drawImage(bmp, 0, 0);
+      const png = await new Promise(r => c.toBlob(r, 'image/png')); // clipboard requires PNG
+      if (png) { await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]); imageCopied = true; }
+    } catch (err) { log(`clipboard copy failed: ${err.message}`); }
+  }
   let cardUrl = null;
   if (blob) { try { cardUrl = await uploadShareImage(blob, slot); } catch (err) { log(`share upload failed: ${err.message}`); } }
   const intent = cardUrl
@@ -1454,9 +1467,11 @@ async function shareCubeOnX() {
   if (sharePanelImg) { sharePanelImg.src = url || ''; sharePanelImg.style.display = url ? 'block' : 'none'; }
   if (sharePanelTextEl) sharePanelTextEl.textContent = text;
   if (sharePanelHintEl) {
-    sharePanelHintEl.textContent = cardUrl
-      ? 'Post on X opens the composer with your text and this cube attached as a preview card. You can also download the image.'
-      : 'Snapshot ready to download. (Card upload unavailable — on X the image won’t preview until this is running on the public site.)';
+    sharePanelHintEl.textContent = imageCopied
+      ? 'Image copied! Post on X opens the composer — press Ctrl+V (⌘V on Mac) to attach the image, then Post.'
+      : (cardUrl
+        ? 'Post on X opens the composer with your text. Download the image and drag it into the tweet to attach it.'
+        : 'Snapshot ready to download — drag it into the X composer to attach it.');
   }
   if (shareDownloadBtn) shareDownloadBtn.disabled = !blob;
   if (sharePanelEl) { sharePanelEl.classList.add('open'); sharePanelEl.setAttribute('aria-hidden', 'false'); }
