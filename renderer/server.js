@@ -816,7 +816,11 @@ async function handleXStatus(req, res) {
     if (!r.ok) {
       // 401 after refresh attempt → dead session; 429 → still connected, just uncached name.
       if (r.status === 429) { sendJson(res, 200, { connected: true }); return; }
-      sendJson(res, 200, { connected: false });
+      // Surface X's actual objection — a valid token with 403s here usually means
+      // the X app is not attached to a Project (v2 API requires it).
+      const detail = await r.text().then(t => t.slice(0, 300)).catch(() => '');
+      console.warn(`[x] /users/me failed HTTP ${r.status}: ${detail}`);
+      sendJson(res, 200, { connected: false, apiError: `HTTP ${r.status}`, detail });
       return;
     }
     const j = await r.json().catch(() => ({}));
