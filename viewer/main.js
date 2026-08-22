@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-3';
+const VIEWER_BUILD = '20260822-4';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1468,9 +1468,9 @@ async function shareCubeOnX() {
 
   if (_shareState && _shareState.url) URL.revokeObjectURL(_shareState.url);
   const url = blob ? URL.createObjectURL(blob) : null;
-  _shareState = { blob, url, fname, intent, shareId, text };
+  _shareState = { blob, url, fname, intent, shareId, text, cardUrl };
   if (sharePanelImg) { sharePanelImg.src = url || ''; sharePanelImg.style.display = url ? 'block' : 'none'; }
-  if (sharePanelTextEl) sharePanelTextEl.textContent = text;
+  if (sharePanelTextEl) sharePanelTextEl.value = text; // editable draft — the panel IS the composer
   if (sharePanelHintEl) {
     sharePanelHintEl.textContent = imageCopied
       ? 'Image copied! Post on X opens the composer — press Ctrl+V (⌘V on Mac) to attach the image, then Post.'
@@ -1543,7 +1543,9 @@ function setShareHintFallback(prefix) {
 
 async function postDirectlyToX() {
   if (!_shareState || !_shareState.shareId) return;
-  const { shareId, text } = _shareState;
+  const { shareId } = _shareState;
+  // Post the REVIEWED text — whatever the user edited in the panel's textarea.
+  const text = (sharePanelTextEl && sharePanelTextEl.value.trim()) || _shareState.text;
 
   if (!_xStatus || !_xStatus.connected) {
     if (sharePanelHintEl) sharePanelHintEl.textContent = 'Connecting to X — approve access in the popup…';
@@ -1597,7 +1599,14 @@ if (shareDownloadBtn) shareDownloadBtn.addEventListener('click', () => {
   document.body.appendChild(a); a.click(); a.remove();
 });
 if (sharePostBtn) sharePostBtn.addEventListener('click', () => {
-  window.open((_shareState && _shareState.intent) || 'https://x.com/compose/tweet', '_blank', 'noopener,noreferrer');
+  // Rebuild the intent from the (possibly edited) draft text at click time.
+  const edited = sharePanelTextEl && sharePanelTextEl.value.trim();
+  let intent = (_shareState && _shareState.intent) || 'https://x.com/compose/tweet';
+  if (edited && _shareState) {
+    intent = `https://x.com/intent/tweet?text=${encodeURIComponent(edited)}` +
+      (_shareState.cardUrl ? `&url=${encodeURIComponent(_shareState.cardUrl)}` : '');
+  }
+  window.open(intent, '_blank', 'noopener,noreferrer');
 });
 if (shareCloseBtn) shareCloseBtn.addEventListener('click', closeSharePanel);
 if (sharePanelEl) sharePanelEl.addEventListener('click', e => { if (e.target === sharePanelEl) closeSharePanel(); });

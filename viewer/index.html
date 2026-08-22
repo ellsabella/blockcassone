@@ -245,10 +245,12 @@
       background: #05070a; border: 1px solid rgba(120, 200, 255, 0.35); margin-bottom: 10px;
     }
     #share-panel-text {
+      display: block; width: 100%; resize: vertical; min-height: 64px;
       white-space: pre-wrap; font: 700 13px/1.4 'Courier New', monospace; color: #dfe8f5;
       background: rgba(6, 10, 16, 0.7); border: 1px solid rgba(120, 200, 255, 0.28);
       padding: 9px 11px; margin-bottom: 8px;
     }
+    #share-panel-text:focus { outline: none; border-color: rgba(120, 200, 255, 0.7); }
     #share-panel .share-hint { color: #9fb2c8; font-size: 11.5px; line-height: 1.5; }
     #share-panel .share-hint b { color: #cfe8ff; }
     #share-post {
@@ -892,7 +894,7 @@
     <div class="modal-panel">
       <h2>Share on X</h2>
       <img id="share-panel-img" alt="cube snapshot">
-      <pre id="share-panel-text"></pre>
+      <textarea id="share-panel-text" rows="3" maxlength="280" spellcheck="false" aria-label="Tweet text — edit before posting"></textarea>
       <p class="share-hint">Post on X opens the composer with your text and this cube attached as a preview card. You can also download the image.</p>
       <div class="panel-row" style="margin-top:12px;justify-content:flex-end;">
         <button id="share-post-x" style="display:none">Post to X</button>
@@ -910,8 +912,8 @@
   <script src="/public/linestyles.js"></script>
   <script src="/public/planes.js"></script>
   <script src="/public/blocks.js"></script>
-  <script src="/viewer/vendor/wallet-widget.js?v=20260822-3"></script>
-  <script type="module" src="./main.js?v=20260822-3"></script>
-  <script type="module" src="./nav-gate.js?v=20260822-3"></script>
+  <script src="/viewer/vendor/wallet-widget.js?v=20260822-4"></script>
+  <script type="module" src="./main.js?v=20260822-4"></script>
+  <script type="module" src="./nav-gate.js?v=20260822-4"></script>
 </body>
 </html>
