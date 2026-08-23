@@ -177,6 +177,14 @@ function decodeAbiString(ret) {
 // The REAL per-cube 2D thumbnail: cubeForSlot(slot) -> thumbnailSVG(cubeId) on-chain,
 // built from the SAME art bytes the 3D cube renders — so the two panels always match.
 // GET /api/thumbnail?slot=N  (or ?cube=ID)  ->  image/svg+xml
+// On-chain thumbnail render is SECONDS of heavy view-call — cache it. Art is
+// immutable until customize/rebase mechanics open (off at launch), so a short
+// TTL is purely defensive; slot→cube mappings can change as mints land, so
+// slot-derived lookups re-resolve but the per-cube SVG cache still hits.
+const _thumbCache = new Map(); // cubeId -> { svg, ts }
+const THUMB_TTL_MS = 10 * 60 * 1000;
+const THUMB_CACHE_MAX = 800;
+
 async function handleThumbnail(req, res) {
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -191,16 +199,27 @@ async function handleThumbnail(req, res) {
       cubeId = BigInt(ret || '0x0').toString();
     }
     if (BigInt(cubeId) === 0n) { sendJson(res, 404, { error: 'no cube at slot' }); return; }
+    cubeId = BigInt(cubeId).toString();
+    const sendSvg = (svg) => {
+      res.writeHead(200, {
+        'Content-Type': 'image/svg+xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=600',
+        'Access-Control-Allow-Origin': '*',
+      });
+      res.end(svg);
+    };
+    const hit = _thumbCache.get(cubeId);
+    if (hit && Date.now() - hit.ts < THUMB_TTL_MS) { sendSvg(hit.svg); return; }
     const svgRet = await ethCall(cfg.rpcUrl, cfg.thumbnailRenderer,
       '0x1df76ecc' + pad32(BigInt(cubeId).toString(16))); // thumbnailSVG(uint256)
     const svg = decodeAbiString(svgRet);
     if (!svg) { sendJson(res, 502, { error: 'empty thumbnail' }); return; }
-    res.writeHead(200, {
-      'Content-Type': 'image/svg+xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=30',
-      'Access-Control-Allow-Origin': '*',
-    });
-    res.end(svg);
+    if (_thumbCache.size >= THUMB_CACHE_MAX) {
+      const oldest = _thumbCache.keys().next().value;
+      _thumbCache.delete(oldest);
+    }
+    _thumbCache.set(cubeId, { svg, ts: Date.now() });
+    sendSvg(svg);
   } catch (err) {
     sendJson(res, 502, { error: 'thumbnail failed', detail: String(err?.message || err) });
   }

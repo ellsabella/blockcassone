@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-9';
+const VIEWER_BUILD = '20260823-1';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -3086,12 +3086,20 @@ function fullArtworkMotifSet() {
     for (const m of minted) { if (set.size >= budget) break; if (ownerAddressForSlot(m) === _rebuildWalletAddr) set.add(m); }
   }
   if (set.size < budget) {
-    const t = orbit.state.target;
+    // Score by distance to the CAMERA EYE, not the orbit target — zoomed out,
+    // target-distance ties near and far faces and the near side (closest to the
+    // viewer) lost budget slots to cubes hidden behind the structure.
+    const s = orbit.state;
+    const cp = Math.cos(s.pitch), sp = Math.sin(s.pitch);
+    const cy2 = Math.cos(s.yaw), sy2 = Math.sin(s.yaw);
+    const ex = s.target[0] + cp * sy2 * s.distance;
+    const ey = s.target[1] + sp * s.distance;
+    const ez = s.target[2] + cp * cy2 * s.distance;
     const scored = [];
     for (const m of minted) {
       if (set.has(m)) continue;
       const { mn, mx } = cubeAABBFor(m);
-      const dx = (mn[0] + mx[0]) / 2 - t[0], dy = (mn[1] + mx[1]) / 2 - t[1], dz = (mn[2] + mx[2]) / 2 - t[2];
+      const dx = (mn[0] + mx[0]) / 2 - ex, dy = (mn[1] + mx[1]) / 2 - ey, dz = (mn[2] + mx[2]) / 2 - ez;
       scored.push([dx * dx + dy * dy + dz * dz, m]);
     }
     scored.sort((a, b) => a[0] - b[0]);
