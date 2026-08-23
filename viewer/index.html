@@ -19,7 +19,7 @@
       color: #c8c8cc;
       font-family: 'Courier New', monospace;
     }
-    #gl { display: block; width: 100vw; height: 100vh; }
+    #gl { display: block; width: 100vw; height: 100vh; touch-action: none; }
     button, input, select {
       font-family: 'Courier New', monospace;
       font-size: 12px;
@@ -758,6 +758,37 @@
     <path id="map-link-path"></path>
   </svg>
   <div id="load-fade" aria-hidden="true"></div>
+  <script>
+    // Independent load-fade watchdog: main.js releases the fade when the scene is
+    // ready, but if the module NEVER evaluates (shader failure, import 404, old
+    // mobile Safari choking on modern syntax) the page used to stay black forever.
+    // This inline script cannot be taken down by module failures.
+    (function () {
+      var released = false;
+      function releaseWithMessage(msg) {
+        if (released) return; released = true;
+        var f = document.getElementById('load-fade');
+        if (!f) return;
+        if (msg) {
+          f.innerHTML = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#ff9adb;font:700 14px monospace;text-align:center;padding:24px;white-space:pre-wrap">' + msg + '</div>';
+          f.style.pointerEvents = 'auto';
+        } else {
+          f.classList.add('done');
+        }
+      }
+      setTimeout(function () {
+        // If main.js already released it, this is a no-op (class present).
+        var f = document.getElementById('load-fade');
+        if (f && !f.classList.contains('done')) releaseWithMessage('');
+      }, 8000);
+      window.addEventListener('error', function (e) {
+        var f = document.getElementById('load-fade');
+        if (f && !f.classList.contains('done') && e && e.message) {
+          releaseWithMessage('TheBLOCK failed to start:\n' + e.message);
+        }
+      });
+    })();
+  </script>
   <div id="main-axis" class="axis-gizmo" aria-hidden="true"></div>
   <div id="nft-label">NFT: none</div>
   <div id="hud">
@@ -911,8 +942,8 @@
   <script src="/public/linestyles.js"></script>
   <script src="/public/planes.js"></script>
   <script src="/public/blocks.js"></script>
-  <script src="/viewer/vendor/wallet-widget.js?v=20260822-6"></script>
-  <script type="module" src="./main.js?v=20260822-6"></script>
-  <script type="module" src="./nav-gate.js?v=20260822-6"></script>
+  <script src="/viewer/vendor/wallet-widget.js?v=20260822-7" defer></script>
+  <script type="module" src="./main.js?v=20260822-7"></script>
+  <script type="module" src="./nav-gate.js?v=20260822-7"></script>
 </body>
 </html>

@@ -74,6 +74,79 @@ export function createOrbitCamera(canvas, opts = {}) {
   }, { passive: false });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  // ---- Touch (mobile): one-finger rotate, pinch zoom, two-finger pan, tap = select.
+  // preventDefault suppresses the browser's synthetic mouse events, so short taps
+  // are re-synthesized as mousedown/mouseup for the existing selection handlers.
+  let touchMode = null; // 'rotate' | 'pinch'
+  let lastDist = 0, lastMidX = 0, lastMidY = 0;
+  let tapX = 0, tapY = 0, tapT = 0, tapMoved = false;
+  const pan = (dx, dy) => {
+    const sp = Math.sin(state.pitch), cp = Math.cos(state.pitch);
+    const sy = Math.sin(state.yaw),   cy = Math.cos(state.yaw);
+    const fx = cp * sy, fy = sp, fz = cp * cy;
+    const rx = fz, rz = -fx;
+    const rl = Math.hypot(rx, 0, rz) || 1;
+    const rxn = rx / rl, ryn = 0, rzn = rz / rl;
+    const ux = ryn * fz - rzn * fy, uy = rzn * fx - rxn * fz, uz = rxn * fy - ryn * fx;
+    const k = state.distance * 0.0017;
+    state.target[0] += (-rxn * dx + ux * dy) * k;
+    state.target[1] += (-ryn * dx + uy * dy) * k;
+    state.target[2] += (-rzn * dx + uz * dy) * k;
+  };
+  canvas.addEventListener('touchstart', (e) => {
+    if (!shouldHandleEvent(e)) return;
+    if (e.touches.length === 1) {
+      touchMode = 'rotate';
+      lastX = tapX = e.touches[0].clientX;
+      lastY = tapY = e.touches[0].clientY;
+      tapT = Date.now(); tapMoved = false;
+    } else if (e.touches.length >= 2) {
+      touchMode = 'pinch'; tapMoved = true;
+      const a = e.touches[0], b = e.touches[1];
+      lastDist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+      lastMidX = (a.clientX + b.clientX) / 2; lastMidY = (a.clientY + b.clientY) / 2;
+    }
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => {
+    if (!touchMode) return;
+    e.preventDefault();
+    if (touchMode === 'rotate' && e.touches.length === 1) {
+      const t = e.touches[0];
+      const dx = t.clientX - lastX, dy = t.clientY - lastY;
+      if (Math.abs(t.clientX - tapX) + Math.abs(t.clientY - tapY) > 8) tapMoved = true;
+      lastX = t.clientX; lastY = t.clientY;
+      state.yaw   -= dx * 0.0065;
+      state.pitch += dy * 0.0065;
+      state.pitch = Math.max(state.minPitch, Math.min(state.maxPitch, state.pitch));
+    } else if (touchMode === 'pinch' && e.touches.length >= 2) {
+      const a = e.touches[0], b = e.touches[1];
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+      state.distance *= lastDist / dist;
+      state.distance = Math.max(state.minDist, Math.min(state.maxDist, state.distance));
+      lastDist = dist;
+      const midX = (a.clientX + b.clientX) / 2, midY = (a.clientY + b.clientY) / 2;
+      pan(midX - lastMidX, midY - lastMidY);
+      lastMidX = midX; lastMidY = midY;
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchend', (e) => {
+    if (e.touches.length === 0) {
+      const wasTap = touchMode === 'rotate' && !tapMoved && Date.now() - tapT < 350;
+      touchMode = null;
+      if (wasTap) {
+        const opts = { bubbles: true, cancelable: true, clientX: tapX, clientY: tapY, button: 0 };
+        canvas.dispatchEvent(new MouseEvent('mousedown', opts));
+        canvas.dispatchEvent(new MouseEvent('mouseup', opts));
+        canvas.dispatchEvent(new MouseEvent('click', opts));
+      }
+    } else if (e.touches.length === 1) {
+      touchMode = 'rotate';
+      lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+      tapMoved = true; // a finger lifted mid-gesture — never treat the remainder as a tap
+    }
+  });
+
   function setTarget(x, y, z) {
     state.target[0] = x; state.target[1] = y; state.target[2] = z;
   }

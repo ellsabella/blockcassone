@@ -13,6 +13,12 @@
 // clone below deliberately discards.)
 (function () {
   if (window.top !== window) return; // never inside a frame ourselves
+  // Mobile / low-memory devices: NO behind-landing preload — two full WebGL
+  // instances kill phone tabs outright. ENTER falls back to the landing page's
+  // own navigate handler (we return before cloning the button, so it survives).
+  if (matchMedia('(pointer: coarse)').matches ||
+      matchMedia('(max-width: 860px)').matches ||
+      (navigator.deviceMemory || 8) <= 4) return;
 
   var frame = document.createElement('iframe');
   frame.src = '/viewer/';

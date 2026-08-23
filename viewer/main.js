@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-6';
+const VIEWER_BUILD = '20260822-7';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -115,8 +115,11 @@ function log(msg) {
 }
 
 // ---------- WebGL 2 ----------
+// Mobile profile: coarse pointer = phone/tablet — cheaper context, capped DPR,
+// smaller render budgets (used throughout).
+const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 const gl = canvas.getContext('webgl2', {
-  alpha: false, antialias: true, premultipliedAlpha: false, preserveDrawingBuffer: false,
+  alpha: false, antialias: !MOBILE, premultipliedAlpha: false, preserveDrawingBuffer: false,
 });
 if (!gl) {
   document.body.innerHTML = '<pre style="color:#f66;padding:2em">WebGL 2 not available.</pre>';
@@ -124,10 +127,24 @@ if (!gl) {
 }
 log(`WebGL 2 — ${gl.getParameter(gl.RENDERER)}`);
 
+// A lost GL context (mobile memory pressure, GPU reset) previously left a
+// permanently black canvas under a live-looking UI. Surface it + offer reload.
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  const f = document.getElementById('load-fade');
+  if (f) {
+    f.classList.remove('done');
+    f.style.pointerEvents = 'auto';
+    f.innerHTML = '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#ff9adb;font:700 15px \'Courier New\',monospace;text-align:center;padding:24px">' +
+      'The graphics context was lost (low memory).' +
+      '<button onclick="location.reload()" style="padding:10px 22px;background:rgba(255,58,184,.18);border:1px solid rgba(255,58,184,.8);color:#fff;cursor:pointer;font:inherit">Reload</button></div>';
+  }
+});
+
 let _walkFixed = false; // ?walk mode owns a fixed 1920×1080 backing store for clean 16:9 capture
 function resize() {
   if (_walkFixed) return;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, MOBILE ? 1.5 : 2);
   const w = Math.floor(canvas.clientWidth * dpr);
   const h = Math.floor(canvas.clientHeight * dpr);
   if (canvas.width !== w || canvas.height !== h) {
@@ -3013,6 +3030,9 @@ function detailedEmptyMotifSet() {
   // calls/frame + a ~43-pass scaffold fill on cold entry. Detailed biomes render at
   // the close scopes (street/neighbourhood, ≤64 slots), which is where they read.
   if (mainViewScope === 'region') return new Set();
+  // Mobile: detailed biomes only at street scope (≤8 slots) — 64 biomes is still
+  // ~1k draw calls, too much for phone GPUs.
+  if (MOBILE && mainViewScope !== 'street') return new Set();
   return motifSetForRange(mainScopeStart(), mainScopeCount());
 }
 
@@ -3332,6 +3352,9 @@ function rebuildScene() {
   miniMapSceneItems.push(...buildMiniMapOwnerMarkerItems());
   miniMapSceneItems.push(...buildMiniMapOverlayItems());
 
+  // Mobile: drop the pure-halo additive glow duplicates (each is a second pass
+  // over the same lines) — roughly halves the additive draw count on phones.
+  if (MOBILE) sceneItems = sceneItems.filter(it => it.material !== 'normie-glow');
   const cnt = {};
   for (const it of sceneItems) cnt[it.material] = (cnt[it.material] || 0) + 1;
   log(`scene: ${sceneItems.length} items | ${Object.entries(cnt).map(([m, n]) => `${m}=${n}`).join(', ')}`);
@@ -3418,6 +3441,7 @@ const startT = performance.now();
 const _partitionCache = new WeakMap();
 // Uniforms the draw-time `item.dim` multiplies (mirror of applyDim's set).
 const DIM_UNIFORMS = new Set(['uLineOpacity', 'uAlpha', 'uOpacity', 'uLightScale']);
+const _matOrder = it => `${it.material} ${it.mesh}`;
 function partitionItems(items) {
   let p = _partitionCache.get(items);
   if (!p) {
@@ -3428,6 +3452,13 @@ function partitionItems(items) {
       else if (it.transparentLayer) p.alphaOverlay.push(it);
       else p.alpha.push(it);
     }
+    // Sort order-independent buckets by material+mesh (once per rebuild): with
+    // materials interleaved per cube, drawItems was re-running useProgram + full
+    // per-program uniform uploads on nearly EVERY item — the main frame-CPU cost
+    // at region scope. Opaque (depth-tested) and additive (commutative) are
+    // order-independent; alpha buckets keep build order (transparency sorting).
+    p.opaque.sort((a, b) => (_matOrder(a) < _matOrder(b) ? -1 : 1));
+    p.additive.sort((a, b) => (_matOrder(a) < _matOrder(b) ? -1 : 1));
     _partitionCache.set(items, p);
   }
   return p;
