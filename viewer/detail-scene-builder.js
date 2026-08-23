@@ -77,7 +77,7 @@ export function pushDetailMotifItems({
   }
 
   if (showStoneWalker) {
-    const walkerItems = buildStoneWalker(motifIdx, hilbert, serializedPlanes, gl, meshes);
+    const walkerItems = buildStoneWalker(motifIdx, hilbert, planesForMotif ? planesForMotif(motifIdx) : serializedPlanes, gl, meshes);
     applyMotifStyle(walkerItems, cat, motifIdx);
     if (agenticNonNormie) applyAgenticAwakening(walkerItems);
     applyDim(walkerItems, dim);
@@ -85,7 +85,7 @@ export function pushDetailMotifItems({
   }
 
   if (showVoxels) {
-    const voxelItems = build3DVoxels(motifIdx, hilbert, serializedPlanes, gl, meshes);
+    const voxelItems = build3DVoxels(motifIdx, hilbert, planesForMotif ? planesForMotif(motifIdx) : serializedPlanes, gl, meshes);
     applyMotifStyle(voxelItems, cat, motifIdx);
     if (agenticNonNormie) applyAgenticAwakening(voxelItems);
     applyDim(voxelItems, dim);
@@ -101,7 +101,7 @@ export function pushDetailMotifItems({
   }
 
   if (showCardioid) {
-    const cardItems = buildCubeCardioid(motifIdx, hilbert, serializedPlanes, gl, meshes);
+    const cardItems = buildCubeCardioid(motifIdx, hilbert, planesForMotif ? planesForMotif(motifIdx) : serializedPlanes, gl, meshes);
     applyMotifStyle(cardItems, cat, motifIdx);
     if (agenticNonNormie) applyAgenticAwakening(cardItems);
     applyDim(cardItems, dim);
@@ -117,6 +117,7 @@ export function pushDetailPlaneItems({
   dim,
   hilbert,
   serializedPlanes,
+  planesForMotif = null,
   gl,
   meshes,
   showEdgePoints = false,
@@ -139,6 +140,10 @@ export function pushDetailPlaneItems({
   const motifIdx = plane.hierarchy.motifIndex;
   const cat = categoryForMotif(motifIdx);
   const agenticNonNormie = isAgenticNonNormieCube(motifIdx);
+  // Per-motif plane list for the builders (they filter by motif internally —
+  // handing them the 3-plane slice instead of all ~12k kills the O(world) scans
+  // that dominated rebuild time).
+  const _mp = (p) => (planesForMotif ? planesForMotif(p.hierarchy.motifIndex) : serializedPlanes);
 
   if (isNormieCube(motifIdx)) {
     if (showForest) {
@@ -154,21 +159,21 @@ export function pushDetailPlaneItems({
     }
   } else {
     const artItems = showNonNormieArtwork && buildNonNormieArtworkPlane
-      ? buildNonNormieArtworkPlane(plane, serializedPlanes, gl, meshes)
+      ? buildNonNormieArtworkPlane(plane, _mp(plane), gl, meshes)
       : [];
     if (agenticNonNormie) applyAgenticAwakening(artItems);
     applyDim(artItems, dim);
     if (artItems?.length) itemsOut.push(...artItems);
 
     const walkerItems = showNonNormieWalker && buildNonNormieWalker
-      ? buildNonNormieWalker(plane, serializedPlanes, gl, meshes)
+      ? buildNonNormieWalker(plane, _mp(plane), gl, meshes)
       : [];
     if (agenticNonNormie) applyAgenticAwakening(walkerItems);
     applyDim(walkerItems, dim);
     if (walkerItems?.length) itemsOut.push(...walkerItems);
 
     const bannerItems = showNonNormieBanner && buildNonNormieBanner
-      ? buildNonNormieBanner(plane, serializedPlanes, gl, meshes)
+      ? buildNonNormieBanner(plane, _mp(plane), gl, meshes)
       : [];
     applyBannerGlitch(bannerItems, null);
     if (agenticNonNormie) applyAgenticBannerPulse(bannerItems);
@@ -176,7 +181,7 @@ export function pushDetailPlaneItems({
     if (bannerItems?.length) itemsOut.push(...bannerItems);
 
     const idLabelItems = showNormieIdLabel && buildNonNormieIdLabel
-      ? buildNonNormieIdLabel(plane, serializedPlanes, gl, meshes)
+      ? buildNonNormieIdLabel(plane, _mp(plane), gl, meshes)
       : [];
     if (agenticNonNormie) applyAgenticAwakening(idLabelItems);
     applyDim(idLabelItems, dim);
@@ -210,7 +215,7 @@ export function pushDetailPlaneItems({
     // one consistent banner across all artwork. Replaces the old traits-hash banner,
     // whose data (traits.raw from the normies API) isn't in the self-contained path.
     if (showNormieTraitsBanner && buildNonNormieBanner) {
-      const bannerItems = buildNonNormieBanner(plane, serializedPlanes, gl, meshes);
+      const bannerItems = buildNonNormieBanner(plane, _mp(plane), gl, meshes);
       applyMotifStyle(bannerItems, cat, motifIdx);
       applyBannerGlitch(bannerItems, cat);
       applyDim(bannerItems, dim);

@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260823-1';
+const VIEWER_BUILD = '20260823-2';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -2885,6 +2885,7 @@ function pushPlaneItems(itemsOut, plane, renderMode, cubeCtx, dim) {
     dim,
     hilbert,
     serializedPlanes,
+    planesForMotif,
     gl,
     meshes,
     showEdgePoints,
@@ -3206,7 +3207,7 @@ function rebuildScene() {
             ? planesForMotif(p0.hierarchy.motifIndex)
             : [])
         : (mode === 'BIG')
-          ? serializedPlanes.filter(p => fullArtworkMotifs.has(p.hierarchy.motifIndex))
+          ? [...fullArtworkMotifs].flatMap(m => planesForMotif(m)) // indexed, not an O(12k) filter
           : [];
 
   // Precompute per-motif cubeCtx (mirror slices for forest builder).
