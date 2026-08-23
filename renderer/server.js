@@ -407,11 +407,16 @@ async function proxyChainRpc(req, res) {
     for (let i = 0; i < upstreams.length; i++) {
       const isLast = i === upstreams.length - 1;
       try {
+        // Timeout on non-final upstreams: a HANGING primary must fail over to
+        // publicnode, not hold the browser's request open indefinitely.
+        const ac = new AbortController();
+        const timer = isLast ? null : setTimeout(() => ac.abort(), 10_000);
         const upstreamRes = await devFetch(upstreams[i], {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body,
-        });
+          signal: ac.signal,
+        }).finally(() => { if (timer) clearTimeout(timer); });
         if (!isLast && (upstreamRes.status === 429 || upstreamRes.status >= 500)) {
           lastErr = new Error(`upstream ${i} status ${upstreamRes.status}`);
           continue;

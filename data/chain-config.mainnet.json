@@ -1,5 +1,6 @@
 {
   "enabled": true,
+  "useSnapshot": true,
   "chainId": 1,
   "rpcUrl": "",
   "directRpc": false,
