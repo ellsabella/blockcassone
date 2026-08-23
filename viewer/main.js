@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-8';
+const VIEWER_BUILD = '20260822-9';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -3168,6 +3168,7 @@ function rebuildScene() {
   const p0 = currentPlane();
 
   const fullArtworkMotifs = fullArtworkMotifSet();
+  { let h = 0; for (const m of fullArtworkMotifs) h = (h * 31 + m) | 0; _fullArtSig = h; } // pre-demotion signature
   // Budget NEW full-art mesh builds per rebuild: cold scopes used to freeze for
   // seconds building every minted cube synchronously (~10-25ms each). Demoted
   // cubes render their impostor dot this pass and get built over the next
@@ -3841,9 +3842,27 @@ function startWalkRecording() {
   }
 }
 
+// Camera-settle LOD re-pick: when orbit/zoom stops, re-run the full-art budget
+// against the new viewpoint and rebuild ONLY if the winner set changed — so the
+// full-vs-dot split follows the camera instead of the last click.
+let _camSig = '', _camMovedAt = 0, _camSettleDone = true;
+function cameraSettleCheck(nowMs) {
+  if (mode !== 'BIG' || viewerMode === 'flyby') return;
+  const s = orbit.state;
+  const sig = `${s.yaw.toFixed(3)}|${s.pitch.toFixed(3)}|${s.distance.toFixed(2)}|${s.target[0].toFixed(1)},${s.target[1].toFixed(1)},${s.target[2].toFixed(1)}`;
+  if (sig !== _camSig) { _camSig = sig; _camMovedAt = nowMs; _camSettleDone = false; return; }
+  if (_camSettleDone || nowMs - _camMovedAt < 320) return;
+  _camSettleDone = true;
+  const next = fullArtworkMotifSet();
+  let h = 0; for (const m of next) h = (h * 31 + m) | 0;
+  if (h !== _fullArtSig) scheduleRebuild();
+}
+let _fullArtSig = 0; // signature of the last IDEAL (pre-demotion) budget set
+
 function frame() {
   resize();
   noteFrame();
+  cameraSettleCheck(performance.now());
   const t = (performance.now() - startT) * 0.001;
   if (CINEMATIC) {
     if (!_flight && (mintSimulationLoaded() || (performance.now() - startT) > 2500)) setupCinematicFlight(pickFlightFocus());
