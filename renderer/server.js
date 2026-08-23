@@ -184,6 +184,27 @@ function decodeAbiString(ret) {
 const _thumbCache = new Map(); // cubeId -> { svg, ts }
 const THUMB_TTL_MS = 10 * 60 * 1000;
 const THUMB_CACHE_MAX = 800;
+const THUMBS_DIR = path.join(REPO_ROOT, 'data', 'thumbs'); // indexer-baked SVGs
+
+// slot -> cubeId from the indexer snapshot (mtime-cached) — kills the live
+// cubeForSlot eth_call for every already-indexed cube. Fresh mints not yet in
+// the snapshot fall back to the chain (stale-tolerant, live-correct).
+let _slotMap = { mtime: 0, map: null };
+function slotToCubeFromSnapshot(slot) {
+  try {
+    const p = path.join(REPO_ROOT, 'data', 'world-snapshot.json');
+    const st = fs.statSync(p);
+    if (!_slotMap.map || st.mtimeMs !== _slotMap.mtime) {
+      const snap = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const m = new Map();
+      for (const r of snap.records || []) {
+        if (Number.isInteger(r.slot) && r.cubeId) m.set(r.slot, String(r.cubeId));
+      }
+      _slotMap = { mtime: st.mtimeMs, map: m };
+    }
+    return _slotMap.map.get(slot) || null;
+  } catch (_) { return null; }
+}
 
 async function handleThumbnail(req, res) {
   try {
@@ -195,8 +216,11 @@ async function handleThumbnail(req, res) {
       const slot = Number(url.searchParams.get('slot'));
       if (!Number.isInteger(slot) || slot < 0) { sendJson(res, 400, { error: 'bad slot' }); return; }
       if (!cfg.cubeNft) { sendJson(res, 503, { error: 'cubeNft not configured' }); return; }
-      const ret = await ethCall(cfg.rpcUrl, cfg.cubeNft, '0x7bdf1f21' + pad32(slot.toString(16))); // cubeForSlot(uint32)
-      cubeId = BigInt(ret || '0x0').toString();
+      cubeId = slotToCubeFromSnapshot(slot); // indexer-first, zero RPC
+      if (!cubeId) {
+        const ret = await ethCall(cfg.rpcUrl, cfg.cubeNft, '0x7bdf1f21' + pad32(slot.toString(16))); // cubeForSlot(uint32)
+        cubeId = BigInt(ret || '0x0').toString();
+      }
     }
     if (BigInt(cubeId) === 0n) { sendJson(res, 404, { error: 'no cube at slot' }); return; }
     cubeId = BigInt(cubeId).toString();
@@ -210,6 +234,16 @@ async function handleThumbnail(req, res) {
     };
     const hit = _thumbCache.get(cubeId);
     if (hit && Date.now() - hit.ts < THUMB_TTL_MS) { sendSvg(hit.svg); return; }
+    // Indexer-baked thumbnail on disk → serve with zero RPC (the normal path).
+    try {
+      const baked = fs.readFileSync(path.join(THUMBS_DIR, `${cubeId}.svg`), 'utf8');
+      if (baked) {
+        if (_thumbCache.size >= THUMB_CACHE_MAX) _thumbCache.delete(_thumbCache.keys().next().value);
+        _thumbCache.set(cubeId, { svg: baked, ts: Date.now() });
+        sendSvg(baked);
+        return;
+      }
+    } catch (_) { /* not baked yet — live render below */ }
     const svgRet = await ethCall(cfg.rpcUrl, cfg.thumbnailRenderer,
       '0x1df76ecc' + pad32(BigInt(cubeId).toString(16))); // thumbnailSVG(uint256)
     const svg = decodeAbiString(svgRet);

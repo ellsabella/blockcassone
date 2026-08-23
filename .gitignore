@@ -41,3 +41,4 @@ reserve-plan*.json
 data/sepolia-full/
 data/mainnet/
 data/chain-config.simulation.json
+data/thumbs/

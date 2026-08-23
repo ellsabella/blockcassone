@@ -6,6 +6,7 @@ import { loadConfig } from './config.js';
 import { WorldState } from './snapshot.js';
 import { fetchLogs, fetchBlockTimestamps, buildAndWriteSnapshot } from './chain.js';
 import { NormieArtCache, NonNormieArtCache } from './art.js';
+import { prerenderThumbnails } from './thumbs.js';
 
 async function main() {
   const cfg = loadConfig();
@@ -30,6 +31,12 @@ async function main() {
   const snap = await buildAndWriteSnapshot(client, cfg, ws, artCache, nonNormieArtCache);
   const withArt = snap.records.filter((r) => r.art).length;
   console.log(`[indexer] wrote ${snap.count} cube records (art baked: ${withArt}) → ${cfg.snapshotOut}`);
+
+  // Bake thumbnails for any cube without one (customized cubes re-render).
+  const customizedIds = batch.customized
+    .map((l) => Number(l?.args?.cubeId ?? l?.args?.tokenId ?? 0))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  await prerenderThumbnails(cfg, snap.records, customizedIds);
 }
 
 main().catch((err) => {

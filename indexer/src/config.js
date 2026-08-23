@@ -24,6 +24,7 @@ export function loadConfig() {
     rpcUrl: process.env.INDEXER_RPC_URL || raw.rpcUrl || 'http://127.0.0.1:8545',
     chainId: Number(raw.chainId || 1),
     cubeNft,
+    thumbnailRenderer: raw.thumbnailRenderer || null,
     cubeMintController: raw.cubeMintController || null,
     normieStorage: raw.normieStorage || null,
     nonNormieStore: raw.nonNormieStore || null,   // NonNormieArtStore (external/CC0 tonal art)
@@ -31,6 +32,7 @@ export function loadConfig() {
     // pre-deploy range (INDEXER_FROM_BLOCK=<deploy block>).
     fromBlock: process.env.INDEXER_FROM_BLOCK != null ? BigInt(process.env.INDEXER_FROM_BLOCK) : 0n,
     snapshotOut: resolve(REPO_ROOT, process.env.INDEXER_SNAPSHOT_OUT || 'data/world-snapshot.json'),
+    thumbsOut: resolve(REPO_ROOT, process.env.INDEXER_THUMBS_OUT || 'data/thumbs'),
     // Per-cube art/lifecycle history (mint origin + every re-base + moves), served as a
     // separate lean file so the overview snapshot stays small; the UI fetches it for a
     // cube's detail view.
