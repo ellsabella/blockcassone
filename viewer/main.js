@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260823-2';
+const VIEWER_BUILD = '20260823-3';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -3119,6 +3119,7 @@ const _lodParam = (() => {
 })();
 // Motifs whose full-art meshes have been built this session (budgeted cold builds).
 const _builtFullArt = new Set();
+const _PROF = (() => { try { return new URLSearchParams(location.search).has('prof'); } catch (_) { return false; } })();
 
 // Coalesce rebuilds: data-ready callbacks (wallet / mint / normie pixels /
 // banner) each fire as their data streams in during a load, previously
@@ -3165,6 +3166,8 @@ function cloneSceneItems(items) {
 
 function rebuildScene() {
   const _rebuildStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const _ph = _PROF ? [performance.now()] : null; // phase profiler (?prof=1)
+  const _mark = () => { if (_ph) _ph.push(performance.now()); };
   _rebuildScheduled = false; // running now — cancel any pending scheduled rebuild (kills double-rebuilds)
   _rebuildWalletAddr = loadedWalletAddress(); // hoisted: read once per rebuild, not per motif (DOM read)
   _scaffoldIncomplete = false;
@@ -3225,6 +3228,7 @@ function rebuildScene() {
     }
     cubeCtxMap[motifIdx] = ctx;
   }
+  _mark(); // phase 1: selection/filtering/ctx done
   // --- Per-cube items ---
   for (const motifIdx of motifsToRender) {
     pushMotifItems(sceneItems, motifIdx, mode, bigModeDimForMotif(motifIdx));
@@ -3417,6 +3421,7 @@ function rebuildScene() {
   miniMapSceneItems.push(...buildMiniMapOwnerMarkerItems());
   miniMapSceneItems.push(...buildMiniMapOverlayItems());
 
+  _mark(); // phase 2: all item building done
   // Mobile: drop the pure-halo additive glow duplicates (each is a second pass
   // over the same lines) — roughly halves the additive draw count on phones.
   if (MOBILE) sceneItems = sceneItems.filter(it => it.material !== 'normie-glow');
@@ -3435,6 +3440,11 @@ function rebuildScene() {
     console.log(`[dim ${VIEWER_BUILD}] wallet=${_rebuildWalletAddr || 'none'} bright(0.85+)=${own} dimmed=${other} scope=${mainViewScope} sel(${sel})`);
   }
   const _rebuildEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  if (_ph) {
+    _ph.push(_rebuildEnd);
+    const d = _ph.map((t, i) => (i ? (t - _ph[i - 1]).toFixed(0) : 0)).slice(1);
+    console.log(`[prof] rebuild ${(_rebuildEnd - _rebuildStart).toFixed(0)}ms — prep=${d[0]}ms itemBuild=${d[1]}ms tail=${d[2]}ms · items=${sceneItems.length}`);
+  }
   noteRebuild(_rebuildEnd - _rebuildStart, sceneItems.length + detailSceneItems.length + miniMapSceneItems.length);
   // Deferred some slot builds to stay within the per-frame budget — continue
   // filling the scope next frame. Cached slots make this converge in a few frames.
