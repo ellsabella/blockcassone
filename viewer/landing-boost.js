@@ -20,14 +20,23 @@
       matchMedia('(max-width: 860px)').matches ||
       (navigator.deviceMemory || 8) <= 4) return;
 
+  // Create the frame WITHOUT a src — the preload starts only after the landing
+  // has painted (load + idle), so it never competes with the hero's LCP.
   var frame = document.createElement('iframe');
-  frame.src = '/viewer/';
   frame.title = 'TheBLOCK Explorer';
   frame.setAttribute('aria-hidden', 'true');
   frame.style.cssText =
     'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:-1;' +
     'pointer-events:none;background:#020203';
   document.body.appendChild(frame);
+  var started = false;
+  function startPreload() {
+    if (started) return; started = true;
+    frame.src = '/viewer/';
+  }
+  if (document.readyState === 'complete') setTimeout(startPreload, 600);
+  else window.addEventListener('load', function () { setTimeout(startPreload, 600); });
+  // Failsafe: if ENTER is clicked before the preload started, start it right then.
 
   var btn = document.getElementById('enter');
   if (!btn) return;
@@ -39,6 +48,7 @@
   btn.parentNode.replaceChild(clone, btn);
 
   clone.addEventListener('click', function () {
+    startPreload(); // no-op if already running; covers a click before idle-start
     var kids = Array.prototype.slice.call(document.body.children).filter(function (el) {
       return el !== frame;
     });
