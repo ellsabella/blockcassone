@@ -32,11 +32,12 @@ async function main() {
   const withArt = snap.records.filter((r) => r.art).length;
   console.log(`[indexer] wrote ${snap.count} cube records (art baked: ${withArt}) → ${cfg.snapshotOut}`);
 
-  // Bake thumbnails for any cube without one (customized cubes re-render).
-  const customizedIds = batch.customized
+  // Bake thumbnails for any cube without one. Invalidate CUSTOMIZED cubes (new
+  // art) AND MOVED cubes (colour is slot-derived — a move changes the render).
+  const staleIds = [...batch.customized, ...batch.moved]
     .map((l) => Number(l?.args?.cubeId ?? l?.args?.tokenId ?? 0))
     .filter((n) => Number.isInteger(n) && n > 0);
-  await prerenderThumbnails(cfg, snap.records, customizedIds);
+  await prerenderThumbnails(cfg, snap.records, staleIds);
 }
 
 main().catch((err) => {
