@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260823-3';
+const VIEWER_BUILD = '20260823-4';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -2309,6 +2309,7 @@ function clearGeneratedMeshes() {
   // reset (drawScene skips items whose mesh no longer exists).
   _emptySlotCache.clear();
   _builtFullArt.clear(); // full-art meshes are gone too — rebuild them budgeted
+  _motifItemCache.clear(); // cached item arrays reference the deleted meshes
 }
 
 // ---------- Materials ----------
@@ -3121,6 +3122,32 @@ const _lodParam = (() => {
 const _builtFullArt = new Set();
 const _PROF = (() => { try { return new URLSearchParams(location.search).has('prof'); } catch (_) { return false; } })();
 
+// Per-cube ITEM cache for BIG-mode full-art cubes — the profiler showed 100% of
+// rebuild time was re-constructing ~5k identical item objects every rebuild.
+// Items are built PRISTINE (dim 1.0, uniforms untouched) exactly once per
+// (motif, category, agentic) and re-emitted with draw-time dim. Meshes are
+// cached separately; this caches the item arrays wrapping them.
+const _motifItemCache = new Map(); // `${motif}:${cat}:${agentic}` -> items[]
+let _motifItemCtx = null;          // cubeCtxMap of the CURRENT rebuild (set below)
+function pushFullArtCube(itemsOut, motifIdx, dimVal) {
+  const cat = ensureMotifCategory(motifIdx);
+  const ag = isAgenticNonNormieCube(motifIdx);
+  const key = `${motifIdx}:${cat}:${ag}`;
+  let items = _motifItemCache.get(key);
+  if (!items) {
+    items = [];
+    pushMotifItems(items, motifIdx, '3D', 1.0);
+    const ctx = _motifItemCtx ? _motifItemCtx[motifIdx] : undefined;
+    for (const plane of planesForMotif(motifIdx)) {
+      pushPlaneItems(items, plane, 'BIG', ctx, 1.0);
+    }
+    if (_motifItemCache.size >= 512) _motifItemCache.clear(); // simple bound; rebuilt budgeted
+    _motifItemCache.set(key, items);
+  }
+  for (const it of items) it.dim = dimVal;
+  itemsOut.push(...items);
+}
+
 // Coalesce rebuilds: data-ready callbacks (wallet / mint / normie pixels /
 // banner) each fire as their data streams in during a load, previously
 // triggering a full rebuildScene() apiece (~8 heavy rebuilds per load). Collapse
@@ -3210,7 +3237,7 @@ function rebuildScene() {
             ? planesForMotif(p0.hierarchy.motifIndex)
             : [])
         : (mode === 'BIG')
-          ? [...fullArtworkMotifs].flatMap(m => planesForMotif(m)) // indexed, not an O(12k) filter
+          ? [] // BIG-mode full-art planes are inside the per-cube item cache (pushFullArtCube)
           : [];
 
   // Precompute per-motif cubeCtx (mirror slices for forest builder).
@@ -3228,13 +3255,14 @@ function rebuildScene() {
     }
     cubeCtxMap[motifIdx] = ctx;
   }
+  _motifItemCtx = cubeCtxMap; // for pushFullArtCube cache builds this rebuild
   _mark(); // phase 1: selection/filtering/ctx done
   // --- Per-cube items ---
   for (const motifIdx of motifsToRender) {
     pushMotifItems(sceneItems, motifIdx, mode, bigModeDimForMotif(motifIdx));
   }
   for (const motifIdx of fullArtworkMotifs) {
-    pushMotifItems(sceneItems, motifIdx, '3D', bigModeDimForMotif(motifIdx));
+    pushFullArtCube(sceneItems, motifIdx, bigModeDimForMotif(motifIdx));
   }
 
   // Light markers — once in any non-2D mode, anchored to the active cube.
