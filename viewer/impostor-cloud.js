@@ -50,6 +50,7 @@ export function buildImpostorCloud(gl, hilbert, meshes, opts = {}) {
     motifCount = total,
     occupiedSlots = new Set(),  // Set<motifIdx> of real cubes
     dotsForOccupied = true,     // false → no dot where a real cube sits (it renders itself)
+    hideSlots = null,           // Set<motifIdx>: slots rendering full art — never dot these
     emptySize = 0.32,           // world-space dot radius (× slot extent)
     occupiedSize = 0.62,
     emptyOpacity = 0.42,
@@ -69,7 +70,7 @@ export function buildImpostorCloud(gl, hilbert, meshes, opts = {}) {
 
   for (let m = start; m < end; m++) {
     const isOcc = occupiedSlots.has(m);
-    if (isOcc && !dotsForOccupied) continue; // a real cube sits here — no impostor dot at its centre
+    if (isOcc && (hideSlots ? hideSlots.has(m) : !dotsForOccupied)) continue; // full-art cube renders itself — no dot
     const s = slotCenterSize(hilbert, m);
     if (isOcc) {
       const region = Math.floor(m / regionSize);
@@ -83,6 +84,11 @@ export function buildImpostorCloud(gl, hilbert, meshes, opts = {}) {
     }
   }
 
+  // Hide-set signature: the dot layout depends on WHICH slots are hidden (the
+  // full-art LOD set), not just how many — bake it into the mesh cache key.
+  let hSig = 0;
+  if (hideSlots) for (const id of hideSlots) hSig = (hSig * 31 + id) | 0;
+
   const items = [];
   for (const [key, b] of buckets) {
     if (!b.data.length) continue;
@@ -91,7 +97,7 @@ export function buildImpostorCloud(gl, hilbert, meshes, opts = {}) {
     // NOTE: keyed on occupancy COUNT — revisit if move mechanics reshuffle slots
     // without changing the count (moves also trigger full mesh clears today).
     const mkBase = `${keyPrefix}-${key}-${start}-${end}`;
-    const mk = `${mkBase}-e${occupiedSlots.size}`;
+    const mk = `${mkBase}-e${occupiedSlots.size}-h${hSig >>> 0}`;
     const prev = _liveImpostorKeys.get(mkBase);
     if (prev && prev !== mk && meshes[prev] !== undefined) {
       disposeMeshGL(gl, meshes[prev]);

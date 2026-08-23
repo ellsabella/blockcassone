@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260822-7';
+const VIEWER_BUILD = '20260822-8';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -2308,6 +2308,7 @@ function clearGeneratedMeshes() {
   // without this, cached slots silently stop rendering after a wallet load /
   // reset (drawScene skips items whose mesh no longer exists).
   _emptySlotCache.clear();
+  _builtFullArt.clear(); // full-art meshes are gone too — rebuild them budgeted
 }
 
 // ---------- Materials ----------
@@ -3069,8 +3070,46 @@ function fullArtworkMotifSet() {
   // (street, neighbourhood, region). Mints are a sparse, indexer-bounded set, so even a
   // whole region is only a handful of real cubes. Owner focus never hides other owners'
   // cubes; it only drives the left-hand list + emphasis.
-  return new Set(mainScopeMotifs().filter(isMintedSlot));
+  const budget = _lodParam !== null ? _lodParam : (MOBILE ? 20 : 96);
+  const minted = mainScopeMotifs().filter(isMintedSlot);
+  if (minted.length <= budget) return new Set(minted);
+  // LOD budget: only the N most relevant minted cubes render full art; the rest
+  // show their bright impostor dots (the world's existing distance language).
+  // Priority: selected cube → owner-focus set → the connected wallet's cubes →
+  // nearest to the camera target. Keeps draw cost CONSTANT as minting proceeds.
+  const inScope = new Set(minted);
+  const set = new Set();
+  const seed = (m) => { if (set.size < budget && inScope.has(m)) set.add(m); };
+  if (selectedMotifIdx !== null && selectedMotifIdx !== undefined) seed(selectedMotifIdx);
+  for (const m of ownerFocusedMotifSet()) seed(m);
+  if (_rebuildWalletAddr) {
+    for (const m of minted) { if (set.size >= budget) break; if (ownerAddressForSlot(m) === _rebuildWalletAddr) set.add(m); }
+  }
+  if (set.size < budget) {
+    const t = orbit.state.target;
+    const scored = [];
+    for (const m of minted) {
+      if (set.has(m)) continue;
+      const { mn, mx } = cubeAABBFor(m);
+      const dx = (mn[0] + mx[0]) / 2 - t[0], dy = (mn[1] + mx[1]) / 2 - t[1], dz = (mn[2] + mx[2]) / 2 - t[2];
+      scored.push([dx * dx + dy * dy + dz * dz, m]);
+    }
+    scored.sort((a, b) => a[0] - b[0]);
+    for (const [, m] of scored) { if (set.size >= budget) break; set.add(m); }
+  }
+  return set;
 }
+// ?lod=off (unbudgeted, old behaviour) / ?lod=N (explicit budget) for live A/B.
+const _lodParam = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get('lod');
+    if (q === 'off') return Infinity;
+    const n = parseInt(q, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch (_) { return null; }
+})();
+// Motifs whose full-art meshes have been built this session (budgeted cold builds).
+const _builtFullArt = new Set();
 
 // Coalesce rebuilds: data-ready callbacks (wallet / mint / normie pixels /
 // banner) each fire as their data streams in during a load, previously
@@ -3129,6 +3168,19 @@ function rebuildScene() {
   const p0 = currentPlane();
 
   const fullArtworkMotifs = fullArtworkMotifSet();
+  // Budget NEW full-art mesh builds per rebuild: cold scopes used to freeze for
+  // seconds building every minted cube synchronously (~10-25ms each). Demoted
+  // cubes render their impostor dot this pass and get built over the next
+  // passes via the scaffold continuation.
+  {
+    const MAX_NEW_FULL_ART = MOBILE ? 3 : 8;
+    let fresh = 0;
+    for (const m of [...fullArtworkMotifs]) {
+      if (_builtFullArt.has(m)) continue;
+      if (fresh >= MAX_NEW_FULL_ART) { fullArtworkMotifs.delete(m); _scaffoldIncomplete = true; continue; }
+      fresh++; _builtFullArt.add(m);
+    }
+  }
   if (fullArtworkMotifs.size > 0) startDetailMaterialLoad();
   const motifsInFilter = _visibleMotifs();
   const motifsToRender = (mode === 'BIG')
@@ -3224,7 +3276,10 @@ function rebuildScene() {
       const occ = new Set(getMintedCubes().map(c => c.slot));
       _cloudItems = buildImpostorCloud(gl, hilbert, meshes, {
         motifStart: mainScopeStart(), motifCount: mainScopeCount(),
-        occupiedSlots: occ, dotsForOccupied: false,
+        occupiedSlots: occ, dotsForOccupied: true,
+        // Cubes currently rendering FULL art get no dot; beyond-budget minted
+        // cubes show their bright occupied dot instead (LOD tier B).
+        hideSlots: fullArtworkMotifs,
       });
       sceneItems.push(..._cloudItems);
     } else {
