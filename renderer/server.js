@@ -756,6 +756,11 @@ function handleXLogin(req, res) {
   const state     = crypto.randomBytes(16).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   const redirectUri = `${base}/api/x/callback`;
+  // Mobile same-tab flow: ?ret=<same-origin path> — after the callback the tab
+  // is 302'd back there instead of the close-popup page. Path-only (no open
+  // redirect): must start with a single '/'.
+  const retRaw = new URL(req.url, base).searchParams.get('ret') || '';
+  const ret = /^\/(?!\/)/.test(retRaw) ? retRaw.slice(0, 300) : '';
   const auth = new URL('https://x.com/i/oauth2/authorize');
   auth.searchParams.set('response_type', 'code');
   auth.searchParams.set('client_id', clientId);
@@ -766,7 +771,7 @@ function handleXLogin(req, res) {
   auth.searchParams.set('code_challenge_method', 'S256');
   res.writeHead(302, {
     Location: auth.toString(),
-    'Set-Cookie': xCookieHeader(X_LOGIN_COOKIE, sealXCookie({ v: verifier, s: state, r: redirectUri, ts: Date.now() }), { maxAge: 600, secure }),
+    'Set-Cookie': xCookieHeader(X_LOGIN_COOKIE, sealXCookie({ v: verifier, s: state, r: redirectUri, ret, ts: Date.now() }), { maxAge: 600, secure }),
     'Cache-Control': 'no-store',
   });
   res.end();
@@ -818,13 +823,20 @@ async function handleXCallback(req, res) {
       exp: Date.now() + (Number(tok.expires_in) || 7200) * 1000,
       un: '', // username cached lazily by /api/x/status
     };
+    const setCookies = [
+      xCookieHeader(X_AUTH_COOKIE, sealXCookie(payload), { maxAge: X_AUTH_MAX_AGE, secure }),
+      xCookieHeader(X_LOGIN_COOKIE, '', { maxAge: 0, secure }),
+    ];
+    if (login.ret) {
+      // Same-tab (mobile) flow: bounce straight back to the app.
+      res.writeHead(302, { Location: login.ret, 'Cache-Control': 'no-store', 'Set-Cookie': setCookies });
+      res.end();
+      return;
+    }
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Set-Cookie': [
-        xCookieHeader(X_AUTH_COOKIE, sealXCookie(payload), { maxAge: X_AUTH_MAX_AGE, secure }),
-        xCookieHeader(X_LOGIN_COOKIE, '', { maxAge: 0, secure }),
-      ],
+      'Set-Cookie': setCookies,
     });
     res.end(xClosePopupHtml('Connected to X — you can close this window.', true));
   } catch (err) {

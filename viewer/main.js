@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-6';
+const VIEWER_BUILD = '20260824-7';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1591,6 +1591,18 @@ async function postDirectlyToX() {
   }
 
   if (!_xStatus || !_xStatus.connected) {
+    if (MOBILE) {
+      // Same-tab OAuth: popup + window.close() flows strand mobile browsers
+      // (the observed died-on-the-timeline bug). Save the draft, ride the
+      // redirect to X and back, restore the composer on return.
+      try {
+        sessionStorage.setItem('x-share-pending', JSON.stringify({
+          shareId, text, cardUrl: (_shareState && _shareState.cardUrl) || null,
+        }));
+      } catch (_) {}
+      location.href = '/api/x/login?ret=' + encodeURIComponent('/viewer/?xback=1');
+      return;
+    }
     if (sharePanelHintEl) sharePanelHintEl.textContent = 'Connecting to X — approve access in the popup…';
     await openXLoginPopup();
     // Trust the SERVER's verdict, not the popup plumbing: X's COOP severs
@@ -1639,6 +1651,27 @@ async function postDirectlyToX() {
 }
 
 if (sharePostXBtn) sharePostXBtn.addEventListener('click', postDirectlyToX);
+
+// Returning from the mobile same-tab X auth: restore the saved draft and reopen
+// the composer, now connected — the user just taps Post.
+(async () => {
+  let pend = null;
+  try { pend = sessionStorage.getItem('x-share-pending'); } catch (_) {}
+  if (!pend) return;
+  try { sessionStorage.removeItem('x-share-pending'); } catch (_) {}
+  let p; try { p = JSON.parse(pend); } catch (_) { return; }
+  if (!p || !p.shareId) return;
+  await fetchXStatus();
+  if (!_xStatus || !_xStatus.connected) return;
+  _xShareEnabled = true; // a connected session implies the server has X configured
+  const cardUrl = p.cardUrl || `${location.origin}/s/${p.shareId}`;
+  _shareState = { blob: null, url: null, fname: 'theblock.webp', intent: null, shareId: p.shareId, text: p.text || '', cardUrl };
+  if (sharePanelImg) { sharePanelImg.src = `${cardUrl}.webp`; sharePanelImg.style.display = 'block'; }
+  if (sharePanelTextEl) sharePanelTextEl.value = p.text || '';
+  if (sharePanelHintEl) sharePanelHintEl.textContent = 'Connected — tap Post to X to publish.';
+  updateXShareButton();
+  if (sharePanelEl) { sharePanelEl.classList.add('open'); sharePanelEl.setAttribute('aria-hidden', 'false'); }
+})();
 
 if (cubeDetailShareBtn) cubeDetailShareBtn.addEventListener('click', shareCubeOnX);
 if (shareDownloadBtn) shareDownloadBtn.addEventListener('click', () => {
@@ -4063,6 +4096,28 @@ function frame() {
 
   drawScene(sceneItems, mainCam, t);
 
+  // MAIN-VIEW screenshot — read RIGHT HERE, after the main scene and before the
+  // minimap/detail scissor passes paint their corners into the framebuffer, so
+  // the capture is exactly the big view (all mobile shares + desktop POST VIEW).
+  if (_captureRequest && !_captureRequest.done && _captureRequest.mode === 'main') {
+    const req = _captureRequest; req.done = true; _captureRequest = null;
+    try {
+      const w2 = canvas.width, h2 = canvas.height;
+      const px = new Uint8Array(w2 * h2 * 4);
+      gl.readPixels(0, 0, w2, h2, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const c = document.createElement('canvas'); c.width = w2; c.height = h2;
+      const ctx2 = c.getContext('2d');
+      const img2 = ctx2.createImageData(w2, h2);
+      const rowBytes = w2 * 4;
+      for (let row = 0; row < h2; row++) {
+        const src = (h2 - 1 - row) * rowBytes;
+        img2.data.set(px.subarray(src, src + rowBytes), row * rowBytes);
+      }
+      ctx2.putImageData(img2, 0, 0);
+      c.toBlob(b => b ? req.resolve(b) : req.reject(new Error('toBlob failed')), 'image/webp', 0.92);
+    } catch (err) { req.reject(err); }
+  }
+
   let mapVP = null;
   let mapRectScreen = null;
   lastMapRect = null; // cleared each frame; set only when the minimap actually draws (below)
@@ -4113,7 +4168,8 @@ function frame() {
       drawScene(detailSceneItems, detailCam, t);
       // Snapshot the cube view for the "Share on X" flow: read this viewport straight from the
       // framebuffer (robust vs toDataURL), flip GL's bottom-up rows, and hand back a WebP blob.
-      if (_captureRequest && !_captureRequest.done) {
+      // ONLY detail-mode requests — main-view screenshots are answered below.
+      if (_captureRequest && !_captureRequest.done && _captureRequest.mode !== 'main') {
         const req = _captureRequest; req.done = true; _captureRequest = null;
         try {
           const px = new Uint8Array(w * h * 4);
@@ -4133,29 +4189,6 @@ function frame() {
       updateAxisGizmo(cubeDetailAxisEl, detailCam, 24);
       gl.disable(gl.SCISSOR_TEST);
     }
-  }
-
-  // MAIN-VIEW screenshot: "whatever is on screen, post it" — read the whole
-  // framebuffer as rendered this frame (the 3D view; DOM chrome isn't in the
-  // canvas, which is exactly right for sharing). Used by all mobile shares and
-  // the desktop POST VIEW button.
-  if (_captureRequest && !_captureRequest.done && _captureRequest.mode === 'main') {
-    const req = _captureRequest; req.done = true; _captureRequest = null;
-    try {
-      const w2 = canvas.width, h2 = canvas.height;
-      const px = new Uint8Array(w2 * h2 * 4);
-      gl.readPixels(0, 0, w2, h2, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      const c = document.createElement('canvas'); c.width = w2; c.height = h2;
-      const ctx2 = c.getContext('2d');
-      const img2 = ctx2.createImageData(w2, h2);
-      const rowBytes = w2 * 4;
-      for (let row = 0; row < h2; row++) {
-        const src = (h2 - 1 - row) * rowBytes;
-        img2.data.set(px.subarray(src, src + rowBytes), row * rowBytes);
-      }
-      ctx2.putImageData(img2, 0, 0);
-      c.toBlob(b => b ? req.resolve(b) : req.reject(new Error('toBlob failed')), 'image/webp', 0.92);
-    } catch (err) { req.reject(err); }
   }
 
   gl.disable(gl.BLEND);
