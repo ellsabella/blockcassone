@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-3';
+const VIEWER_BUILD = '20260824-4';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1459,11 +1459,19 @@ async function shareCubeOnX() {
   catch (err) { log(`cube snapshot failed: ${err.message}`); }
 
   // MOBILE: native share sheet carries image + text straight to the X app.
+  // Mobile now uses the SAME single-flow composer panel as desktop: the direct
+  // API post is the only path that GUARANTEES image + link land in the tweet
+  // (the X app's native share sheet silently drops attached files when text
+  // rides along — the "no image, no link" bug). Native share remains only as
+  // the fallback when the server has no X credentials, and then it carries the
+  // card URL so at least the link survives.
   const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (isMobile && blob && navigator.canShare) {
+  if (isMobile && !_xShareEnabled && blob && navigator.canShare) {
+    let nativeCardUrl = null;
+    try { nativeCardUrl = (await uploadShareImage(blob, slot)).cardUrl; } catch (_) {}
     const file = new File([blob], fname, { type: 'image/webp' });
     if (navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], text }); return; }
+      try { await navigator.share({ files: [file], text, url: nativeCardUrl || undefined }); return; }
       catch (err) { if (err && err.name === 'AbortError') return; /* else fall through to panel */ }
     }
   }
@@ -2928,7 +2936,8 @@ function bigModeDimForMotif(motifIdx) {
   // (deep background) keep their existing levels.
   const ownDim = () => {
     const me = _rebuildWalletAddr;
-    return me && ownerAddressForSlot(motifIdx) === me ? 0.85 : 0.25;
+    if (!me) return 0.7; // no wallet connected: showcase brightness, not owner-dim gloom
+    return ownerAddressForSlot(motifIdx) === me ? 0.85 : 0.25;
   };
   if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
     return regionIndexForMotif(motifIdx) === selectedRegionIdx ? ownDim() : 0.16;

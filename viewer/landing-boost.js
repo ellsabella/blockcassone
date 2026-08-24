@@ -34,8 +34,11 @@
     if (started) return; started = true;
     frame.src = '/viewer/';
   }
-  if (document.readyState === 'complete') setTimeout(startPreload, 600);
-  else window.addEventListener('load', function () { setTimeout(startPreload, 600); });
+  // Start after first paint (DOMContentLoaded + a beat) — NOT the window load
+  // event, which the landing's video can delay by many seconds, leaving nothing
+  // preloaded when ENTER is clicked.
+  if (document.readyState !== 'loading') setTimeout(startPreload, 400);
+  else document.addEventListener('DOMContentLoaded', function () { setTimeout(startPreload, 400); });
   // Failsafe: if ENTER is clicked before the preload started, start it right then.
 
   var btn = document.getElementById('enter');
