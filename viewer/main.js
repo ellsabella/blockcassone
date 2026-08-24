@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-8';
+const VIEWER_BUILD = '20260824-9';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -2988,8 +2988,8 @@ function bigModeDimForMotif(motifIdx) {
   const ownDim = () => {
     const me = _rebuildWalletAddr;
     if (!me) return 0.7; // no wallet connected: showcase brightness, not owner-dim gloom
-    // Mobile floor 0.5: 0.25 reads near-black on phone panels at small cube sizes.
-    return ownerAddressForSlot(motifIdx) === me ? 0.85 : (MOBILE ? 0.5 : 0.25);
+    // Mobile floor 0.65: phone panels crush the low end — 0.25/0.5 read near-black.
+    return ownerAddressForSlot(motifIdx) === me ? 0.85 : (MOBILE ? 0.65 : 0.25);
   };
   if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
     return regionIndexForMotif(motifIdx) === selectedRegionIdx ? ownDim() : 0.16;
@@ -3113,9 +3113,8 @@ function detailedEmptyMotifSet() {
   // calls/frame + a ~43-pass scaffold fill on cold entry. Detailed biomes render at
   // the close scopes (street/neighbourhood, ≤64 slots), which is where they read.
   if (mainViewScope === 'region') return new Set();
-  // Mobile: detailed biomes only at street scope (≤8 slots) — 64 biomes is still
-  // ~1k draw calls, too much for phone GPUs.
-  if (MOBILE && mainViewScope !== 'street') return new Set();
+  // Mobile now matches desktop (biomes at street + neighbourhood; cloud beyond):
+  // the LOD budget + GPU eviction cover the cost, and biome-less views read empty.
   return motifSetForRange(mainScopeStart(), mainScopeCount());
 }
 
@@ -3568,9 +3567,9 @@ function rebuildScene() {
   miniMapSceneItems.push(...buildMiniMapOverlayItems());
 
   _mark(); // phase 2: all item building done
-  // Mobile: drop the pure-halo additive glow duplicates (each is a second pass
-  // over the same lines) — roughly halves the additive draw count on phones.
-  if (MOBILE) sceneItems = sceneItems.filter(it => it.material !== 'normie-glow');
+  // (Mobile used to drop the normie-glow halo passes — restored: with the LOD
+  // budget + GPU eviction the phone affords them, and without them the plane
+  // edges read flat and dim.)
   const cnt = {};
   for (const it of sceneItems) cnt[it.material] = (cnt[it.material] || 0) + 1;
   log(`scene: ${sceneItems.length} items | ${Object.entries(cnt).map(([m, n]) => `${m}=${n}`).join(', ')}`);
