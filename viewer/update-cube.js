@@ -30,7 +30,11 @@ const state = { owned: [], cube: null, proposal: null, holding: false,
 
   let flags = null;
   try { flags = await contractFlags(); } catch { flags = null; }
-  if (flags && flags.customizesEnabled === false) { showGate(); return; } // definitively off -> hide
+  // ?preview=1 skips the UI hide for design/dev work — the contract still
+  // rejects any actual commit while customizesEnabled is off, so this only
+  // reveals the page, it cannot enable the mechanic.
+  const _previewGate = (() => { try { return new URLSearchParams(location.search).has('preview'); } catch (_) { return false; } })();
+  if (!_previewGate && flags && flags.customizesEnabled === false) { showGate(); return; } // definitively off -> hide
 
   let cfg = {};
   try { cfg = await (await fetch('/data/chain-config.json', { cache: 'no-store' })).json(); } catch {}
