@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-5';
+const VIEWER_BUILD = '20260824-6';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1407,12 +1407,12 @@ function buildShareText(motifIdx) {
 
 // Ask the render loop to snapshot the cube-detail viewport on its next frame → WebP Blob.
 let _captureRequest = null;
-function captureCubeDetailImage() {
+function captureCubeDetailImage(mode = 'detail') {
   return new Promise((resolve, reject) => {
-    if (!cubeDetailOpen || selectedMotifIdx === null || selectedMotifIdx === undefined) {
+    if (mode === 'detail' && (!cubeDetailOpen || selectedMotifIdx === null || selectedMotifIdx === undefined)) {
       reject(new Error('no cube open')); return;
     }
-    const req = { resolve, reject, done: false };
+    const req = { resolve, reject, done: false, mode };
     _captureRequest = req;
     setTimeout(() => {
       if (!req.done) { req.done = true; if (_captureRequest === req) _captureRequest = null; reject(new Error('snapshot timed out')); }
@@ -1448,14 +1448,20 @@ function closeSharePanel() {
 // Clicking Share captures the cube view + uploads it, then opens a panel with the image, the post
 // text, a Download button, and a Post-on-X button (opens X with text + the card URL → image unfurls).
 // On mobile it first tries the native share sheet (image + text → X app) for a true one-tap.
-async function shareCubeOnX() {
-  if (selectedMotifIdx === null || selectedMotifIdx === undefined) return;
-  const slot = selectedMotifIdx;
-  const text = buildShareText(slot);
+async function shareCubeOnX(mode) {
+  // mode 'detail' = the cube-detail viewport render (desktop panel share);
+  // mode 'main'   = a SCREENSHOT of the main view exactly as on screen
+  //                 (all mobile shares + the desktop POST VIEW button).
+  mode = mode || (MOBILE ? 'main' : 'detail');
+  if (mode === 'detail' && (selectedMotifIdx === null || selectedMotifIdx === undefined)) return;
+  const slot = selectedMotifIdx ?? 0; // card record needs a slot; 0 = generic view
+  const text = (selectedMotifIdx !== null && selectedMotifIdx !== undefined)
+    ? buildShareText(slot)
+    : 'THE BLOCK\n\nby @bright_lightart';
   const fname = `theblock-cube-${String(slot).padStart(4, '0')}.webp`;
 
   let blob = null;
-  try { blob = await captureCubeDetailImage(); }
+  try { blob = await captureCubeDetailImage(mode); }
   catch (err) { log(`cube snapshot failed: ${err.message}`); }
 
   // MOBILE: native share sheet carries image + text straight to the X app.
@@ -4129,35 +4135,27 @@ function frame() {
     }
   }
 
-  // MOBILE snapshot path: the desktop detail panel is display:none (rect 0x0),
-  // so the block above never runs — captures timed out and the share flow fell
-  // back to the empty composer draft. Render the detail scene one-off into a
-  // square corner viewport (hidden under the bottom sheet) and read that.
-  if (MOBILE && _captureRequest && !_captureRequest.done && cubeDetailOpen && detailSceneItems.length > 0) {
+  // MAIN-VIEW screenshot: "whatever is on screen, post it" — read the whole
+  // framebuffer as rendered this frame (the 3D view; DOM chrome isn't in the
+  // canvas, which is exactly right for sharing). Used by all mobile shares and
+  // the desktop POST VIEW button.
+  if (_captureRequest && !_captureRequest.done && _captureRequest.mode === 'main') {
     const req = _captureRequest; req.done = true; _captureRequest = null;
     try {
-      recentreDetailOrbit(); // frame the selected cube for the shot
-      const size = Math.min(canvas.width, canvas.height, 1024);
-      gl.enable(gl.SCISSOR_TEST);
-      gl.viewport(0, 0, size, size);
-      gl.scissor(0, 0, size, size);
-      gl.clearColor(0.015, 0.016, 0.02, 1.0);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      drawScene(detailSceneItems, detailOrbit.camera(1), t);
-      const px = new Uint8Array(size * size * 4);
-      gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      gl.disable(gl.SCISSOR_TEST);
-      const c = document.createElement('canvas'); c.width = size; c.height = size;
+      const w2 = canvas.width, h2 = canvas.height;
+      const px = new Uint8Array(w2 * h2 * 4);
+      gl.readPixels(0, 0, w2, h2, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const c = document.createElement('canvas'); c.width = w2; c.height = h2;
       const ctx2 = c.getContext('2d');
-      const img2 = ctx2.createImageData(size, size);
-      const rowBytes = size * 4;
-      for (let row = 0; row < size; row++) {
-        const src = (size - 1 - row) * rowBytes;
+      const img2 = ctx2.createImageData(w2, h2);
+      const rowBytes = w2 * 4;
+      for (let row = 0; row < h2; row++) {
+        const src = (h2 - 1 - row) * rowBytes;
         img2.data.set(px.subarray(src, src + rowBytes), row * rowBytes);
       }
       ctx2.putImageData(img2, 0, 0);
       c.toBlob(b => b ? req.resolve(b) : req.reject(new Error('toBlob failed')), 'image/webp', 0.92);
-    } catch (err) { try { gl.disable(gl.SCISSOR_TEST); } catch (_) {} req.reject(err); }
+    } catch (err) { req.reject(err); }
   }
 
   gl.disable(gl.BLEND);
@@ -4368,6 +4366,18 @@ function initMobileUI() {
   } catch (_) {}
 }
 if (MOBILE) initMobileUI();
+
+// Desktop: POST VIEW — share a screenshot of the CURRENT main view. Wide
+// compositions (streets, regions, the full block) are share-worthy, not just
+// single cubes from the detail panel.
+if (!MOBILE) {
+  const svb = document.createElement('button');
+  svb.id = 'share-view-btn';
+  svb.textContent = 'POST VIEW';
+  svb.title = 'Share a snapshot of this view on X';
+  document.body.appendChild(svb);
+  svb.addEventListener('click', () => shareCubeOnX('main'));
+}
 
 rebuildScene();  // Initial scaffold before first frame.
 requestAnimationFrame(() => {
