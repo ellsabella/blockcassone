@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-4';
+const VIEWER_BUILD = '20260824-5';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -2937,7 +2937,8 @@ function bigModeDimForMotif(motifIdx) {
   const ownDim = () => {
     const me = _rebuildWalletAddr;
     if (!me) return 0.7; // no wallet connected: showcase brightness, not owner-dim gloom
-    return ownerAddressForSlot(motifIdx) === me ? 0.85 : 0.25;
+    // Mobile floor 0.5: 0.25 reads near-black on phone panels at small cube sizes.
+    return ownerAddressForSlot(motifIdx) === me ? 0.85 : (MOBILE ? 0.5 : 0.25);
   };
   if (selectedRegionIdx !== null && selectedRegionIdx !== undefined) {
     return regionIndexForMotif(motifIdx) === selectedRegionIdx ? ownDim() : 0.16;
@@ -4126,6 +4127,37 @@ function frame() {
       updateAxisGizmo(cubeDetailAxisEl, detailCam, 24);
       gl.disable(gl.SCISSOR_TEST);
     }
+  }
+
+  // MOBILE snapshot path: the desktop detail panel is display:none (rect 0x0),
+  // so the block above never runs — captures timed out and the share flow fell
+  // back to the empty composer draft. Render the detail scene one-off into a
+  // square corner viewport (hidden under the bottom sheet) and read that.
+  if (MOBILE && _captureRequest && !_captureRequest.done && cubeDetailOpen && detailSceneItems.length > 0) {
+    const req = _captureRequest; req.done = true; _captureRequest = null;
+    try {
+      recentreDetailOrbit(); // frame the selected cube for the shot
+      const size = Math.min(canvas.width, canvas.height, 1024);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.viewport(0, 0, size, size);
+      gl.scissor(0, 0, size, size);
+      gl.clearColor(0.015, 0.016, 0.02, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      drawScene(detailSceneItems, detailOrbit.camera(1), t);
+      const px = new Uint8Array(size * size * 4);
+      gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      gl.disable(gl.SCISSOR_TEST);
+      const c = document.createElement('canvas'); c.width = size; c.height = size;
+      const ctx2 = c.getContext('2d');
+      const img2 = ctx2.createImageData(size, size);
+      const rowBytes = size * 4;
+      for (let row = 0; row < size; row++) {
+        const src = (size - 1 - row) * rowBytes;
+        img2.data.set(px.subarray(src, src + rowBytes), row * rowBytes);
+      }
+      ctx2.putImageData(img2, 0, 0);
+      c.toBlob(b => b ? req.resolve(b) : req.reject(new Error('toBlob failed')), 'image/webp', 0.92);
+    } catch (err) { try { gl.disable(gl.SCISSOR_TEST); } catch (_) {} req.reject(err); }
   }
 
   gl.disable(gl.BLEND);
