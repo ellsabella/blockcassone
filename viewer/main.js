@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-1';
+const VIEWER_BUILD = '20260824-2';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -119,7 +119,9 @@ function log(msg) {
 // smaller render budgets (used throughout).
 const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 const gl = canvas.getContext('webgl2', {
-  alpha: false, antialias: !MOBILE, premultipliedAlpha: false, preserveDrawingBuffer: false,
+  // Antialias everywhere: the art is thin neon lines — unsmoothed they read as
+  // fuzz. The LOD budget keeps mobile draw counts low enough to afford it.
+  alpha: false, antialias: true, premultipliedAlpha: false, preserveDrawingBuffer: false,
 });
 if (!gl) {
   document.body.innerHTML = '<pre style="color:#f66;padding:2em">WebGL 2 not available.</pre>';
@@ -144,7 +146,9 @@ canvas.addEventListener('webglcontextlost', (e) => {
 let _walkFixed = false; // ?walk mode owns a fixed 1920×1080 backing store for clean 16:9 capture
 function resize() {
   if (_walkFixed) return;
-  const dpr = Math.min(window.devicePixelRatio || 1, MOBILE ? 1.5 : 2);
+  // Mobile renders at (near-)native DPR — 1.5 on a 3x display halved the
+  // resolution and read as "fuzzy". The LOD budget carries the pixel cost.
+  const dpr = Math.min(window.devicePixelRatio || 1, MOBILE ? 2.5 : 2);
   const w = Math.floor(canvas.clientWidth * dpr);
   const h = Math.floor(canvas.clientHeight * dpr);
   if (canvas.width !== w || canvas.height !== h) {

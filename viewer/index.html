@@ -115,6 +115,10 @@
     #m-chips .m-chip.owner i { width: 7px; height: 7px; border-radius: 50%; background: #3cff78; }
     #m-chips .m-chip.active { color: #fff; background: rgba(72,72,88,0.95); border-color: #ff7dcc; box-shadow: 0 0 14px rgba(255,58,184,0.32); }
     #m-hint { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 20; padding: 8px 16px; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #cabcd4; background: rgba(10,8,12,0.6); border: 1px solid rgba(255,58,184,0.28); transition: opacity .8s ease; }
+    /* Modals (share panel etc.) must sit ABOVE the bottom sheet on mobile, and
+       stay scrollable on short screens. */
+    body.is-mobile .modal { z-index: 45; }
+    body.is-mobile .modal .modal-panel { max-height: 86vh; overflow-y: auto; }
     /* Current-view label, centred in the header — same aesthetic as the nav links:
        hero pixel font, pale, pink glow. */
     #view-label {
@@ -996,8 +1000,8 @@
   <script src="/public/linestyles.js"></script>
   <script src="/public/planes.js"></script>
   <script src="/public/blocks.js"></script>
-  <script src="/viewer/vendor/wallet-widget.js?v=20260824-1" defer></script>
-  <script type="module" src="./main.js?v=20260824-1"></script>
-  <script type="module" src="./nav-gate.js?v=20260824-1"></script>
+  <script src="/viewer/vendor/wallet-widget.js?v=20260824-2" defer></script>
+  <script type="module" src="./main.js?v=20260824-2"></script>
+  <script type="module" src="./nav-gate.js?v=20260824-2"></script>
 </body>
 </html>
