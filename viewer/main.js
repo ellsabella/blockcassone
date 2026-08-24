@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-2';
+const VIEWER_BUILD = '20260824-3';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -148,7 +148,9 @@ function resize() {
   if (_walkFixed) return;
   // Mobile renders at (near-)native DPR — 1.5 on a 3x display halved the
   // resolution and read as "fuzzy". The LOD budget carries the pixel cost.
-  const dpr = Math.min(window.devicePixelRatio || 1, MOBILE ? 2.5 : 2);
+  // 2.0 on mobile: crisp on 2-3x displays without the 2.5x framebuffer+MSAA
+  // memory that risks GPU context loss on phones.
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.floor(canvas.clientWidth * dpr);
   const h = Math.floor(canvas.clientHeight * dpr);
   if (canvas.width !== w || canvas.height !== h) {
@@ -1786,11 +1788,18 @@ function focusCubeAndOwner(cube) {
   ownerFocusEnabled = true;
   setOwnerFocusAddress(cube.wallet);
   updateOwnerFocusButton();
-  // Frame the cube's NEIGHBOURHOOD (its populated cluster), not the whole world — so we
-  // start focused on a real cube in context, never aimlessly scrolling an open world.
-  mainViewScope = 'neighbourhood';
-  selectedStreetIdx = null;
-  selectedNeighbourhoodIdx = neighbourhoodIndexForMotif(cube.slot);
+  // Frame the cube's populated cluster, not the whole world — never aimlessly
+  // scrolling an open world. Mobile starts one level TIGHTER (street): fewer
+  // items on a small screen, and the composition reads better at phone scale.
+  if (MOBILE) {
+    mainViewScope = 'street';
+    selectedStreetIdx = streetIndexForMotif(cube.slot);
+    selectedNeighbourhoodIdx = null;
+  } else {
+    mainViewScope = 'neighbourhood';
+    selectedStreetIdx = null;
+    selectedNeighbourhoodIdx = neighbourhoodIndexForMotif(cube.slot);
+  }
   selectedRegionIdx = null;
   updateScopeButtons();
   openCubeDetail(cube.slot, { preserveStreet: true }); // keep the neighbourhood scope + selection
@@ -2317,6 +2326,8 @@ function clearGeneratedMeshes() {
   _emptySlotCache.clear();
   _builtFullArt.clear(); // full-art meshes are gone too — rebuild them budgeted
   _motifItemCache.clear(); // cached item arrays reference the deleted meshes
+  _motifMeshKeys.clear();
+  _motifLastUse.clear();
 }
 
 // ---------- Materials ----------
@@ -3137,23 +3148,60 @@ const _PROF = (() => { try { return new URLSearchParams(location.search).has('pr
 // cached separately; this caches the item arrays wrapping them.
 const _motifItemCache = new Map(); // `${motif}:${cat}:${agentic}` -> items[]
 let _motifItemCtx = null;          // cubeCtxMap of the CURRENT rebuild (set below)
+// GPU LRU (the long-flagged leak): record which mesh keys each full-art motif
+// created, stamp last use, and dispose the least-recently-shown motifs' GL
+// resources past a cap — GPU memory no longer grows monotonically with touring
+// (phones were hitting context loss / black screens).
+const _motifMeshKeys = new Map(); // motifIdx -> mesh keys created for it
+const _motifLastUse = new Map();  // motifIdx -> monotonic use tick
+let _useTick = 0;
+const FULL_ART_GPU_CAP = MOBILE ? 36 : 220;
+
 function pushFullArtCube(itemsOut, motifIdx, dimVal) {
   const cat = ensureMotifCategory(motifIdx);
   const ag = isAgenticNonNormieCube(motifIdx);
   const key = `${motifIdx}:${cat}:${ag}`;
   let items = _motifItemCache.get(key);
   if (!items) {
+    const before = new Set(Object.keys(meshes));
     items = [];
     pushMotifItems(items, motifIdx, '3D', 1.0);
     const ctx = _motifItemCtx ? _motifItemCtx[motifIdx] : undefined;
     for (const plane of planesForMotif(motifIdx)) {
       pushPlaneItems(items, plane, 'BIG', ctx, 1.0);
     }
-    if (_motifItemCache.size >= 512) _motifItemCache.clear(); // simple bound; rebuilt budgeted
+    const created = [];
+    for (const k of Object.keys(meshes)) if (!before.has(k)) created.push(k);
+    if (created.length) _motifMeshKeys.set(motifIdx, [...(_motifMeshKeys.get(motifIdx) || []), ...created]);
     _motifItemCache.set(key, items);
   }
+  _motifLastUse.set(motifIdx, ++_useTick);
   for (const it of items) it.dim = dimVal;
   itemsOut.push(...items);
+}
+
+function evictFullArtGpu(keepSet) {
+  if (_motifMeshKeys.size <= FULL_ART_GPU_CAP) return;
+  const candidates = [..._motifMeshKeys.keys()]
+    .filter(m => !keepSet.has(m))
+    .sort((a, b) => (_motifLastUse.get(a) || 0) - (_motifLastUse.get(b) || 0));
+  let toDrop = _motifMeshKeys.size - FULL_ART_GPU_CAP;
+  for (const m of candidates) {
+    if (toDrop-- <= 0) break;
+    for (const k of _motifMeshKeys.get(m) || []) {
+      const v = meshes[k];
+      if (v && typeof WebGLTexture !== 'undefined' && v instanceof WebGLTexture) {
+        try { gl.deleteTexture(v); } catch (_) {}
+      } else if (v) {
+        disposeMeshGL(gl, v);
+      }
+      delete meshes[k];
+    }
+    _motifMeshKeys.delete(m);
+    _motifLastUse.delete(m);
+    _builtFullArt.delete(m);
+    for (const ck of [..._motifItemCache.keys()]) if (ck.startsWith(`${m}:`)) _motifItemCache.delete(ck);
+  }
 }
 
 // Coalesce rebuilds: data-ready callbacks (wallet / mint / normie pixels /
@@ -3272,6 +3320,7 @@ function rebuildScene() {
   for (const motifIdx of fullArtworkMotifs) {
     pushFullArtCube(sceneItems, motifIdx, bigModeDimForMotif(motifIdx));
   }
+  evictFullArtGpu(fullArtworkMotifs); // free GL resources of long-unseen cubes
 
   // Light markers — once in any non-2D mode, anchored to the active cube.
   if (mode !== '2D' && showLightMarkers) {
@@ -4150,6 +4199,18 @@ function initMobileUI() {
   const chips = document.createElement('div');
   chips.id = 'm-chips';
   document.body.appendChild(chips);
+
+  // Scope stepper: explicit zoom-level buttons (pinch-through-limits also works,
+  // but discoverable buttons make navigation reliable on small screens).
+  const scopeBtns = document.createElement('div');
+  scopeBtns.id = 'm-scope';
+  scopeBtns.innerHTML =
+    `<button class="m-iconbtn" aria-label="Closer view">${svgIcon('<circle cx="9" cy="9" r="6"></circle><path d="M13.5 13.5 L18 18"></path><path d="M9 6v6"></path><path d="M6 9h6"></path>')}</button>` +
+    `<button class="m-iconbtn" aria-label="Wider view">${svgIcon('<circle cx="9" cy="9" r="6"></circle><path d="M13.5 13.5 L18 18"></path><path d="M6 9h6"></path>')}</button>`;
+  document.body.appendChild(scopeBtns);
+  const scopeButtons = scopeBtns.querySelectorAll('button');
+  scopeButtons[0].addEventListener('click', () => stepScope(-1)); // + : tighter (…→street)
+  scopeButtons[1].addEventListener('click', () => stepScope(+1)); // − : wider (…→block)
 
   let cubeNftAddr = '';
   fetch('/data/chain-config.json').then(r => r.json()).then(c => { cubeNftAddr = String(c.cubeNft || ''); }).catch(() => {});
