@@ -78,7 +78,7 @@ export function createOrbitCamera(canvas, opts = {}) {
   // preventDefault suppresses the browser's synthetic mouse events, so short taps
   // are re-synthesized as mousedown/mouseup for the existing selection handlers.
   let touchMode = null; // 'rotate' | 'pinch'
-  let lastDist = 0, lastMidX = 0, lastMidY = 0;
+  let lastDist = 0, lastMidX = 0, lastMidY = 0, _pinchStepAt = 0;
   let tapX = 0, tapY = 0, tapT = 0, tapMoved = false;
   const pan = (dx, dy) => {
     const sp = Math.sin(state.pitch), cp = Math.cos(state.pitch);
@@ -122,8 +122,15 @@ export function createOrbitCamera(canvas, opts = {}) {
     } else if (touchMode === 'pinch' && e.touches.length >= 2) {
       const a = e.touches[0], b = e.touches[1];
       const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
-      state.distance *= lastDist / dist;
-      state.distance = Math.max(state.minDist, Math.min(state.maxDist, state.distance));
+      const want = state.distance * (lastDist / dist);
+      // Pinch-through-the-limits steps the view SCOPE (mobile navigation):
+      // keep pinching out past max zoom → wider scope; in past min → tighter.
+      if (opts.onPinchStep) {
+        const now = Date.now();
+        if (want > state.maxDist * 1.12 && now - _pinchStepAt > 700) { _pinchStepAt = now; opts.onPinchStep(+1); }
+        else if (want < state.minDist * 0.88 && now - _pinchStepAt > 700) { _pinchStepAt = now; opts.onPinchStep(-1); }
+      }
+      state.distance = Math.max(state.minDist, Math.min(state.maxDist, want));
       lastDist = dist;
       const midX = (a.clientX + b.clientX) / 2, midY = (a.clientY + b.clientY) / 2;
       pan(midX - lastMidX, midY - lastMidY);

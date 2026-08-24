@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260823-4';
+const VIEWER_BUILD = '20260824-1';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -333,6 +333,7 @@ let selectedRegionIdx = null;
 let ownerFocusEnabled = false;
 let ownerFocusAddress = '';
 let _ownerInvKey = ''; // owner-inventory diff key (declared here: the fn runs during module init)
+let _mSheetShow = null, _mSheetHide = null; // mobile bottom-sheet hooks (set by initMobileUI)
 let ownerFocusLabelVersion = 0;
 let ownerFocusMotifCache = new Set();
 const lightsSelectedEl = document.getElementById('lights-selected');
@@ -1331,6 +1332,7 @@ function openCubeDetail(motifIdx, { preserveStreet = false } = {}) {
   highlightInventorySlot(motifIdx);
   updateStreetStats();
   setOrbitTargetToSelection();
+  if (_mSheetShow) _mSheetShow(); // mobile bottom sheet follows the selection
   scheduleRebuild(); // coalesces with callers that rebuild right after (focus flows)
 }
 
@@ -1376,6 +1378,7 @@ function closeCubeDetail() {
   updateSvgThumb(null);
   cubeDetailOpen = false;
   updateStreetStats();
+  if (_mSheetHide) _mSheetHide();
   // Scheduled (not sync): callers that rebuild right after (deselect click,
   // focus flows) coalesce to ONE rebuild — rebuildScene() cancels this.
   scheduleRebuild();
@@ -2494,6 +2497,7 @@ function eventInWorldMap(e) {
 const orbit = createOrbitCamera(canvas, {
   distance: 3.5,
   shouldHandleEvent: e => !eventInCubeDetail(e) && !eventInWorldMap(e),
+  onPinchStep: (dir) => { if (MOBILE) stepScope(dir); }, // pinch past the limits = scope step
 });
 const detailOrbit = createOrbitCamera(canvas, {
   distance: 3.5,
@@ -4070,6 +4074,195 @@ function frame() {
   requestAnimationFrame(frame);
 }
 log('entering render loop');
+// ---------- Mobile UI: slim top bar + full-screen menu + bottom sheet + chips ----------
+// Desktop is untouched: everything here runs only under the MOBILE profile, and
+// the desktop panels are hidden via body.is-mobile CSS.
+function initMobileUI() {
+  document.body.classList.add('is-mobile');
+  const svgIcon = (paths, size = 20) =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" fill="none" stroke="currentColor" stroke-width="2">${paths}</svg>`;
+
+  // Top bar: hamburger (left) + wallet (right); the view-label stays centred.
+  const hud = document.getElementById('hud');
+  const menuBtn = document.createElement('button');
+  menuBtn.className = 'm-iconbtn';
+  menuBtn.setAttribute('aria-label', 'Menu');
+  menuBtn.innerHTML = svgIcon('<path d="M2 5h16"></path><path d="M2 10h16"></path><path d="M2 15h16"></path>') + '<span class="m-dot"></span>';
+  const walletBtn = document.createElement('button');
+  walletBtn.className = 'm-iconbtn wallet';
+  walletBtn.setAttribute('aria-label', 'Wallet');
+  walletBtn.innerHTML = svgIcon('<rect x="2" y="5" width="16" height="11" rx="1"></rect><path d="M13 10.5h3"></path><path d="M5 5V4a1.5 1.5 0 0 1 1.5-1.5H14"></path>');
+  if (hud) { hud.insertBefore(menuBtn, hud.firstChild); hud.appendChild(walletBtn); }
+
+  // Full-screen menu (the wallet widget node is MOVED here — React root survives).
+  const menu = document.createElement('div');
+  menu.id = 'm-menu';
+  menu.innerHTML =
+    `<button class="m-iconbtn m-close" aria-label="Close">${svgIcon('<path d="M4 4 L16 16"></path><path d="M16 4 L4 16"></path>')}</button>` +
+    '<div class="m-brand">THE BLOCK</div>' +
+    '<a class="m-item current" href="/viewer/">EXPLORER <span class="m-cur">CURRENT</span></a>' +
+    '<a class="m-item" href="/about">ABOUT</a>' +
+    '<a class="m-item" href="https://opensea.io/collection/theblock-by-ella/overview" target="_blank" rel="noopener">OPENSEA &#8599;</a>' +
+    '<div class="m-wallet"></div>' +
+    '<button class="m-mycubes">MY CUBES</button>' +
+    '<div class="m-foot">4096 CUBES &middot; ONE BLOCK &middot; 100% ONCHAIN</div>';
+  document.body.appendChild(menu);
+  const wcNode = document.getElementById('wallet-connect');
+  if (wcNode) menu.querySelector('.m-wallet').appendChild(wcNode);
+  const setMenu = (open) => menu.classList.toggle('open', open);
+  menuBtn.addEventListener('click', () => setMenu(true));
+  walletBtn.addEventListener('click', () => setMenu(true));
+  menu.querySelector('.m-close').addEventListener('click', () => setMenu(false));
+  menu.querySelector('a.m-item.current').addEventListener('click', (e) => { e.preventDefault(); setMenu(false); });
+  menu.querySelector('.m-mycubes').addEventListener('click', () => {
+    setMenu(false);
+    focusOwnerFirstCube(connectedAddress || MY_WALLET);
+  });
+  // Connected indicator (green dot on the hamburger)
+  setInterval(() => document.body.classList.toggle('m-connected', !!connectedAddress), 1500);
+
+  // Bottom sheet
+  const sheet = document.createElement('div');
+  sheet.id = 'm-sheet';
+  sheet.innerHTML =
+    '<div class="m-grab"><i></i></div>' +
+    '<div class="m-head"><div style="min-width:0"><div class="m-title"></div><div class="m-sub"></div></div>' +
+    `<button class="m-share" aria-label="Share on X">${svgIcon('<path d="M4 18 L18 4"></path><path d="M4 4 L18 18"></path>', 22)}</button></div>` +
+    '<div class="m-owner"><i></i><span class="m-owner-name"></span></div>' +
+    '<div class="m-detail">' +
+      '<div class="m-rows">' +
+        '<div class="m-row"><b>OWNER</b><span class="m-r-owner"></span></div>' +
+        '<div class="m-row"><b>COLLECTION</b><span class="m-r-coll"></span></div>' +
+        '<div class="m-row"><b>POSITION</b><span class="m-r-pos"></span></div>' +
+        '<div class="m-row"><b>ENVIRONMENT</b><span class="m-r-env"></span></div>' +
+      '</div>' +
+      '<div class="m-actions">' +
+        '<button class="m-post">POST TO X</button>' +
+        '<button class="m-sec m-os">VIEW ON OPENSEA &#8599;</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="m-hintline">DRAG UP FOR DETAILS &middot; SWIPE DOWN TO CLOSE</div>';
+  document.body.appendChild(sheet);
+  const chips = document.createElement('div');
+  chips.id = 'm-chips';
+  document.body.appendChild(chips);
+
+  let cubeNftAddr = '';
+  fetch('/data/chain-config.json').then(r => r.json()).then(c => { cubeNftAddr = String(c.cubeNft || ''); }).catch(() => {});
+
+  const setExpanded = (v) => {
+    sheet.classList.toggle('expanded', v);
+    document.body.classList.toggle('m-sheet-expanded', v);
+  };
+
+  function refreshSheet() {
+    const slot = selectedMotifIdx;
+    if (slot === null || slot === undefined) { _mSheetHide(); return; }
+    const cube = getMintedCubeForSlot(slot);
+    const street = streetIndexForMotif(slot);
+    const env = String(environmentForStreet(street) || '').toUpperCase();
+    const titleEl = sheet.querySelector('.m-title');
+    const subEl = sheet.querySelector('.m-sub');
+    if (cube) {
+      const n = cube.nft || {};
+      titleEl.textContent = n.isNormie
+        ? `NORMIE #${n.normieId ?? '?'}`
+        : `${String(n.cc0ProjectName || n.collection || 'SOURCE').toUpperCase()} #${n.tokenId ?? '?'}`;
+      subEl.textContent = `CUBE ${cube.cubeId} · STREET ${street} · ${env}`;
+      const short = shortAddress(cube.wallet);
+      sheet.querySelector('.m-owner-name').textContent = short;
+      sheet.querySelector('.m-r-owner').textContent = short;
+      ownerLabelFor(cube.wallet).then((label) => {
+        if (label && getMintedCubeForSlot(selectedMotifIdx)?.wallet === cube.wallet) {
+          sheet.querySelector('.m-owner-name').textContent = label;
+          sheet.querySelector('.m-r-owner').textContent = label;
+        }
+      }).catch(() => {});
+      sheet.querySelector('.m-r-coll').textContent = n.isNormie ? 'Normies' : (n.cc0ProjectName || n.collection || '?');
+      sheet.querySelector('.m-share').style.display = '';
+      // Owner chip strip
+      const owned = getMintedCubes().filter(c2 => c2.wallet === cube.wallet).sort((a, b) => a.slot - b.slot);
+      let html = `<div class="m-chip owner"><i></i>${shortAddress(cube.wallet)} (${owned.length})</div>`;
+      for (const c2 of owned.slice(0, 24)) {
+        html += `<button class="m-chip${c2.slot === slot ? ' active' : ''}" data-slot="${c2.slot}">${c2.slot}</button>`;
+      }
+      chips.innerHTML = html;
+      chips.classList.add('open');
+      const ownerChipLabel = chips.querySelector('.m-chip.owner');
+      ownerLabelFor(cube.wallet).then((label) => {
+        if (label && ownerChipLabel) ownerChipLabel.innerHTML = `<i></i>${label} (${owned.length})`;
+      }).catch(() => {});
+      for (const btn of chips.querySelectorAll('button.m-chip')) {
+        btn.addEventListener('click', () => {
+          const s2 = Number(btn.dataset.slot);
+          openCubeDetail(s2);
+          setOrbitTargetToSelection();
+          const { mn, mx } = cubeAABBFor(s2);
+          orbit.setDistance(Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) * 2.4);
+        });
+      }
+    } else {
+      titleEl.textContent = `SLOT ${slot}`;
+      subEl.textContent = `UNMINTED · STREET ${street} · ${env}`;
+      sheet.querySelector('.m-owner-name').textContent = '—';
+      sheet.querySelector('.m-r-owner').textContent = '—';
+      sheet.querySelector('.m-r-coll').textContent = '—';
+      sheet.querySelector('.m-share').style.display = 'none';
+      chips.classList.remove('open');
+    }
+    sheet.querySelector('.m-r-pos').textContent =
+      `STREET ${street} · NBHD ${neighbourhoodIndexForMotif(slot)} · REGION ${regionIndexForMotif(slot)}`;
+    sheet.querySelector('.m-r-env').textContent = env;
+    sheet.classList.add('open');
+  }
+
+  _mSheetShow = refreshSheet;
+  _mSheetHide = () => { sheet.classList.remove('open'); setExpanded(false); chips.classList.remove('open'); };
+
+  sheet.querySelector('.m-share').addEventListener('click', () => shareCubeOnX());
+  sheet.querySelector('.m-post').addEventListener('click', () => shareCubeOnX());
+  sheet.querySelector('.m-os').addEventListener('click', () => {
+    const cube = selectedMotifIdx != null ? getMintedCubeForSlot(selectedMotifIdx) : null;
+    const url = cube && cubeNftAddr
+      ? `https://opensea.io/assets/ethereum/${cubeNftAddr}/${cube.cubeId}`
+      : 'https://opensea.io/collection/theblock-by-ella/overview';
+    window.open(url, '_blank', 'noopener,noreferrer');
+  });
+
+  // Drag/tap the sheet: up = expand, down = collapse then close.
+  let dragY = null;
+  const grabZone = sheet.querySelector('.m-grab');
+  const headZone = sheet.querySelector('.m-head');
+  for (const zone of [grabZone, headZone]) {
+    zone.addEventListener('touchstart', (e) => { dragY = e.touches[0].clientY; }, { passive: true });
+    zone.addEventListener('touchend', (e) => {
+      if (dragY === null) return;
+      const dy = (e.changedTouches[0]?.clientY ?? dragY) - dragY;
+      dragY = null;
+      if (dy < -40) setExpanded(true);
+      else if (dy > 40) {
+        if (sheet.classList.contains('expanded')) setExpanded(false);
+        else closeCubeDetail();
+      }
+    });
+  }
+  grabZone.addEventListener('click', () => setExpanded(!sheet.classList.contains('expanded')));
+
+  // First-visit gesture hint
+  try {
+    if (!localStorage.getItem('m-hint-seen')) {
+      const hint = document.createElement('div');
+      hint.id = 'm-hint';
+      hint.textContent = 'PINCH TO CHANGE SCALE · TAP A CUBE';
+      document.body.appendChild(hint);
+      const dismiss = () => { hint.style.opacity = '0'; setTimeout(() => hint.remove(), 900); try { localStorage.setItem('m-hint-seen', '1'); } catch (_) {} };
+      setTimeout(dismiss, 6000);
+      canvas.addEventListener('touchstart', dismiss, { once: true });
+    }
+  } catch (_) {}
+}
+if (MOBILE) initMobileUI();
+
 rebuildScene();  // Initial scaffold before first frame.
 requestAnimationFrame(() => {
   scheduleDetailMaterialLoad();

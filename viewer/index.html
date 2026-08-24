@@ -61,6 +61,60 @@
       overflow: hidden;
     }
     .legacy-hidden { display: none !important; }
+    /* ---------- Mobile UI (body.is-mobile; DOM built by initMobileUI) ---------- */
+    body.is-mobile #site-nav, body.is-mobile #wallet-controls,
+    body.is-mobile #mode-controls, body.is-mobile #panels-toggle,
+    body.is-mobile #nav-bar, body.is-mobile #owner-inventory,
+    body.is-mobile #cube-detail, body.is-mobile #svg-thumb,
+    body.is-mobile #street-stats, body.is-mobile #world-map,
+    body.is-mobile #world-map-label, body.is-mobile #world-map-axis,
+    body.is-mobile #main-axis { display: none !important; }
+    body.is-mobile #view-label { font-size: 15px; }
+    .m-iconbtn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: rgba(24,24,28,0.86); border: 1px solid rgba(120,120,140,0.38); color: #d6d6dc; position: relative; padding: 0; }
+    .m-iconbtn.wallet { background: rgba(8,14,10,0.5); border-color: rgba(120,200,140,0.55); color: #cfeecb; }
+    .m-iconbtn .m-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: #3cff78; box-shadow: 0 0 6px rgba(60,255,120,0.9); display: none; }
+    body.m-connected .m-iconbtn .m-dot { display: block; }
+    #m-menu { position: fixed; inset: 0; z-index: 40; display: none; flex-direction: column; background: rgba(2,2,3,0.96); padding: 70px 32px 24px 32px; }
+    #m-menu.open { display: flex; }
+    #m-menu .m-brand { font-family: 'NormiesFont','Courier New',monospace; text-align: center; font-size: 26px; color: #fff; letter-spacing: .06em; margin-bottom: 34px; text-shadow: 0 0 6px rgba(255,58,184,.9), 0 0 28px rgba(255,58,184,.65), 0 0 70px rgba(255,58,184,.35); }
+    #m-menu a.m-item { font-family: 'NormiesFont','Courier New',monospace; display: flex; align-items: center; justify-content: space-between; height: 58px; font-size: 17px; color: #fff; letter-spacing: .05em; text-decoration: none; border-bottom: 2px solid transparent; text-shadow: 0 0 6px rgba(255,58,184,.9), 0 0 22px rgba(255,58,184,.6); }
+    #m-menu a.m-item.current { border-bottom-color: rgba(255,58,184,.9); }
+    #m-menu .m-cur { font-family: 'Courier New',monospace; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: #ff9adb; }
+    #m-menu .m-wallet { margin-top: 40px; display: flex; flex-direction: column; gap: 12px; }
+    #m-menu .m-close { position: absolute; top: 8px; right: 12px; }
+    #m-menu .m-mycubes { height: 48px; margin-top: 12px; font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #d9d2e0; background: rgba(10,8,12,0.66); border: 1px solid rgba(255,58,184,0.35); }
+    #m-menu .m-foot { margin-top: auto; text-align: center; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: #55555f; }
+    #m-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: none; flex-direction: column; height: 196px; background: rgba(8,6,10,0.92); border-top: 2px solid rgba(255,58,184,0.9); box-shadow: 0 -6px 30px rgba(255,58,184,0.18); padding-bottom: env(safe-area-inset-bottom); transition: height .25s ease; }
+    #m-sheet.open { display: flex; }
+    #m-sheet.expanded { height: min(560px, 78vh); }
+    #m-sheet .m-grab { display: flex; justify-content: center; padding: 8px 0 2px 0; }
+    #m-sheet .m-grab i { width: 44px; height: 4px; border-radius: 2px; background: rgba(255,125,204,0.6); }
+    #m-sheet .m-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px 0 16px; }
+    #m-sheet .m-title { font-family: 'NormiesFont','Courier New',monospace; font-size: 15px; color: #fff; letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 0 6px rgba(255,58,184,.9), 0 0 22px rgba(255,58,184,.5); }
+    #m-sheet .m-sub { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: #b6b6c2; margin-top: 6px; }
+    #m-sheet .m-share { flex-shrink: 0; width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; background: rgba(29,60,90,0.8); border: 1px solid rgba(120,200,255,0.9); color: #fff; padding: 0; }
+    #m-sheet .m-owner { display: flex; align-items: center; gap: 8px; padding: 12px 16px 0 16px; font-size: 12px; font-weight: 700; color: #cfeecb; }
+    #m-sheet .m-owner i { width: 7px; height: 7px; border-radius: 50%; background: #3cff78; }
+    #m-sheet .m-hintline { margin-top: auto; padding: 0 16px 12px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; color: #8a8a96; }
+    #m-sheet .m-detail { display: none; flex-direction: column; overflow-y: auto; }
+    #m-sheet.expanded .m-detail { display: flex; }
+    #m-sheet.expanded .m-hintline { display: none; }
+    #m-sheet .m-rows { display: flex; flex-direction: column; margin: 14px 16px 0 16px; border: 1px solid rgba(255,58,184,0.28); background: rgba(12,2,8,0.5); }
+    #m-sheet .m-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid rgba(255,58,184,0.14); }
+    #m-sheet .m-row:last-child { border-bottom: none; }
+    #m-sheet .m-row b { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: #8a8a96; }
+    #m-sheet .m-row span { font-size: 12.5px; font-weight: 700; color: #e8e8ee; }
+    #m-sheet .m-actions { display: flex; flex-direction: column; gap: 10px; margin: 14px 16px 4px 16px; }
+    #m-sheet .m-post { height: 52px; font-size: 14px; font-weight: 800; letter-spacing: .06em; color: #fff; background: rgba(29,155,240,0.6); border: 1px solid rgba(120,200,255,0.9); }
+    #m-sheet .m-sec { height: 48px; font-size: 12px; font-weight: 800; letter-spacing: .06em; color: #d9d2e0; background: rgba(10,8,12,0.66); border: 1px solid rgba(255,58,184,0.35); }
+    #m-chips { position: fixed; left: 0; right: 0; bottom: 208px; z-index: 31; display: none; gap: 8px; align-items: center; padding: 0 12px; overflow-x: auto; scrollbar-width: none; }
+    #m-chips.open { display: flex; }
+    body.m-sheet-expanded #m-chips { display: none; }
+    #m-chips .m-chip { flex-shrink: 0; height: 44px; display: flex; align-items: center; padding: 0 14px; font-size: 12px; font-weight: 700; color: #d6d6dc; background: rgba(24,24,28,0.86); border: 1px solid rgba(120,120,140,0.38); }
+    #m-chips .m-chip.owner { color: #ff9adb; background: rgba(10,8,12,0.78); border: 2px solid rgba(255,58,184,0.9); gap: 8px; }
+    #m-chips .m-chip.owner i { width: 7px; height: 7px; border-radius: 50%; background: #3cff78; }
+    #m-chips .m-chip.active { color: #fff; background: rgba(72,72,88,0.95); border-color: #ff7dcc; box-shadow: 0 0 14px rgba(255,58,184,0.32); }
+    #m-hint { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 20; padding: 8px 16px; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #cabcd4; background: rgba(10,8,12,0.6); border: 1px solid rgba(255,58,184,0.28); transition: opacity .8s ease; }
     /* Current-view label, centred in the header — same aesthetic as the nav links:
        hero pixel font, pale, pink glow. */
     #view-label {
@@ -942,8 +996,8 @@
   <script src="/public/linestyles.js"></script>
   <script src="/public/planes.js"></script>
   <script src="/public/blocks.js"></script>
-  <script src="/viewer/vendor/wallet-widget.js?v=20260823-4" defer></script>
-  <script type="module" src="./main.js?v=20260823-4"></script>
-  <script type="module" src="./nav-gate.js?v=20260823-4"></script>
+  <script src="/viewer/vendor/wallet-widget.js?v=20260824-1" defer></script>
+  <script type="module" src="./main.js?v=20260824-1"></script>
+  <script type="module" src="./nav-gate.js?v=20260824-1"></script>
 </body>
 </html>
