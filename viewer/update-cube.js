@@ -232,19 +232,20 @@ function renderStrip() {
 function renderActions(proposing) {
   const a = els.actions;
   if (!proposing) {
+    // LAUNCH SAFETY: the random CC0 pool spin (rebaseToPoolSource) is REMOVED
+    // from the UI — the pool was sized at mint opening, and post-mint pulls
+    // would drain sources the mint still needs (unfixable at contract level).
+    // Updates come exclusively from art the wallet actually holds.
     a.innerHTML = `<div class="row">
-        <button class="act" id="fromwallet">🖼 From wallet</button>
-        <button class="act spin" id="spincc0">🎲 Spin CC0</button></div>
+        <button class="act" id="fromwallet">&#128444; From wallet</button></div>
       <div class="hint">${state.cube ? 'editing #' + state.cube.cubeId + ' · changing art costs only gas' : 'select a cube to edit'}</div>`;
     $('fromwallet').onclick = () => { if (!requireCube()) return; openSheet(); };
-    $('spincc0').onclick = () => { if (!requireCube()) return; spin(); };
   } else {
     a.innerHTML = `<div class="row">
-        ${state.proposal.kind === 'cc0' ? `<button class="act spin" id="again">🎲 Spin again</button>` : ''}
         <button class="act ghost" id="discard">Discard</button></div>
       <div class="row"><button class="act primary" id="update">Update art on-chain →</button></div>
       <div class="hint">${state.proposal.kind === 'wallet' ? 'From your wallet · you confirmed rights' : 'Random CC0 pool source'}</div>`;
-    const ag = $('again'); if (ag) ag.onclick = spin;
+    // (spin-again removed with the pool-spin flow — launch safety)
     $('discard').onclick = discard;
     $('update').onclick = commit;
   }
