@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-9';
+const VIEWER_BUILD = '20260825-1';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1522,9 +1522,9 @@ async function shareCubeOnX(mode) {
   const url = blob ? URL.createObjectURL(blob) : null;
   _shareState = { blob, url, fname, intent, shareId, text, cardUrl };
   if (sharePanelImg) { sharePanelImg.src = url || ''; sharePanelImg.style.display = url ? 'block' : 'none'; }
-  // Editable draft — the panel IS the composer. Prefill includes the card link so
-  // what you see is exactly what posts (image attaches automatically on post).
-  if (sharePanelTextEl) sharePanelTextEl.value = cardUrl ? `${text}\n${cardUrl}` : text;
+  // Editable draft — the panel IS the composer. Prefill links to the OpenSEA
+  // collection (per launch decision); what you see is exactly what posts.
+  if (sharePanelTextEl) sharePanelTextEl.value = `${text}\nhttps://opensea.io/collection/theblock-by-ella/overview`;
   if (sharePanelHintEl) {
     sharePanelHintEl.textContent = 'Edit your text, then Post — the image attaches automatically.';
   }
