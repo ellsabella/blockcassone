@@ -137,7 +137,12 @@ function readChainConfig() {
   loadDotEnv(ENV_PATH, { override: true });
   const envRpc = process.env.BLOCKCASSONE_RPC_URL || process.env.BLOCKCASSONE_PROXY_RPC_URL;
   try {
-    const configPath = path.join(REPO_ROOT, 'data', 'chain-config.json');
+    // Honour the same dev-only override the static handler applies to
+    // /data/chain-config.json, so server-side eth_calls hit the same chain
+    // the browser is looking at.
+    const configPath = process.env.BLOCKCASSONE_CHAIN_CONFIG
+      ? path.join(REPO_ROOT, String(process.env.BLOCKCASSONE_CHAIN_CONFIG).replace(/^\/+/, ''))
+      : path.join(REPO_ROOT, 'data', 'chain-config.json');
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     return {
       rpcUrl: String(envRpc || parsed.rpcUrl || 'http://127.0.0.1:8545'),
@@ -1137,6 +1142,14 @@ const server = http.createServer((req, res) => {
   else if (rel === '/about') rel = '/about.html';
   // Any URL ending with '/' → serve that directory's index.html.
   else if (rel.endsWith('/')) rel += 'index.html';
+
+  // Dev-only chain-config override: BLOCKCASSONE_CHAIN_CONFIG=data/chain-config.mainnet.json
+  // makes the server hand the browser THAT file for /data/chain-config.json, so a local
+  // checkout can hydrate against mainnet without dirtying the git-tracked dev config.
+  // (Production doesn't set it — the deploy script cp's the mainnet file into place.)
+  if (rel === '/data/chain-config.json' && process.env.BLOCKCASSONE_CHAIN_CONFIG) {
+    rel = '/' + String(process.env.BLOCKCASSONE_CHAIN_CONFIG).replace(/^\/+/, '');
+  }
 
   // Pick root: repo root for /viewer/, /core/, /public/, /schema/, /renderer/; renderer/ for everything else.
   const useRepoRoot = REPO_PREFIXES.some(p => rel.startsWith(p));

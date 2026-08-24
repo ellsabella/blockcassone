@@ -20,8 +20,17 @@
     a{color:inherit}
 
     .top{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(4,4,6,.9);backdrop-filter:blur(8px);z-index:5}
-    .top .back{color:var(--dim);text-decoration:none;font-weight:700}
-    .top h1{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);font-weight:800;flex:1;text-align:center}
+    /* Site nav — identical format to the Explorer's #site-nav (viewer/index.html). */
+    #site-nav{display:flex;gap:18px;align-items:center;flex:1;flex-wrap:wrap}
+    #site-nav .nav-link{
+      font-family:'NormiesFont',ui-monospace,monospace;
+      color:#fff;text-decoration:none;font-size:17px;font-weight:400;
+      letter-spacing:.06em;text-transform:uppercase;padding:4px 2px;
+      border-bottom:2px solid transparent;cursor:pointer;
+      text-shadow:0 0 6px rgba(255,58,184,0.9),0 0 22px rgba(255,58,184,0.6),0 0 46px rgba(255,58,184,0.3);
+    }
+    #site-nav .nav-link:hover{border-bottom-color:rgba(255,58,184,0.7);text-shadow:0 0 6px rgba(255,58,184,1),0 0 26px rgba(255,58,184,0.8)}
+    #site-nav .nav-link[aria-current="page"]{border-bottom-color:rgba(255,58,184,0.9)}
     #wallet-connect{border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:var(--panel2);color:var(--ink);font:700 11px var(--mono);cursor:pointer}
     #wallet-connect.connected{border-color:var(--green);color:#9affc9}
 
@@ -84,17 +93,32 @@
     .gate .big{font-size:40px}
     .gate p{color:var(--dim);max-width:300px}
     .gate a{color:var(--pink);text-decoration:none;font-weight:800}
+
+    /* Empty state — connected wallet owns no cubes (or no wallet yet). */
+    .nocubes{display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:26px;text-align:center;padding:40px 24px}
+    .nocubes.on{display:flex}
+    .nocubes .msg{font-family:var(--mono);font-size:clamp(20px,4.6vw,30px);font-weight:700;color:var(--ink);line-height:1.5;max-width:600px}
+    .nocubes a{font-family:var(--mono);font-size:18px;font-weight:800;color:var(--pink);text-decoration:none;letter-spacing:.04em;text-shadow:0 0 8px rgba(255,125,204,.7),0 0 26px rgba(255,125,204,.4)}
+    .nocubes a:hover{text-decoration:underline}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div id="app" style="display:flex;flex-direction:column;flex:1">
-      <div class="top">
-        <a href="/viewer/index.html" class="back">‹ Big Cube</a>
-        <h1>Update Cube</h1>
-        <div id="wallet-connect" data-wallet-widget></div>
-      </div>
+    <div class="top">
+      <nav id="site-nav">
+        <a href="/viewer/" class="nav-link">EXPLORER</a>
+        <a href="/about" class="nav-link">ABOUT</a>
+        <a href="https://opensea.io/collection/theblock-by-ella/overview" target="_blank" rel="noopener" class="nav-link">OPENSEA &#8599;</a>
+      </nav>
+      <div id="wallet-connect" data-wallet-widget></div>
+    </div>
 
+    <div class="nocubes" id="nocubes">
+      <div class="msg" id="nocubes-msg">To update a cube, you must first own one.</div>
+      <a id="nocubes-link" href="https://opensea.io/collection/theblock-by-ella/overview" target="_blank" rel="noopener">Opensea &#8599;</a>
+    </div>
+
+    <div id="app" style="display:none;flex-direction:column;flex:1">
       <div class="strip-label">Your cubes — pick one to edit</div>
       <div class="strip" id="strip"><span class="empty" id="strip-empty">connect a wallet to load your cubes</span></div>
 
@@ -117,7 +141,7 @@
       <div class="big">🚫</div>
       <h1 style="letter-spacing:.1em;color:var(--ink)">Not available</h1>
       <p>Art updates are paused right now (<b style="color:var(--ink)">customizesEnabled</b> is off on-chain). This page and its links are hidden until updates re-open.</p>
-      <a href="/viewer/index.html">‹ Back to the Big Cube</a>
+      <a href="/viewer/">‹ Back to the Explorer</a>
     </div>
   </div>
 
@@ -133,6 +157,6 @@
   <div class="toast" id="toast"></div>
 
   <script src="/viewer/vendor/wallet-widget.js?v=20260806-1"></script>
-  <script type="module" src="./update-cube.js?v=20260806-1"></script>
+  <script type="module" src="./update-cube.js?v=20260825-2"></script>
 </body>
 </html>

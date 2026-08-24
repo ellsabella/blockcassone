@@ -197,6 +197,17 @@ async function loadSnapshotRecords(config) {
   }
 }
 
+// Ownership-only view of the indexer snapshot: which wallet owns which cube.
+// NO art hydration, NO chain calls — one cached static fetch. Used by pages
+// (Update Cube) that must know ownership before spending any RPC at all.
+// Returns null when there is no usable snapshot (caller decides the fallback).
+export async function loadSnapshotOwnership() {
+  const config = await loadChainConfig();
+  if (!config.enabled || !config.useSnapshot) return null;
+  const records = await loadSnapshotRecords(config);
+  return records ? { config, records } : null;
+}
+
 // Hydrate .art for normie-sourced records by batching rawImageData (immutable
 // per normieId). Shared by the snapshot fast-path; the chain scan hydrates
 // inline. Goes away once the indexer serves art (M4).

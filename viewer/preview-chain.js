@@ -4,7 +4,7 @@
 // byte-identical to what re-basing onto that art would store. The thumbnail
 // renderer address is derived from the V2 `renderer` in chain-config.json.
 
-import { loadChainMintRecords } from './chain-cubes.js';
+import { loadChainMintRecords, loadSnapshotOwnership } from './chain-cubes.js';
 import { keccak256 } from '../core/keccak.js';
 import { startRpc } from './perf-metrics.js';
 
@@ -447,17 +447,20 @@ export async function proposedAnimationURI(cubeId, { sourceContract, sourceToken
 // Cubes minted on the local chain. For dev, optionally filter by owner; the
 // returned cubes are the candidate targets to overwrite (cubeId + seed + slot).
 export async function loadOwnedCubes(owner) {
-  const result = await loadChainMintRecords();
-  void ('[preview-chain] loadChainMintRecords →', {
-    enabled: result?.enabled,
-    cubeNft: result?.config?.cubeNft,
-    count: result?.records?.length || 0,
-  });
-  const records = (result && result.records) || [];
   const own = owner ? String(owner).toLowerCase() : null;
-  return records
+  const pick = records => (records || [])
     .filter(r => !own || String(r.wallet || '').toLowerCase() === own)
     .map(r => ({ cubeId: r.cubeId, slot: r.slot, seed: r.seed, sourceTokenId: r.source?.tokenId, owner: r.wallet }));
+  // Cache-first: the indexer snapshot answers "which cubes does this wallet own"
+  // with ZERO chain calls (one cached static fetch). Only a missing/stale
+  // snapshot falls back to the full record load (which may scan the chain) —
+  // so an unconnected or cube-less visitor never costs us RPC.
+  try {
+    const snap = await loadSnapshotOwnership();
+    if (snap) return pick(snap.records);
+  } catch (_) { /* fall through to the full load */ }
+  const result = await loadChainMintRecords();
+  return pick(result && result.records);
 }
 
 // seed: 0x bytes32 (or any hex). slot/sourceTokenId: number|bigint. sourceContract: 0x addr

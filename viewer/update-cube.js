@@ -38,6 +38,7 @@ const state = { owned: [], cube: null, proposal: null, holding: false,
 
   let cfg = {};
   try { cfg = await (await fetch('/data/chain-config.json', { cache: 'no-store' })).json(); } catch {}
+  setEmptyState('connect'); // default view until a wallet reports in
   mountConnectButton($('wallet-connect'), {
     chainId: cfg.chainId, rpcUrl: cfg.rpcUrl, chainName: 'TheBLOCK', onChange: onWallet,
   });
@@ -45,13 +46,29 @@ const state = { owned: [], cube: null, proposal: null, holding: false,
   render();
 })();
 
-function showGate() { $('app').style.display = 'none'; $('gate').style.display = 'flex'; }
+function showGate() {
+  $('app').style.display = 'none';
+  $('nocubes').classList.remove('on');
+  $('gate').style.display = 'flex';
+}
+
+// Page state: 'connect' (no wallet yet) | 'none' (wallet owns no cubes) | null (has cubes → app).
+function setEmptyState(kind) {
+  const app = $('app'), no = $('nocubes');
+  if (!kind) { no.classList.remove('on'); app.style.display = 'flex'; return; }
+  app.style.display = 'none';
+  $('nocubes-msg').textContent = kind === 'connect'
+    ? 'Connect a wallet to load your cubes.'
+    : 'To update a cube, you must first own one.';
+  $('nocubes-link').style.display = kind === 'connect' ? 'none' : '';
+  no.classList.add('on');
+}
 
 // ---------- wallet / cubes ----------
 async function onWallet(acct) {
   setTransactionSender(acct ? walletSend : null);
   $('wallet-connect').classList.toggle('connected', !!acct);
-  if (!acct) { state.owned = []; state.cube = null; state.proposal = null; renderStrip(); render(); return; }
+  if (!acct) { state.owned = []; state.cube = null; state.proposal = null; renderStrip(); render(); setEmptyState('connect'); return; }
   await loadOwned(acct);
 }
 
@@ -62,8 +79,8 @@ async function loadOwned(acct) {
   catch (e) { toast('could not load cubes: ' + msg(e), true); }
   state.owned = owned;
   renderStrip();
-  if (owned.length) selectCube(owned[0], true);
-  else { state.cube = null; render(); }
+  if (owned.length) { setEmptyState(null); selectCube(owned[0], true); }
+  else { state.cube = null; render(); setEmptyState('none'); }
 }
 
 function selectCube(c, force) {
@@ -75,9 +92,20 @@ function selectCube(c, force) {
   loadCurrent(c);
 }
 
+// Cache-first thumbnail: the server's /api/thumbnail is disk-first (indexer-baked
+// SVGs) with a TTL memory cache — no browser-side eth_call. Only if that route
+// fails do we pay for the live on-chain render.
+async function cachedThumbnailSVG(cubeId) {
+  try {
+    const r = await fetch('/api/thumbnail?cube=' + Number(cubeId), { cache: 'default' });
+    if (r.ok) { const t = await r.text(); if (t && t.includes('<svg')) return t; }
+  } catch (_) { /* fall through */ }
+  return cubeThumbnailSVG(cubeId);
+}
+
 async function loadCurrent(c) {
   // 2D = the stored on-chain thumbnail; 3D = the cube's on-chain animation_url (real 3D).
-  try { const svg = await cubeThumbnailSVG(c.cubeId); if (state.cube === c) { state.currentSvg = svg; paint2D(); } }
+  try { const svg = await cachedThumbnailSVG(c.cubeId); if (state.cube === c) { state.currentSvg = svg; paint2D(); } }
   catch (e) { if (state.cube === c) { state.currentSvg = note('on-chain render unavailable', msg(e)); paint2D(); } }
   try { const anim = await cubeAnimationURI(c.cubeId); if (state.cube === c) { state.currentAnim = anim; paint3D(); } }
   catch (e) { if (state.cube === c) { state.currentAnim = null; paint3D(); } }
