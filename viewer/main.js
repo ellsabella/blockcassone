@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260824-7';
+const VIEWER_BUILD = '20260824-8';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -1455,9 +1455,21 @@ async function shareCubeOnX(mode) {
   mode = mode || (MOBILE ? 'main' : 'detail');
   if (mode === 'detail' && (selectedMotifIdx === null || selectedMotifIdx === undefined)) return;
   const slot = selectedMotifIdx ?? 0; // card record needs a slot; 0 = generic view
-  const text = (selectedMotifIdx !== null && selectedMotifIdx !== undefined)
-    ? buildShareText(slot)
-    : 'THE BLOCK\n\nby @bright_lightart';
+  // Detail shares name the cube; main-view shares name the VIEW (street/nbhd/
+  // region number, or just THE BLOCK at full-block scope).
+  let text;
+  if (mode === 'detail') {
+    text = buildShareText(slot);
+  } else {
+    const start = mainScopeStart();
+    const label =
+      mainViewScope === 'street' ? `STREET ${Math.floor(start / 8)}` :
+      mainViewScope === 'neighbourhood' ? `NEIGHBOURHOOD ${Math.floor(start / 64)}` :
+      mainViewScope === 'region' ? `REGION ${Math.floor(start / 512)}` : '';
+    text = label
+      ? `THE BLOCK - ${label}\n\nby @bright_lightart`
+      : 'THE BLOCK\n\nby @bright_lightart';
+  }
   const fname = `theblock-cube-${String(slot).padStart(4, '0')}.webp`;
 
   let blob = null;
