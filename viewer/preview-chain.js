@@ -582,6 +582,65 @@ export async function isPoolSourceClaimed(sourceContract, sourceTokenId) {
   return !/^0x0*$/.test(String(ret || '0x0')); // nonzero cubeId => claimed
 }
 
+// Delegate.xyz Registry V2 — the same address on every chain. Lets a hot wallet use
+// vault-held art without ever connecting the vault (same pattern as allowlist/reserve.mjs).
+const DELEGATE_REGISTRY_V2 = '0x00000000000000447e69651d841bD8D104Bed493';
+
+// LAUNCH SAFETY (UI guard — there is deliberately NO contract-side equivalent):
+// may this (contract, tokenId) be used as a customize source? Blocks mint-pool art:
+//   1. any Normie — the genesis mint's own pool collection;
+//   2. any source with a committed payload in the NonNormieArtStore
+//      (genesis pool + allowlist reserve) — sourcePayloadHash(key) != 0;
+//   3. any source already claimed by a live cube — cubeForSourceKey(key) != 0.
+// Two eth_calls, in parallel, and callers only invoke this after a cube owner has
+// actually picked an NFT — anonymous visitors never cost RPC. NOTE the contract is
+// chain-blind (sourceKey hashes ITS OWN chainid), so this guard runs for every
+// wallet chain, not just mainnet. Fails CLOSED: an unverifiable source is blocked.
+export async function checkSourceAvailable(sourceContract, sourceTokenId) {
+  const cfg = await loadConfig();
+  if (cfg.normies && String(sourceContract).toLowerCase() === String(cfg.normies).toLowerCase()) {
+    return { ok: false, reason: 'Normies are mint-pool art — they join TheBLOCK through the mint, not an update' };
+  }
+  const storeKey = keccak256(hexToBytes(addrWord(sourceContract) + word(sourceTokenId)));
+  const claimKey = sourceClaimKey(cfg, sourceContract, sourceTokenId);
+  const [poolRet, claimRet] = await Promise.all([
+    artStoreAddress(cfg).then(store => ethCall(cfg, store, '0x65626080' + storeKey)).catch(() => null), // sourcePayloadHash(bytes32)
+    cfg.cubeNft ? ethCall(cfg, cfg.cubeNft, '0xdd597020' + claimKey).catch(() => null) : Promise.resolve(null), // cubeForSourceKey(bytes32)
+  ]);
+  if (poolRet === null || claimRet === null) {
+    return { ok: false, reason: 'could not verify this token against the mint pool — try again in a moment' };
+  }
+  if (!/^0x0*$/.test(String(poolRet))) {
+    return { ok: false, reason: 'that token is reserved by the mint pool — it cannot be taken by an update' };
+  }
+  const claimedBy = Number(BigInt(claimRet));
+  if (claimedBy) return { ok: false, reason: `that token is already the source of TheBLOCK #${claimedBy}` };
+  return { ok: true };
+}
+
+// Ownership / delegation check for a proposed source: `wallet` must be the token's
+// owner, or hold a delegate.xyz Registry-V2 delegation from the owner (token, contract
+// or wallet-wide — checkDelegateForERC721 resolves all three). Mainnet reads only —
+// callers should skip it for NFTs enumerated on other chains.
+export async function checkSourceUsable(wallet, sourceContract, sourceTokenId) {
+  const cfg = await loadConfig();
+  let owner;
+  try {
+    const ret = await ethCall(cfg, sourceContract, '0x6352211e' + word(sourceTokenId)); // ownerOf(uint256)
+    owner = '0x' + String(ret).replace(/^0x/, '').slice(-40);
+  } catch (_) {
+    return { ok: false, reason: 'could not read that token’s owner on-chain' };
+  }
+  if (owner.toLowerCase() === String(wallet).toLowerCase()) return { ok: true, owner };
+  try {
+    const data = '0xb9f36874' // checkDelegateForERC721(address,address,address,uint256,bytes32)
+      + addrWord(wallet) + addrWord(owner) + addrWord(sourceContract) + word(sourceTokenId) + '0'.repeat(64);
+    const ret = await ethCall(cfg, DELEGATE_REGISTRY_V2, data);
+    if (!/^0x0*$/.test(String(ret))) return { ok: true, owner, viaDelegate: true };
+  } catch (_) { /* registry unreachable → fall through to the refusal */ }
+  return { ok: false, owner, reason: 'this wallet neither owns that token nor holds a delegate.xyz delegation from its owner' };
+}
+
 // poolSources() minus any already claimed on-chain — the "spin the wheel" should only ever
 // offer sources a cube can actually take. Uniqueness is still enforced on commit; this just
 // stops the UI proposing a source that would revert with SourceAlreadyClaimed.

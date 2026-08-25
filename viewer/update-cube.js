@@ -11,6 +11,7 @@ import {
   previewThumbnailSVG, cubeThumbnailSVG, cubeAnimationURI, proposedAnimationURI, loadOwnedCubes,
   customizeCube, rebaseToPoolSource, contractFlags, setTransactionSender,
   poolSources, unclaimedPoolSources, poolSourcePayload,
+  checkSourceAvailable, checkSourceUsable,
 } from './preview-chain.js';
 import { mountConnectButton, sendTransaction as walletSend, account as walletAccount } from './wallet.js?v=20260806-1';
 
@@ -112,14 +113,32 @@ async function loadCurrent(c) {
 }
 
 // ---------- propose ----------
+// LAUNCH SAFETY: both rules are UI-enforced (no contract guard exists) — a source
+// must not be mint-pool art, and vault-held art must carry a live delegation.
+async function guardProposal(nft) {
+  const acct = walletAccount();
+  const avail = await checkSourceAvailable(nft.contract, nft.tokenId);
+  if (!avail.ok) return avail.reason;
+  if (nft.viaVault) {
+    if (String(nft.chain || 'ethereum') !== 'ethereum') return 'vault art is mainnet-only for now';
+    const usable = await checkSourceUsable(acct, nft.contract, nft.tokenId);
+    if (!usable.ok) return usable.reason;
+  }
+  return null;
+}
+
 async function setProposalWallet(nft) {
   closeSheet();
+  toast('checking source…');
+  const blocked = await guardProposal(nft).catch(e => 'source check failed: ' + msg(e));
+  if (blocked) { toast(blocked, true); return; }
   toast('flattening art…');
   try {
     const grid = await imageUrlToBinaryGrid(nft.imageUrl);
     const payload = gridToTonalPayload(grid);
     state.proposal = { kind: 'wallet', sourceContract: nft.contract, sourceTokenId: nft.tokenId,
-      payload, art: nft.imageUrl, label: nft.name || ('#' + nft.tokenId) };
+      payload, art: nft.imageUrl, label: (nft.name || ('#' + nft.tokenId)) + (nft.viaVault ? ' (vault)' : ''),
+      viaVault: !!nft.viaVault, chain: nft.chain || 'ethereum' };
     state.proposedSvg = null; state.holding = false;
     render();
     fetchProposed2D(); fetchProposed3D();
@@ -180,6 +199,11 @@ async function commit() {
   setBusy(true);
   try {
     if (p.kind === 'wallet') {
+      // Re-run the launch-safety guard right before the tx — pool claims and
+      // delegations can change between picking the art and committing it.
+      const blocked = await guardProposal({ contract: p.sourceContract, tokenId: p.sourceTokenId, viaVault: p.viaVault, chain: p.chain })
+        .catch(e => 'source re-check failed: ' + msg(e));
+      if (blocked) { toast(blocked, true); return; }
       await customizeCube({ cubeId: c.cubeId, owner, sourceContract: p.sourceContract, sourceTokenId: p.sourceTokenId, payload: p.payload });
     } else {
       await rebaseToPoolSource({ cubeId: c.cubeId, owner, sourceContract: p.sourceContract, sourceTokenId: p.sourceTokenId });
@@ -290,12 +314,24 @@ async function openSheet() {
   els.walletgrid.innerHTML = '';
   els.sheet_status.textContent = acct ? 'loading your NFTs…' : 'connect a wallet first';
   if (!acct) return;
+  await listSheetNfts(acct, false);
+}
+
+// List an address's NFTs into the sheet grid. viaVault marks delegate.xyz art:
+// listed from the VAULT's inventory, committed by the CONNECTED wallet — each
+// pick is validated against the registry (guardProposal) before use.
+async function listSheetNfts(address, viaVault) {
+  els.walletgrid.innerHTML = '';
+  els.sheet_status.textContent = viaVault ? 'loading vault NFTs…' : 'loading your NFTs…';
   try {
-    const nfts = (await loadWalletNftsAcrossChains(acct)).nfts || []; // returns walletState {nfts,…}
+    const nfts = ((await loadWalletNftsAcrossChains(address)).nfts || [])
+      .map(n => (viaVault ? { ...n, viaVault: true } : n));
     state.walletNfts = nfts;
-    els.sheet_status.textContent = nfts.length ? `${nfts.length} items` : 'no NFTs found';
+    els.sheet_status.textContent = nfts.length
+      ? `${nfts.length} items${viaVault ? ' · via vault ' + short(address) + ' — delegation checked on pick' : ''}`
+      : (viaVault ? 'no NFTs found in that vault' : 'no NFTs found');
     els.walletgrid.innerHTML = nfts.slice(0, 60).map((n, i) =>
-      `<div class="nft" data-i="${i}"><img loading="lazy" src="${esc(n.imageUrl || '')}" alt=""><span class="lab">${esc(n.name || ('#' + n.tokenId))}</span></div>`).join('');
+      `<div class="nft" data-i="${i}"><img loading="lazy" src="${esc(n.imageUrl || '')}" alt=""><span class="lab">${viaVault ? '🔗 ' : ''}${esc(n.name || ('#' + n.tokenId))}</span></div>`).join('');
   } catch (e) { els.sheet_status.textContent = 'could not load NFTs: ' + msg(e); }
 }
 function closeSheet() { els.scrim.classList.remove('on'); els.sheet.classList.remove('on'); }
@@ -311,6 +347,19 @@ function wireStatic() {
     const el = e.target.closest('.nft'); if (el) setProposalWallet(state.walletNfts[+el.dataset.i]);
   });
   els.scrim.onclick = closeSheet;
+
+  // Delegate.xyz vault flow: list a vault's NFTs without connecting it.
+  $('vault-load').onclick = async () => {
+    const addr = String($('vault-addr').value || '').trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) { toast('enter a valid vault address (0x…)', true); return; }
+    if (addr.toLowerCase() === String(walletAccount() || '').toLowerCase()) { toast('that is the connected wallet — its art is already listed', true); return; }
+    $('vault-clear').style.display = '';
+    await listSheetNfts(addr, true);
+  };
+  $('vault-clear').onclick = async () => {
+    $('vault-addr').value = ''; $('vault-clear').style.display = 'none';
+    const acct = walletAccount(); if (acct) await listSheetNfts(acct, false);
+  };
 
   const cmp = $('compare');
   const hold = on => {

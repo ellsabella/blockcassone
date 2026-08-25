@@ -149,6 +149,10 @@ function readChainConfig() {
       chainId: Number(parsed.chainId || 0),
       cubeNft: String(parsed.cubeNft || ''),
       thumbnailRenderer: String(parsed.thumbnailRenderer || ''),
+      // Attestation-service verification targets (see handleAttest):
+      flatteningAttestation: String(parsed.flatteningAttestation || ''),
+      normies: String(parsed.normies || ''),
+      nonNormieStore: String(parsed.nonNormieStore || ''),
     };
   } catch (_) {
     return { rpcUrl: String(envRpc || 'http://127.0.0.1:8545'), chainId: 0, cubeNft: '', thumbnailRenderer: '' };
@@ -488,10 +492,12 @@ async function proxyChainRpc(req, res) {
 // POSTs it here, and gets back a signature. On local Anvil the client uses the node's
 // unlocked signer (eth_signTypedData_v4) instead and never reaches this route.
 //
-// SECURITY: this signs whatever attestation the client sends — i.e. a signing oracle,
-// acceptable for the Sepolia E2E stub (a throwaway signer key). For a real launch, the
-// service should independently verify the flattening and own the nonce/deadline before
-// signing, rather than trusting the client's payloadHash.
+// SECURITY: NOT a blind oracle — verifyAttestRequest() pins the EIP-712 envelope and
+// independently enforces the pool + ownership/delegation rules against the chain
+// before anything is signed (see the block comment above it for what is and is not
+// covered). The remaining trust gap is payloadHash fidelity (no server-side
+// re-flatten), which only lets an owner stylise art on a source they legitimately
+// control.
 //
 // viem is required LAZILY so the dev server still boots without it (only the Sepolia
 // signer path needs it — install with `npm i viem` on the VPS). Key from env:
@@ -521,15 +527,128 @@ function coerceTypedMessage(types, primaryType, message) {
   return out;
 }
 
+// ---- attestation verification (mainnet hardening) --------------------------
+// The signer must never be a blind oracle: before signing we independently verify
+// that the requested attestation is one the legit client flow could have built.
+//   PIN     domain (name/version/chainId/verifyingContract), primaryType, version
+//           fields, deadline window.
+//   POOL    the source must not be mint-pool art: not a Normie, no committed
+//           payload in the NonNormieArtStore (pool + reserve), not already the
+//           source of a live cube (cubeForSourceKey). Mirrors the UI guard — but
+//           HERE is the real enforcement (the UI can be bypassed; this can't).
+//   OWNER   the minter must own the source token, or hold a delegate.xyz
+//           Registry-V2 delegation from its owner. The token is looked up on
+//           mainnet first, then the other wallet chains the site lists.
+// What is NOT verified: that the payloadHash is a faithful flattening of the
+// source's art (would need a server-side re-render). An owner can therefore
+// still stylise art on a source THEY OWN — accepted; the pool + ownership rules
+// are the ones that protect other people and the mint.
+const ATTEST_WORD = (v) => BigInt(v).toString(16).padStart(64, '0');
+const ATTEST_ADDR = (a) => String(a).replace(/^0x/, '').toLowerCase().padStart(64, '0');
+const ATTEST_DELEGATE_REGISTRY = '0x00000000000000447e69651d841bD8D104Bed493';
+const ATTEST_ALT_CHAINS = [ // where else wallet art may live (viewer DEFAULT_WALLET_CHAINS)
+  { name: 'base', rpcUrl: 'https://mainnet.base.org' },
+  { name: 'shape', rpcUrl: 'https://mainnet.shape.network' },
+];
+const ZERO_RET = (r) => /^0x0*$/.test(String(r || '0x0'));
+
+// Per-IP limiter: attests are rare (one per commit), so a low ceiling is safe.
+const _attestHits = new Map(); // ip -> { n, resetAt }
+function attestRateLimited(ip) {
+  const now = Date.now();
+  const h = _attestHits.get(ip);
+  if (!h || now > h.resetAt) { _attestHits.set(ip, { n: 1, resetAt: now + 3_600_000 }); return false; }
+  h.n += 1;
+  return h.n > 30;
+}
+
+// keccak256(abi.encode(...)) via viem (already a signer-service dependency).
+function attestKeys(chainId, sourceContract, sourceTokenId) {
+  const { keccak256, encodeAbiParameters } = require('viem');
+  const storeKey = keccak256(encodeAbiParameters(
+    [{ type: 'address' }, { type: 'uint256' }], [sourceContract, BigInt(sourceTokenId)]));
+  const claimKey = keccak256(encodeAbiParameters(
+    [{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }],
+    [BigInt(chainId), sourceContract, BigInt(sourceTokenId)]));
+  return { storeKey: storeKey.slice(2), claimKey: claimKey.slice(2) };
+}
+
+async function verifyAttestRequest(typedData) {
+  const config = readChainConfig();
+  const m = typedData.message || {};
+  const d = typedData.domain || {};
+  const fail = (reason) => ({ ok: false, reason });
+
+  // PIN — exactly the envelope preview-chain.js builds, nothing else.
+  if (typedData.primaryType !== 'Attestation') return fail('unexpected primaryType');
+  if (d.name !== 'TheBLOCKFlattening' || String(d.version) !== '1') return fail('unexpected domain');
+  if (Number(d.chainId) !== config.chainId) return fail('unexpected domain chainId');
+  if (!config.flatteningAttestation ||
+      String(d.verifyingContract).toLowerCase() !== config.flatteningAttestation.toLowerCase()) {
+    return fail('unexpected verifyingContract');
+  }
+  if (String(m.agentic) === 'true' || m.agentic === true) return fail('agentic attestations are not served here');
+  if (Number(m.payloadVersion) !== 1 || Number(m.flatteningVersion) !== 1) return fail('unexpected payload version');
+  const deadline = Number(m.deadline || 0);
+  const now = Math.floor(Date.now() / 1000);
+  if (!(deadline > now && deadline <= now + 7200)) return fail('deadline outside the accepted window');
+  const minter = String(m.minter || '');
+  const sourceContract = String(m.sourceContract || '');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(minter) || !/^0x[0-9a-fA-F]{40}$/.test(sourceContract)) {
+    return fail('malformed addresses');
+  }
+  let sourceTokenId;
+  try { sourceTokenId = BigInt(m.sourceTokenId); } catch (_) { return fail('malformed sourceTokenId'); }
+
+  // POOL — never attest mint-pool art (mirrors CubeNFT's chain-blind sourceKey).
+  if (config.normies && sourceContract.toLowerCase() === config.normies.toLowerCase()) {
+    return fail('Normies are mint-pool art');
+  }
+  const { storeKey, claimKey } = attestKeys(config.chainId, sourceContract, sourceTokenId);
+  if (config.nonNormieStore) {
+    const r = await ethCall(config.rpcUrl, config.nonNormieStore, '0x65626080' + storeKey); // sourcePayloadHash(bytes32)
+    if (!ZERO_RET(r)) return fail('source is reserved by the mint pool');
+  }
+  if (config.cubeNft) {
+    const r = await ethCall(config.rpcUrl, config.cubeNft, '0xdd597020' + claimKey); // cubeForSourceKey(bytes32)
+    if (!ZERO_RET(r)) return fail('source is already claimed by a cube');
+  }
+
+  // OWNER — find the token's chain, read its owner, accept owner or delegate.
+  const chains = [{ name: 'ethereum', rpcUrl: config.rpcUrl }, ...ATTEST_ALT_CHAINS];
+  const ownerData = '0x6352211e' + ATTEST_WORD(sourceTokenId); // ownerOf(uint256)
+  for (const chain of chains) {
+    let owner;
+    try {
+      const r = await ethCall(chain.rpcUrl, sourceContract, ownerData);
+      if (!r || r === '0x' || ZERO_RET(r)) continue;
+      owner = '0x' + String(r).replace(/^0x/, '').slice(-40);
+    } catch (_) { continue; } // not on this chain (or RPC hiccup) — try the next
+    if (owner.toLowerCase() === minter.toLowerCase()) return { ok: true };
+    try {
+      const del = await ethCall(chain.rpcUrl, ATTEST_DELEGATE_REGISTRY,
+        '0xb9f36874' + ATTEST_ADDR(minter) + ATTEST_ADDR(owner) + ATTEST_ADDR(sourceContract)
+        + ATTEST_WORD(sourceTokenId) + '0'.repeat(64)); // checkDelegateForERC721(...,rights=0)
+      if (!ZERO_RET(del)) return { ok: true };
+    } catch (_) { /* registry unreachable on this chain */ }
+    return fail('minter neither owns the source token nor holds a delegate.xyz delegation from its owner');
+  }
+  return fail('source token not found on any supported chain');
+}
+
 async function handleAttest(req, res) {
   if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method not allowed' }); return; }
   loadDotEnv(ENV_PATH, { override: true });
   try {
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (attestRateLimited(ip)) { sendJson(res, 429, { error: 'Too many attestation requests — try later' }); return; }
     const { typedData } = JSON.parse(await readRequestBody(req, 4_000_000));
     if (!typedData || !typedData.domain || !typedData.message || !typedData.primaryType) {
       sendJson(res, 400, { error: 'Missing typedData {domain, types, primaryType, message}' });
       return;
     }
+    const verdict = await verifyAttestRequest(typedData);
+    if (!verdict.ok) { sendJson(res, 403, { error: 'Attestation refused', detail: verdict.reason }); return; }
     const account = getAttestAccount();
     const types = { ...typedData.types };
     delete types.EIP712Domain; // viem derives the domain type itself
