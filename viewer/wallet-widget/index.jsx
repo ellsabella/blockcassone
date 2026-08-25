@@ -66,12 +66,19 @@ function Bridge() {
 
 async function init() {
   const dc = await fetch('/dev-config').then((r) => r.json()).catch(() => ({}));
+  const cc = await fetch('/data/chain-config.json').then((r) => r.json()).catch(() => ({}));
   const projectId = dc.walletConnectProjectId || '00000000000000000000000000000000';
+  // The site's chain-config decides which chain the wallet requests FIRST. The old
+  // hardcoded [sepolia, mainnet] was dress-rehearsal ordering — it made wallets ask
+  // for Sepolia on the production site. The active chain also gets the site's RPC
+  // proxy (key-bearing + failover); the other chain falls back to a public default.
+  const active = Number(cc.chainId) === sepolia.id ? sepolia : mainnet;
+  const other = active.id === sepolia.id ? mainnet : sepolia;
   wagmiConfig = getDefaultConfig({
     appName: 'THE BLOCK',
     projectId,
-    chains: [sepolia, mainnet],
-    transports: { [sepolia.id]: http('/api/chain-rpc'), [mainnet.id]: http() },
+    chains: [active, other],
+    transports: { [active.id]: http('/api/chain-rpc'), [other.id]: http() },
     ssr: false,
   });
   const qc = new QueryClient();
