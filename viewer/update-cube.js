@@ -5,7 +5,7 @@
 // the dev preview iframe. Hold-to-compare flips current vs proposed. The whole page is hidden
 // when customizesEnabled is off on-chain (the contract is the real gate; this is UX only).
 
-import { loadWalletNftsAcrossChains } from './wallet-nfts.js';
+import { fetchWalletNftsPage, DEFAULT_WALLET_CHAINS } from './wallet-nfts.js';
 import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
 import {
   previewThumbnailSVG, cubeThumbnailSVG, cubeAnimationURI, proposedAnimationURI, loadOwnedCubes,
@@ -104,12 +104,27 @@ async function cachedThumbnailSVG(cubeId) {
   return cubeThumbnailSVG(cubeId);
 }
 
+// Per-session memo of each cube's current art — flicking between cubes in the
+// strip must not re-pay the render eth_calls. Invalidated on a successful commit.
+const _cubeArtCache = new Map(); // cubeId -> { svg?, anim? }
+
 async function loadCurrent(c) {
   // 2D = the stored on-chain thumbnail; 3D = the cube's on-chain animation_url (real 3D).
-  try { const svg = await cachedThumbnailSVG(c.cubeId); if (state.cube === c) { state.currentSvg = svg; paint2D(); } }
-  catch (e) { if (state.cube === c) { state.currentSvg = note('on-chain render unavailable', msg(e)); paint2D(); } }
-  try { const anim = await cubeAnimationURI(c.cubeId); if (state.cube === c) { state.currentAnim = anim; paint3D(); } }
-  catch (e) { if (state.cube === c) { state.currentAnim = null; paint3D(); } }
+  const hit = _cubeArtCache.get(c.cubeId) || {};
+  if (hit.svg) { state.currentSvg = hit.svg; paint2D(); }
+  else {
+    try {
+      const svg = await cachedThumbnailSVG(c.cubeId);
+      _cubeArtCache.set(c.cubeId, { ..._cubeArtCache.get(c.cubeId), svg });
+      if (state.cube === c) { state.currentSvg = svg; paint2D(); }
+    } catch (e) { if (state.cube === c) { state.currentSvg = note('on-chain render unavailable', msg(e)); paint2D(); } }
+  }
+  if (hit.anim) { state.currentAnim = hit.anim; paint3D(); return; }
+  try {
+    const anim = await cubeAnimationURI(c.cubeId);
+    _cubeArtCache.set(c.cubeId, { ..._cubeArtCache.get(c.cubeId), anim });
+    if (state.cube === c) { state.currentAnim = anim; paint3D(); }
+  } catch (e) { if (state.cube === c) { state.currentAnim = null; paint3D(); } }
 }
 
 // ---------- propose ----------
@@ -208,6 +223,7 @@ async function commit() {
     } else {
       await rebaseToPoolSource({ cubeId: c.cubeId, owner, sourceContract: p.sourceContract, sourceTokenId: p.sourceTokenId });
     }
+    _cubeArtCache.delete(c.cubeId);            // art changed on-chain — drop the memo
     state.currentSvg = state.proposedSvg;      // proposed becomes the new current
     state.proposal = null; state.holding = false;
     render();
@@ -320,19 +336,67 @@ async function openSheet() {
 // List an address's NFTs into the sheet grid. viaVault marks delegate.xyz art:
 // listed from the VAULT's inventory, committed by the CONNECTED wallet — each
 // pick is validated against the registry (guardProposal) before use.
+//
+// EFFICIENCY: strictly on-demand pagination. One OpenSea page (≤200 items) per
+// LOAD MORE press, working down the chain queue (ethereum → base → shape) — the
+// old flow drained the ENTIRE inventory of all three chains up-front (a page per
+// 200 NFTs × 3 chains) before a single tile rendered.
+const sheetPager = { owner: null, viaVault: false, queue: [], items: [], busy: false };
+
 async function listSheetNfts(address, viaVault) {
+  sheetPager.owner = address;
+  sheetPager.viaVault = !!viaVault;
+  sheetPager.queue = DEFAULT_WALLET_CHAINS.map(chain => ({ chain, cursor: null, done: false }));
+  sheetPager.items = [];
+  state.walletNfts = [];
   els.walletgrid.innerHTML = '';
   els.sheet_status.textContent = viaVault ? 'loading vault NFTs…' : 'loading your NFTs…';
+  await loadMoreSheetArt();
+}
+
+async function loadMoreSheetArt() {
+  if (sheetPager.busy) return;
+  sheetPager.busy = true;
+  const btn = $('sheet-more');
+  if (btn) { btn.disabled = true; btn.textContent = 'LOADING…'; }
   try {
-    const nfts = ((await loadWalletNftsAcrossChains(address)).nfts || [])
-      .map(n => (viaVault ? { ...n, viaVault: true } : n));
-    state.walletNfts = nfts;
-    els.sheet_status.textContent = nfts.length
-      ? `${nfts.length} items${viaVault ? ' · via vault ' + short(address) + ' — delegation checked on pick' : ''}`
-      : (viaVault ? 'no NFTs found in that vault' : 'no NFTs found');
-    els.walletgrid.innerHTML = nfts.slice(0, 60).map((n, i) =>
-      `<div class="nft" data-i="${i}"><img loading="lazy" src="${esc(n.imageUrl || '')}" alt=""><span class="lab">${viaVault ? '🔗 ' : ''}${esc(n.name || ('#' + n.tokenId))}</span></div>`).join('');
+    // Fetch ONE page; if it contributed nothing (empty chain), roll straight on
+    // to the next chain so a base/shape-only wallet isn't stuck behind clicks —
+    // but never more than one page per chain in a single press.
+    for (let hops = 0; hops < DEFAULT_WALLET_CHAINS.length; hops++) {
+      const entry = sheetPager.queue.find(c => !c.done);
+      if (!entry) break;
+      const page = await fetchWalletNftsPage(sheetPager.owner, entry.chain, entry.cursor);
+      entry.cursor = page.next;
+      entry.done = !page.next;
+      const add = page.nfts
+        .filter(n => n.imageUrl) // no image → nothing to flatten, don't show it
+        .map(n => (sheetPager.viaVault ? { ...n, viaVault: true } : n));
+      sheetPager.items.push(...add);
+      if (add.length) break;
+    }
+    renderSheetGrid();
   } catch (e) { els.sheet_status.textContent = 'could not load NFTs: ' + msg(e); }
+  finally {
+    sheetPager.busy = false;
+    const b = $('sheet-more');
+    if (b) { b.disabled = false; b.textContent = 'LOAD MORE ART ↓'; }
+  }
+}
+
+function renderSheetGrid() {
+  const more = sheetPager.queue.some(c => !c.done);
+  state.walletNfts = sheetPager.items;
+  els.walletgrid.innerHTML = sheetPager.items.map((n, i) =>
+    `<div class="nft" data-i="${i}"><img loading="lazy" src="${esc(n.imageUrl || '')}" alt=""><span class="lab">${n.viaVault ? '🔗 ' : ''}${esc(n.name || ('#' + n.tokenId))}</span></div>`).join('');
+  const base = sheetPager.items.length
+    ? `${sheetPager.items.length} items`
+    : (sheetPager.viaVault ? 'no NFTs found in that vault' : 'no NFTs found');
+  els.sheet_status.textContent = base
+    + (sheetPager.viaVault ? ' · via vault ' + short(sheetPager.owner) + ' — delegation checked on pick' : '')
+    + (more ? ' · more available' : '');
+  const btn = $('sheet-more');
+  if (btn) btn.style.display = more ? '' : 'none';
 }
 function closeSheet() { els.scrim.classList.remove('on'); els.sheet.classList.remove('on'); }
 
@@ -360,6 +424,7 @@ function wireStatic() {
     $('vault-addr').value = ''; $('vault-clear').style.display = 'none';
     const acct = walletAccount(); if (acct) await listSheetNfts(acct, false);
   };
+  $('sheet-more').onclick = loadMoreSheetArt;
 
   const cmp = $('compare');
   const hold = on => {

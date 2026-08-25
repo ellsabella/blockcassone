@@ -214,6 +214,16 @@ async function fetchNftDetail(nft) {
   return res.json();
 }
 
+// ONE OpenSea page (≤200 items), normalized — for callers that paginate on demand
+// (the Update page's picker) instead of draining the whole inventory up-front.
+export async function fetchWalletNftsPage(address, chain = 'ethereum', cursor = null) {
+  const cleanAddress = String(address || '').trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(cleanAddress))
+    throw new Error('Enter a valid Ethereum wallet address');
+  const page = await fetchWalletPage(cleanAddress, chain, cursor);
+  return { nfts: (page.nfts || []).map(n => normalizeNft(n, chain)), next: page.next || null };
+}
+
 export async function loadWalletNfts(address, chain = 'ethereum') {
   const cleanAddress = String(address || '').trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(cleanAddress))

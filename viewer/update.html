@@ -79,8 +79,10 @@
     .warn{margin:2px 16px 10px;padding:9px 11px;border:1px solid rgba(255,93,108,.4);background:rgba(255,93,108,.07);border-radius:9px;color:#ff9aa4;font-size:11px;line-height:1.45}
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:4px 16px 24px;overflow-y:auto}
     @media(min-width:520px){.grid{grid-template-columns:repeat(4,1fr)}}
-    .nft{border:2px solid transparent;border-radius:11px;overflow:hidden;background:#060608;cursor:pointer;position:relative}
-    .nft img,.nft svg{display:block;width:100%;aspect-ratio:1/1;object-fit:cover}
+    /* Square tiles: the CONTAINER owns the 1:1 shape, the image just fills it —
+       a slow, missing or oddly-sized image can never collapse the cell. */
+    .nft{border:2px solid transparent;border-radius:11px;overflow:hidden;background:#0b0b11;cursor:pointer;position:relative;aspect-ratio:1/1}
+    .nft img,.nft svg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
     .nft:hover{border-color:var(--pink)}
     .nft .lab{position:absolute;left:0;right:0;bottom:0;font-size:9px;padding:3px 5px;color:var(--ink);background:linear-gradient(transparent,rgba(0,0,0,.8));font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .sheet .status{color:var(--faint);font-size:11px;padding:0 16px 18px}
@@ -89,6 +91,8 @@
     .vault-row input::placeholder{color:var(--faint)}
     .vault-row button{border:1px solid var(--line);background:var(--panel2);color:var(--dim);border-radius:8px;padding:8px 11px;font:700 11px var(--mono);cursor:pointer;white-space:nowrap}
     .vault-row button:hover{color:var(--ink)}
+    .loadmore{margin:0 16px 14px;flex:0 0 auto;border:1px solid var(--line);background:var(--panel2);color:var(--ink);border-radius:10px;padding:11px;font:800 12px var(--mono);cursor:pointer}
+    .loadmore:hover{background:#1c1c25} .loadmore:disabled{opacity:.5;cursor:wait}
 
     .toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,20px);background:var(--green);color:#04120c;font-weight:800;padding:11px 18px;border-radius:11px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:40;font-size:12px;max-width:88vw;text-align:center}
     .toast.on{opacity:1;transform:translate(-50%,0)}
@@ -161,12 +165,13 @@
       <button id="vault-clear" style="display:none">My wallet</button>
     </div>
     <div class="grid" id="walletgrid"></div>
+    <button id="sheet-more" class="loadmore" style="display:none">LOAD MORE ART ↓</button>
     <div class="status" id="sheet-status">connect a wallet to list your NFTs</div>
   </div>
 
   <div class="toast" id="toast"></div>
 
   <script src="/viewer/vendor/wallet-widget.js?v=20260825-3"></script>
-  <script type="module" src="./update-cube.js?v=20260825-3"></script>
+  <script type="module" src="./update-cube.js?v=20260825-4"></script>
 </body>
 </html>
