@@ -348,14 +348,22 @@ async function openSheet() {
 //                contract → collection slug (1 light call per chain, cached on the
 //                queue entry), then the wallet's NFTs in JUST that collection.
 //                Cheapest possible way to find one collection in a huge wallet.
+const SHEET_INITIAL = 24; // tiles shown on open — calm, fast first paint
+const SHEET_STEP = 48;    // tiles revealed per LOAD MORE press
 const sheetPager = { owner: null, viaVault: false, queue: [], items: [], busy: false,
-  textFilter: '', contract: null };
+  textFilter: '', contract: null, visible: SHEET_INITIAL };
 
 function resetSheetQueue() {
   sheetPager.queue = DEFAULT_WALLET_CHAINS.map(chain => ({ chain, cursor: null, done: false, slug: undefined }));
   sheetPager.items = [];
+  sheetPager.visible = SHEET_INITIAL;
   state.walletNfts = [];
   els.walletgrid.innerHTML = '';
+}
+
+function sheetFiltered() {
+  const q = sheetPager.textFilter;
+  return q ? sheetPager.items.filter(n => sheetMatchesText(n, q)) : sheetPager.items;
 }
 
 async function listSheetNfts(address, viaVault) {
@@ -367,11 +375,18 @@ async function listSheetNfts(address, viaVault) {
   const sc = $('art-search-clear'); if (sc) sc.style.display = 'none';
   resetSheetQueue();
   els.sheet_status.textContent = viaVault ? 'loading vault NFTs…' : 'loading your NFTs…';
-  await loadMoreSheetArt();
+  await loadMoreSheetArt(true);
 }
 
-async function loadMoreSheetArt() {
+async function loadMoreSheetArt(initial) {
   if (sheetPager.busy) return;
+  // Reveal already-loaded tiles first — a LOAD MORE press costs an API call
+  // ONLY once everything fetched so far is on screen.
+  if (!initial && sheetFiltered().length > sheetPager.visible) {
+    sheetPager.visible += SHEET_STEP;
+    renderSheetGrid();
+    return;
+  }
   sheetPager.busy = true;
   const btn = $('sheet-more');
   if (btn) { btn.disabled = true; btn.textContent = 'LOADING…'; }
@@ -398,6 +413,7 @@ async function loadMoreSheetArt() {
       sheetPager.items.push(...add);
       if (add.length) break;
     }
+    if (!initial) sheetPager.visible += SHEET_STEP; // a fetch press must reveal, too
     renderSheetGrid();
   } catch (e) { els.sheet_status.textContent = 'could not load NFTs: ' + msg(e); }
   finally {
@@ -414,19 +430,20 @@ function sheetMatchesText(n, q) {
 }
 
 function renderSheetGrid() {
-  const more = sheetPager.queue.some(c => !c.done);
   const q = sheetPager.textFilter;
-  const visible = q ? sheetPager.items.filter(n => sheetMatchesText(n, q)) : sheetPager.items;
-  state.walletNfts = visible; // grid indexes must match what's rendered
-  els.walletgrid.innerHTML = visible.map((n, i) =>
+  const filtered = sheetFiltered();
+  const shown = filtered.slice(0, sheetPager.visible);
+  const more = sheetPager.queue.some(c => !c.done) || filtered.length > shown.length;
+  state.walletNfts = shown; // grid indexes must match what's rendered
+  els.walletgrid.innerHTML = shown.map((n, i) =>
     `<div class="nft" data-i="${i}"><img loading="lazy" src="${esc(n.imageUrl || '')}" alt=""><span class="lab">${n.viaVault ? '🔗 ' : ''}${esc(n.name || ('#' + n.tokenId))}</span></div>`).join('');
   let label;
-  if (q) label = `${visible.length} of ${sheetPager.items.length} loaded match “${q}”`;
-  else if (sheetPager.contract) label = visible.length
-    ? `${visible.length} items in that collection`
+  if (q) label = `${shown.length} of ${filtered.length} matching “${q}”`;
+  else if (sheetPager.contract) label = filtered.length
+    ? `showing ${shown.length} of ${filtered.length} in that collection`
     : 'none of that collection in this wallet';
   else label = sheetPager.items.length
-    ? `${sheetPager.items.length} items`
+    ? `showing ${shown.length} of ${sheetPager.items.length} loaded`
     : (sheetPager.viaVault ? 'no NFTs found in that vault' : 'no NFTs found');
   els.sheet_status.textContent = label
     + (sheetPager.viaVault ? ' · via vault ' + short(sheetPager.owner) + ' — delegation checked on pick' : '')
@@ -446,13 +463,13 @@ async function runArtSearch() {
     sheetPager.textFilter = '';
     resetSheetQueue();
     els.sheet_status.textContent = 'searching that collection…';
-    await loadMoreSheetArt();
+    await loadMoreSheetArt(true); // fresh listing — start at the initial tile count
   } else {
     sheetPager.textFilter = raw.toLowerCase();
     if (sheetPager.contract) { // leaving contract mode — reload the normal listing
       sheetPager.contract = null;
       resetSheetQueue();
-      await loadMoreSheetArt();
+      await loadMoreSheetArt(true); // fresh listing — start at the initial tile count
     } else {
       renderSheetGrid();
     }
@@ -467,7 +484,7 @@ async function clearArtSearch() {
     sheetPager.contract = null;
     resetSheetQueue();
     els.sheet_status.textContent = 'loading…';
-    await loadMoreSheetArt();
+    await loadMoreSheetArt(true); // fresh listing — start at the initial tile count
   } else {
     renderSheetGrid();
   }
@@ -498,7 +515,7 @@ function wireStatic() {
     $('vault-addr').value = ''; $('vault-clear').style.display = 'none';
     const acct = walletAccount(); if (acct) await listSheetNfts(acct, false);
   };
-  $('sheet-more').onclick = loadMoreSheetArt;
+  $('sheet-more').onclick = () => loadMoreSheetArt(); // wrap: the click Event must not read as `initial`
   $('art-search-go').onclick = runArtSearch;
   $('art-search-clear').onclick = clearArtSearch;
   $('art-search').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); runArtSearch(); } });
