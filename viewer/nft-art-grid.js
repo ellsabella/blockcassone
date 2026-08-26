@@ -965,8 +965,27 @@ function inferPixelGrid(sample) {
   const yProfile = inferGridAxis(profiles.horizontal, sample.h);
   const xTransition = inferGridAxisFromTransitions(txPositions, sample.w);
   const yTransition = inferGridAxisFromTransitions(tyPositions, sample.h);
-  const x = xTransition.score >= 0.82 ? xTransition : xProfile;
-  const y = yTransition.score >= 0.82 ? yTransition : yProfile;
+  let x = xTransition.score >= 0.82 ? xTransition : xProfile;
+  let y = yTransition.score >= 0.82 ? yTransition : yProfile;
+  // Square-pixel coherence: sprite pixels are square, so both axes must agree
+  // on pitch. Lossy CDN re-encodes (seadn serves AVIF) smear one axis's edges
+  // more than the other's, and the smeared axis then locks onto a fine
+  // sub-multiple of the true pitch (54 rows instead of 18 on MoonCats → the
+  // art renders shredded). When the pitches disagree, re-derive the weaker
+  // axis from the stronger one's pitch and keep it unless it fits far worse.
+  const xPitch = sample.w / Math.max(1, x.cells);
+  const yPitch = sample.h / Math.max(1, y.cells);
+  if (x.cells >= MIN_PIXEL_GRID && y.cells >= MIN_PIXEL_GRID && Math.abs(xPitch - yPitch) > 0.3) {
+    if (x.score >= y.score) {
+      const cells = Math.max(MIN_PIXEL_GRID, Math.round(sample.h / xPitch));
+      const derived = scoreTransitionGrid(tyPositions, sample.h, cells);
+      if (derived.score >= y.score - 0.35) y = derived;
+    } else {
+      const cells = Math.max(MIN_PIXEL_GRID, Math.round(sample.w / yPitch));
+      const derived = scoreTransitionGrid(txPositions, sample.w, cells);
+      if (derived.score >= x.score - 0.35) x = derived;
+    }
+  }
   const stats = cellStats(sample, x.cells, y.cells);
   const usedTransitionGrid = x === xTransition || y === yTransition;
   const axisScore = usedTransitionGrid
