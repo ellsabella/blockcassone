@@ -13,7 +13,7 @@ import {
   initNormiesManager, setDataReadyCallback, setBannerDataReadyCallback,
 } from './normies-manager.js';
 import { buildHilbertLines, buildFullHilbertPath, buildHilbertPathRange } from './hilbert-lines.js';
-import { createHilbertWalk, createCubeOrbit } from './hilbert-walk.js';
+import { createHilbertWalk, createCubeOrbit, createRollercoaster } from './hilbert-walk.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
 import { buildStoneWalker }   from './materials/stone-walker.js';
 import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner, buildNonNormieIdLabel, setNonNormieResolvers } from './non-normie-art-plane.js';
@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260825-3';
+const VIEWER_BUILD = '20260826-5';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -3925,52 +3925,139 @@ if (CINEMATIC && typeof document !== 'undefined' && document.body) {
   document.body.classList.add('cinematic');
 }
 
-// ---------- Promo: "run the Hilbert line" walk + one-click 16:9 recording (?walk) ----------
-const WALK = new URLSearchParams(location.search).has('walk');
-let _walk = null, _walkArmed = 0, _walkStarted = false, _walkRec = null, _walkName = 'hilbert-walk';
+// ---------- Promo recording (?rec=<shot>): deterministic frame capture → MP4 ----------
+// Shots (all ride the Hilbert line; start windows are scouted so biome
+// placeholders — and for nbhd-line at least TWO different biomes — are in frame):
+//   ?rec=nbhd-line    slow "follow the line" across one neighbourhood
+//   ?rec=street-line  line-follow along one populated street
+//   ?rec=cube-line    same street, camera right down at cube level
+//   ?rec=coaster      rollercoaster: zoom fully out, dive through cube middles, back out
+// Extras: &start=<slot> &dur=<seconds> &fps=<30|60> &w=1920 &h=1080
+// Frames render on a FIXED virtual clock (performance.now is overridden while
+// capturing, so camera + shader time are exactly 1/fps per frame regardless of
+// wall clock), are read back losslessly after the main scene draw, and stream to
+// the dev server which assembles a high-quality MP4 (x264 crf 14). Slower than
+// realtime; the output has zero dropped frames. Replaces the old ?walk
+// MediaRecorder rig (realtime VP9 — bitrate smear + hitch-stutter baked in).
+const _recQ = new URLSearchParams(location.search);
+const REC_SHOT = _recQ.get('rec');
+const WALK = !!REC_SHOT;
+const _realNow = performance.now.bind(performance);
+let _recNow = null; // virtual clock while capturing (ms); null → real time
+if (WALK) performance.now = () => (_recNow !== null ? _recNow : _realNow());
+const _recFps = Math.max(10, Math.min(120, Number(_recQ.get('fps')) || 60));
+const _recW = Math.max(320, Number(_recQ.get('w')) || 1920);
+const _recH = Math.max(180, Number(_recQ.get('h')) || 1080);
+let _walk = null, _walkArmed = 0, _walkStarted = false, _walkName = 'shot';
 let _walkStartT = 0, _walkDurationMs = 15000;
+let _recActive = false, _recPending = false, _recFrame = 0, _lastWarmRebuild = 0;
 
-function setupWalk() {
-  // Figure-eight orbit around one populated Normie cube — all sides, zoom out/in, 10s seamless loop.
-  let slot = -1, normieId = null;
-  for (let m = 0; m < WORLD_SIZE; m++) {
-    if (!isMintedSlot(m)) continue;
-    const cube = getMintedCubeForSlot(m);
-    if (cube && (cube.sourceKind === 'normie' || cube.nft?.isNormie)) {
-      slot = m; normieId = cube.nft?.normieId ?? null; break;
+// Scout a neighbourhood whose 8 streets span ≥2 biome environments AND that has
+// both minted cubes and empty slots (crystal placeholders visible).
+function _recScoutNbhd() {
+  let fallback = 0, fallbackScore = -1;
+  for (let nb = 0; nb < WORLD_SIZE / NEIGHBOURHOOD_SIZE; nb++) {
+    const s0 = nb * NEIGHBOURHOOD_SIZE;
+    const envs = new Set();
+    for (let st = 0; st < NEIGHBOURHOOD_SIZE / STREET_SIZE; st++) envs.add(environmentForStreet(s0 / STREET_SIZE + st));
+    let minted = 0;
+    for (let m = s0; m < s0 + NEIGHBOURHOOD_SIZE; m++) if (isMintedSlot(m)) minted++;
+    const empty = NEIGHBOURHOOD_SIZE - minted;
+    const score = envs.size * 100 + Math.min(minted, 20);
+    if (score > fallbackScore) { fallbackScore = score; fallback = nb; }
+    if (envs.size >= 2 && minted >= 3 && empty >= 4) {
+      log(`rec: neighbourhood ${nb} — ${envs.size} biomes, ${minted} minted, ${empty} placeholders`);
+      return nb;
     }
   }
-  if (slot < 0) { log('walk: no populated Normie cube found'); return; }
+  log('rec: no ideal neighbourhood — using best-scoring ' + fallback);
+  return fallback;
+}
 
-  const c = centerOfAABB(cubeAABBFor(slot));
-  const cs = sizeOfAABB(cubeAABBFor(slot)) || 1;
-  _walkName = 'normie-figure8' + (normieId != null ? '-' + normieId : '');
-  _walkDurationMs = 16000; // slower
+// Scout a POPULATED street that still shows ≥2 crystal placeholders.
+function _recScoutStreet() {
+  let fallback = 0, best = -1;
+  for (let st = 0; st < WORLD_SIZE / STREET_SIZE; st++) {
+    const s0 = st * STREET_SIZE;
+    let minted = 0;
+    for (let m = s0; m < s0 + STREET_SIZE; m++) if (isMintedSlot(m)) minted++;
+    const empty = STREET_SIZE - minted;
+    const score = Math.min(minted, 5) * 10 + Math.min(empty, 3);
+    if (score > best) { best = score; fallback = st; }
+    if (minted >= 3 && empty >= 2) { log(`rec: street ${st} — ${minted} minted, ${empty} placeholders`); return st; }
+  }
+  log('rec: no ideal street — using best-scoring ' + fallback);
+  return fallback;
+}
 
-  _walk = createCubeOrbit(orbit, c, {
-    durationMs: _walkDurationMs,
-    loops: 3,                 // three figure-eights
-    yawAmp: Math.PI,          // every side
-    pitchAmp: 1.0,            // top & bottom
-    diveMin: cs * 0.06,       // plunge right into the middle of the cube
-    diveMax: cs * 3.0,        // …then pull fully back out
-    diveCycles: 3,            // dive in once per figure-eight
-    near: Math.max(0.004, cs * 0.008),
-    far: cs * 12,
-  });
-  // Street scope draws the cube in full detail; select it so detail/thumbnail track it.
-  mainViewScope = 'street';
-  selectedStreetIdx = streetIndexForMotif(slot);
-  selectedNeighbourhoodIdx = null; selectedRegionIdx = null;
-  selectedMotifIdx = slot;
+// Raw Hilbert polyline for a slot range (8 vertices per slot — same mapping as
+// buildHilbertPathRange). This IS "the line": walking it at heightOffset 0 passes
+// through the middle of every cube on the range.
+function _recPathPoints(startMotif, count) {
+  const a = Math.max(0, startMotif) * 8;
+  const b = Math.min(hilbert.rawVertices.length, (startMotif + count) * 8);
+  return hilbert.rawVertices.slice(a, b);
+}
+
+function setupWalk() {
+  const startParam = _recQ.has('start') ? Number(_recQ.get('start')) : null;
+  const durS = Number(_recQ.get('dur')) || 0;
+  const cs = sizeOfAABB(cubeAABBFor(0)) || 1;
+  let points, scope, focus, coaster = false;
+
+  if (REC_SHOT === 'nbhd-line' || REC_SHOT === 'coaster') {
+    const nb = startParam !== null ? Math.floor(startParam / NEIGHBOURHOOD_SIZE) : _recScoutNbhd();
+    focus = nb * NEIGHBOURHOOD_SIZE;
+    points = _recPathPoints(focus, NEIGHBOURHOOD_SIZE);
+    scope = 'neighbourhood';
+    coaster = REC_SHOT === 'coaster';
+    _walkName = `${REC_SHOT}-nb${nb}`;
+    _walkDurationMs = (durS || (coaster ? 24 : 26)) * 1000;
+    _walk = coaster
+      ? createRollercoaster(orbit, points, {
+          durationMs: _walkDurationMs, lookAheadLen: cs * 1.4,
+          pullMax: cs * 26, pullCycles: 2,
+          center: centerOfAABB(aabbForMotifs(_motifRange(0, WORLD_SIZE))),
+          near: cs * 0.006, far: cs * 420,
+        })
+      : createHilbertWalk(orbit, points, {
+          durationMs: _walkDurationMs, heightOffset: cs * 1.1,
+          lookAheadLen: cs * 3.2, near: cs * 0.01, far: cs * 220,
+        });
+  } else if (REC_SHOT === 'street-line' || REC_SHOT === 'cube-line') {
+    const st = startParam !== null ? Math.floor(startParam / STREET_SIZE) : _recScoutStreet();
+    focus = st * STREET_SIZE;
+    points = _recPathPoints(focus, STREET_SIZE);
+    scope = 'street';
+    const cubeLevel = REC_SHOT === 'cube-line';
+    _walkName = `${REC_SHOT}-st${st}`;
+    _walkDurationMs = (durS || (cubeLevel ? 16 : 14)) * 1000;
+    _walk = createHilbertWalk(orbit, points, {
+      durationMs: _walkDurationMs,
+      heightOffset: cs * (cubeLevel ? 0.16 : 0.5),
+      lookAheadLen: cs * (cubeLevel ? 0.9 : 2.0),
+      near: cs * (cubeLevel ? 0.005 : 0.008), far: cs * (cubeLevel ? 60 : 120),
+    });
+  } else {
+    log(`rec: unknown shot "${REC_SHOT}" — use nbhd-line | street-line | cube-line | coaster`);
+    return;
+  }
+
+  // Scope-lock so full art + biomes render for the window (biomes draw at
+  // street/neighbourhood scope only).
+  mainViewScope = scope;
+  selectedMotifIdx = focus;
+  selectedStreetIdx = scope === 'street' ? streetIndexForMotif(focus) : null;
+  selectedNeighbourhoodIdx = scope === 'neighbourhood' ? neighbourhoodIndexForMotif(focus) : null;
+  selectedRegionIdx = null;
   scheduleRebuild();
-  log(`walk: Normie cube slot ${slot}${normieId != null ? ` (Normie #${normieId})` : ''} — figure-8 orbit, 10s → ${_walkName}.webm`);
+  log(`rec: ${_walkName} — ${(_walkDurationMs / 1000)}s @ ${_recFps}fps ${_recW}×${_recH}`);
 }
 
 function startWalkRecording() {
-  // Fixed 1920×1080 backing store → the capture is always clean 16:9 1080p; letterbox the display.
+  // Fixed backing store → clean 16:9 output at exactly _recW×_recH; letterbox the display.
   _walkFixed = true;
-  canvas.width = 1920; canvas.height = 1080;
+  canvas.width = _recW; canvas.height = _recH;
   const style = document.createElement('style');
   style.textContent =
     'body.cinematic > *:not(#gl){display:none!important} body.cinematic{cursor:default;background:#000!important;overflow:hidden}' +
@@ -3978,32 +4065,52 @@ function startWalkRecording() {
     'width:min(100vw,177.78vh)!important;height:min(56.25vw,100vh)!important}';
   document.head.appendChild(style);
   document.body.classList.add('cinematic');
+  _recActive = true;
+  _recFrame = 0;
+  _recNow = _realNow(); // freeze the virtual clock — advanced 1/fps per captured frame
+  log(`rec: capturing ${Math.round(_walkDurationMs / 1000 * _recFps)} frames — slower than realtime, watch the counter`);
+}
+
+// One captured frame: flip rows, encode lossless PNG, upload; only THEN advance
+// the virtual clock and re-queue the render loop — perfect backpressure, no drops.
+async function _recSubmitFrame(px, w, h) {
   try {
-    const stream = canvas.captureStream(60);
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
-    const chunks = [];
-    _walkRec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 16000000 });
-    _walkRec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-    _walkRec.onstop = async () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      log('walk: uploading ' + (blob.size / 1048576).toFixed(1) + ' MB to capture server…');
-      try {
-        const r = await fetch('http://localhost:8124/capture?name=' + encodeURIComponent(_walkName), { method: 'POST', body: blob });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        log('walk: saved server-side → captures/' + _walkName + '.webm ✓');
-      } catch (e) {
-        // Fallback: browser download (goes to your Downloads folder).
-        log('walk: capture server unreachable (' + e + ') — falling back to browser download');
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob); a.download = 'hilbert-walk.webm';
-        document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
-      }
-    };
-    _walkRec.start();
-    log('walk: recording 30s…');
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx2 = c.getContext('2d');
+    const img2 = ctx2.createImageData(w, h);
+    const rowBytes = w * 4;
+    for (let row = 0; row < h; row++) {
+      const src = (h - 1 - row) * rowBytes;
+      img2.data.set(px.subarray(src, src + rowBytes), row * rowBytes);
+    }
+    ctx2.putImageData(img2, 0, 0);
+    const blob = await new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('png encode failed'))), 'image/png'));
+    const r = await fetch(`/api/rec/frame?shot=${encodeURIComponent(_walkName)}&n=${_recFrame}`, { method: 'POST', body: blob });
+    if (!r.ok) throw new Error('frame upload HTTP ' + r.status);
+    _recFrame++;
+    _recNow += 1000 / _recFps;
+    if (_recFrame % _recFps === 0) log(`rec: ${_recFrame} frames (${((_recNow - _walkStartT) / 1000).toFixed(1)}s / ${_walkDurationMs / 1000}s)`);
+    if (_recNow - _walkStartT >= _walkDurationMs) { await _recFinish(); }
   } catch (e) {
-    log('walk: MediaRecorder unavailable — screen-record the fullscreen playback instead (' + e + ')');
+    log('rec: FAILED — ' + (e && e.message));
+    _recActive = false; _recNow = null;
+  } finally {
+    _recPending = false;
+    requestAnimationFrame(frame);
   }
+}
+
+async function _recFinish() {
+  _recActive = false;
+  _walkStarted = false;
+  _recNow = null; // release the virtual clock
+  log(`rec: ${_recFrame} frames captured — encoding MP4 on the server…`);
+  try {
+    const r = await fetch(`/api/rec/finish?shot=${encodeURIComponent(_walkName)}&fps=${_recFps}`, { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) log(`rec: DONE ✓ → ${j.file} (${j.frames} frames, ${j.seconds}s)`);
+    else log('rec: encode failed — ' + (j.error || ('HTTP ' + r.status)) + (j.detail ? ' — ' + j.detail : ''));
+  } catch (e) { log('rec: finish failed — ' + (e && e.message)); }
 }
 
 // Camera-settle LOD re-pick: when orbit/zoom stops, re-run the full-art budget
@@ -4033,20 +4140,22 @@ function frame() {
     if (_flight) { const info = _flight.update(performance.now()); if (info) driveCinematicScope(info.level); }
   }
   if (WALK) {
-    // Arm once data's loaded (+ a warmup beat), scope-lock, then start recording + running the line.
+    // Arm once data's loaded, scope-lock, then WARM the budgeted cold builds during a
+    // ~6s pre-roll (a rebuild builds 8 full-art items — repeated rebuilds finish the
+    // whole window) so no impostor dots pop to full art mid-shot. Then start capture.
     if (!_walkArmed && mintSimulationLoaded() && (performance.now() - startT) > 3000) {
-      _walkArmed = performance.now(); setupWalk();
+      _walkArmed = _realNow(); setupWalk();
     }
-    if (_walkArmed && _walk && !_walkStarted && performance.now() - _walkArmed > 1000) {
-      _walkStarted = true; _walkStartT = performance.now(); startWalkRecording(); _walk.start(_walkStartT);
+    if (_walkArmed && _walk && !_walkStarted && _realNow() - _lastWarmRebuild > 200) {
+      _lastWarmRebuild = _realNow(); scheduleRebuild();
     }
-    if (_walk && _walkStarted) {
-      const info = _walk.update(performance.now());
-      const elapsed = performance.now() - _walkStartT;
-      if (_walkRec && _walkRec.state === 'recording' && (info.done || elapsed >= _walkDurationMs)) {
-        _walkRec.stop(); _walkRec = null; // captured exactly one loop → seamless
-      }
+    if (_walkArmed && _walk && !_walkStarted && _realNow() - _walkArmed > 6000) {
+      _walkStarted = true;
+      startWalkRecording();          // fixes canvas + freezes the virtual clock
+      _walkStartT = performance.now(); // = _recNow
+      _walk.start(_walkStartT);
     }
+    if (_walk && _walkStarted) _walk.update(performance.now()); // virtual time — deterministic
   }
   // Flyby Mode: fly the main camera over the focused wallet's cubes, cube by cube. While PAUSED
   // we stop driving entirely (no update) so the user's manual orbit/navigation isn't overridden.
@@ -4129,6 +4238,17 @@ function frame() {
     } catch (err) { req.reject(err); }
   }
 
+  // Promo recording: lossless per-frame readback at this exact point — after the
+  // main scene, before any corner passes (which are skipped anyway: cinematic CSS
+  // hides the DOM panels, so the minimap/detail rects are zero-sized).
+  if (_recActive && _walkStarted && !_recPending) {
+    _recPending = true;
+    const wR = canvas.width, hR = canvas.height;
+    const pxR = new Uint8Array(wR * hR * 4);
+    gl.readPixels(0, 0, wR, hR, gl.RGBA, gl.UNSIGNED_BYTE, pxR);
+    _recSubmitFrame(pxR, wR, hR); // advances the virtual clock + re-queues the loop when uploaded
+  }
+
   let mapVP = null;
   let mapRectScreen = null;
   lastMapRect = null; // cleared each frame; set only when the minimap actually draws (below)
@@ -4207,7 +4327,9 @@ function frame() {
   gl.depthFunc(gl.LESS);
 
   updatePerfHud();
-  requestAnimationFrame(frame);
+  // During promo capture the frame uploader owns the re-queue (backpressure —
+  // the next frame renders only after this one is safely on disk).
+  if (!_recPending) requestAnimationFrame(frame);
 }
 log('entering render loop');
 // ---------- Mobile UI: slim top bar + full-screen menu + bottom sheet + chips ----------

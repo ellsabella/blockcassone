@@ -42,3 +42,5 @@ data/sepolia-full/
 data/mainnet/
 data/chain-config.simulation.json
 data/thumbs/
+data/recordings/
+captures/

@@ -664,6 +664,85 @@ async function verifyAttestRequest(typedData, vaultHint) {
   return fail('source token not found on any supported chain');
 }
 
+// ---- Promo recording sink (?rec mode in the viewer) ------------------------
+// Deterministic frame capture lands here: PNG frames → data/recordings/<shot>/frames,
+// then /api/rec/finish assembles a high-quality MP4 (x264 crf 14) with ffmpeg.
+// LOCAL DEV ONLY: refused in production and for any non-loopback peer.
+const REC_DIR = path.join(REPO_ROOT, 'data', 'recordings');
+const _recSafeShot = (s) => String(s || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'shot';
+
+function recRefused(req, res) {
+  const ip = String(req.socket.remoteAddress || '');
+  const loopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  if (process.env.NODE_ENV === 'production' || !loopback) {
+    sendJson(res, 403, { error: 'recording endpoints are local-dev only' });
+    return true;
+  }
+  return false;
+}
+
+function readBinaryBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > maxBytes) { reject(new Error('body too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+async function handleRecFrame(req, res) {
+  if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method not allowed' }); return; }
+  if (recRefused(req, res)) return;
+  try {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    const shot = _recSafeShot(url.searchParams.get('shot'));
+    const n = Math.max(0, Math.floor(Number(url.searchParams.get('n')) || 0));
+    const dir = path.join(REC_DIR, shot, 'frames');
+    // Frame 0 starts a fresh take — wipe any previous frames so a shorter re-run
+    // can never inherit stale tail frames into its MP4.
+    if (n === 0) fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    const body = await readBinaryBody(req, 64_000_000);
+    fs.writeFileSync(path.join(dir, `f${String(n).padStart(6, '0')}.png`), body);
+    sendJson(res, 200, { ok: true, n });
+  } catch (err) {
+    sendJson(res, 500, { error: 'frame write failed', detail: String(err?.message || err) });
+  }
+}
+
+async function handleRecFinish(req, res) {
+  if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method not allowed' }); return; }
+  if (recRefused(req, res)) return;
+  try {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+    const shot = _recSafeShot(url.searchParams.get('shot'));
+    const fps = Math.max(10, Math.min(120, Number(url.searchParams.get('fps')) || 60));
+    const dir = path.join(REC_DIR, shot, 'frames');
+    const frames = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^f\d{6}\.png$/.test(f)).length : 0;
+    if (!frames) { sendJson(res, 400, { error: 'no frames for shot ' + shot }); return; }
+    const out = path.join(REC_DIR, `${shot}-${fps}fps.mp4`);
+    const { execFile } = require('node:child_process');
+    await new Promise((resolve, reject) => {
+      execFile('ffmpeg', [
+        '-y', '-loglevel', 'error',
+        '-framerate', String(fps),
+        '-i', path.join(dir, 'f%06d.png'),
+        '-c:v', 'libx264', '-preset', 'slow', '-crf', '14',
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+        out,
+      ], { timeout: 600_000 }, (err, _so, se) => (err ? reject(new Error(String(se || err.message).slice(0, 300))) : resolve()));
+    });
+    console.log(`[rec] ${shot}: ${frames} frames @ ${fps}fps → ${out}`);
+    sendJson(res, 200, { ok: true, file: `data/recordings/${shot}-${fps}fps.mp4`, frames, seconds: Number((frames / fps).toFixed(1)) });
+  } catch (err) {
+    sendJson(res, 500, { error: 'encode failed', detail: String(err?.message || err) });
+  }
+}
+
 async function handleAttest(req, res) {
   if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method not allowed' }); return; }
   loadDotEnv(ENV_PATH, { override: true });
@@ -1231,6 +1310,16 @@ const server = http.createServer((req, res) => {
 
   if (req.url === '/api/attest') {
     handleAttest(req, res);
+    return;
+  }
+
+  if (req.url.startsWith('/api/rec/frame')) {
+    handleRecFrame(req, res);
+    return;
+  }
+
+  if (req.url.startsWith('/api/rec/finish')) {
+    handleRecFinish(req, res);
     return;
   }
 
