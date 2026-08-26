@@ -1,7 +1,7 @@
 // Headless repro of the browser flattening pipeline for a wallet NFT.
 // Shims fetch/Image/canvas so viewer/nft-art-grid.js runs verbatim in node,
 // pulling the image through the SAME local server proxy the browser uses.
-// Usage: node dev/flatten-repro.mjs <contract> <tokenId>   (IMG=<url> overrides the image; needs the dev server on :3000)
+// Usage: node dev/flatten-repro.mjs <contract> <tokenId>   (IMG=<url> overrides; needs dev server on :3000; AVIF needs @jsquash/avif in /tmp/avif-dec)
 import { createRequire } from 'node:module';
 const require = createRequire('/home/elsabella/blockcassone/');
 const { PNG } = require('pngjs');
@@ -23,8 +23,18 @@ class FakeImage {
     if (src.startsWith('blob:')) buf = Buffer.from(await blobStore.get(src).arrayBuffer());
     else if (src.startsWith('data:')) buf = Buffer.from(src.slice(src.indexOf(',') + 1), src.includes(';base64,') ? 'base64' : 'utf8');
     else { const r = await realFetch(src); buf = Buffer.from(await r.arrayBuffer()); }
+    if (buf.slice(4, 12).toString('latin1') === 'ftypavif') {
+      // seadn serves AVIF — decode with the same-family decoder browsers use (wasm libavif).
+      const { default: decode, init } = await import('/tmp/avif-dec/node_modules/@jsquash/avif/decode.js');
+      const fs = await import('node:fs');
+      await init(await WebAssembly.compile(fs.readFileSync('/tmp/avif-dec/node_modules/@jsquash/avif/codec/dec/avif_dec.wasm')));
+      const img = await decode(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      this.width = img.width; this.height = img.height;
+      this._rgba = Buffer.from(new Uint8Array(img.data.buffer, img.data.byteOffset || 0, img.data.byteLength));
+      return;
+    }
     if (!(buf[0] === 0x89 && buf[1] === 0x50)) {
-      // Not PNG (seadn serves AVIF/WEBP) — bounce through ffmpeg, like the browser's native decode.
+      // Other non-PNG (webp/jpeg/gif) — bounce through ffmpeg.
       const { execFileSync } = await import('node:child_process');
       const fs = await import('node:fs');
       const inF = `/tmp/repro-in-${process.pid}`, outF = `/tmp/repro-out-${process.pid}.png`;
