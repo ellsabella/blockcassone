@@ -1,4 +1,4 @@
-import { imageUrlToBinaryGrid } from './nft-art-grid.js';
+import { imageUrlToBinaryGrid } from './nft-art-grid.js?v=20260826-3';
 import { inflateGrid } from './art-snapshot.js';
 
 export const NORMIES_CONTRACT = '0x9eb6e2025b64f340691e424b7fe7022ffde12438';

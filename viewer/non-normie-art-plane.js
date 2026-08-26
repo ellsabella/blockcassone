@@ -2,7 +2,7 @@ import { createMeshGL } from '../renderer/src/geometry.js';
 import { mat4, identity } from '../renderer/src/math.js';
 import { hash1, V } from './tree-walker.js';
 import { makePlanePixelFn, buildVoxelMesh, ensureBannerFont, renderBannerTexture } from './normies-manager.js';
-import { otsuRecursiveBands, otsuMultiLevelThresholds } from './nft-art-grid.js';
+import { otsuRecursiveBands, otsuMultiLevelThresholds } from './nft-art-grid.js?v=20260826-3';
 import { buildWalkGlowMeshWS, buildWalkCoreMeshWS } from './materials/stone-walker.js';
 import { planeBasis, uvToWorld, artCorners } from './materials/plane-2d.js';
 import { buildIdLabelFor } from './normie/label.js';

@@ -6,7 +6,11 @@
 // when customizesEnabled is off on-chain (the contract is the real gate; this is UX only).
 
 import { fetchWalletNftsPage, resolveCollectionSlug, DEFAULT_WALLET_CHAINS } from './wallet-nfts.js';
-import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
+import { loadSnapshotOwnership } from './chain-cubes.js';
+// Versioned import: the flattener changes behaviour (MoonCat fixes) and a stale
+// cached copy silently produces garbage payloads — pin the version so a deploy
+// always reaches the browser. Keep in lockstep with wallet-nfts.js's import.
+import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js?v=20260826-3';
 import {
   previewThumbnailSVG, cubeThumbnailSVG, cubeAnimationURI, proposedAnimationURI, loadOwnedCubes,
   customizeCube, rebaseToPoolSource, contractFlags, setTransactionSender,
@@ -348,6 +352,30 @@ async function openSheet() {
 //                contract → collection slug (1 light call per chain, cached on the
 //                queue entry), then the wallet's NFTs in JUST that collection.
 //                Cheapest possible way to find one collection in a huge wallet.
+// Genesis source collections are hidden from the picker entirely: their tokens
+// can never be a customize source (the pool guard would reject them), so
+// showing them just sets users up for a rejection. The set is DERIVED from the
+// world snapshot (every distinct source contract — all six collections) plus
+// the Normies contract; zero RPC, and it tracks reality as mints continue.
+let _hiddenContractsP = null;
+function hiddenSourceContracts() {
+  if (!_hiddenContractsP) {
+    _hiddenContractsP = (async () => {
+      const set = new Set();
+      try {
+        const snap = await loadSnapshotOwnership();
+        for (const r of (snap && snap.records) || []) {
+          const c = r.source && r.source.contract;
+          if (c) set.add(String(c).toLowerCase());
+        }
+        if (snap && snap.config && snap.config.normies) set.add(String(snap.config.normies).toLowerCase());
+      } catch (_) { /* no snapshot → the pick/commit guards still protect */ }
+      return set;
+    })();
+  }
+  return _hiddenContractsP;
+}
+
 const SHEET_INITIAL = 24; // tiles shown on open — calm, fast first paint
 const SHEET_STEP = 48;    // tiles revealed per LOAD MORE press
 const sheetPager = { owner: null, viaVault: false, queue: [], items: [], busy: false,
@@ -394,6 +422,13 @@ async function loadMoreSheetArt(initial) {
     // Fetch ONE page; if it contributed nothing (empty chain), roll straight on
     // to the next chain so a base/shape-only wallet isn't stuck behind clicks —
     // but never more than one page per chain in a single press.
+    const hidden = await hiddenSourceContracts();
+    if (sheetPager.contract && hidden.has(sheetPager.contract)) {
+      sheetPager.queue.forEach(c => { c.done = true; });
+      renderSheetGrid();
+      els.sheet_status.textContent = 'that collection is genesis source art — its tokens cannot be used for updates';
+      return;
+    }
     for (let hops = 0; hops < DEFAULT_WALLET_CHAINS.length; hops++) {
       const entry = sheetPager.queue.find(c => !c.done);
       if (!entry) break;
@@ -408,6 +443,7 @@ async function loadMoreSheetArt(initial) {
       entry.done = !page.next;
       const add = page.nfts
         .filter(n => n.imageUrl) // no image → nothing to flatten, don't show it
+        .filter(n => !hidden.has(String(n.contract).toLowerCase())) // genesis source collections — never usable
         .filter(n => !sheetPager.contract || String(n.contract).toLowerCase() === sheetPager.contract) // belt-and-braces
         .map(n => (sheetPager.viaVault ? { ...n, viaVault: true } : n));
       sheetPager.items.push(...add);
