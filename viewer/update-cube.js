@@ -5,7 +5,7 @@
 // the dev preview iframe. Hold-to-compare flips current vs proposed. The whole page is hidden
 // when customizesEnabled is off on-chain (the contract is the real gate; this is UX only).
 
-import { fetchWalletNftsPage, DEFAULT_WALLET_CHAINS } from './wallet-nfts.js';
+import { fetchWalletNftsPage, resolveCollectionSlug, DEFAULT_WALLET_CHAINS } from './wallet-nfts.js';
 import { imageUrlToBinaryGrid, gridToTonalPayload } from './nft-art-grid.js';
 import {
   previewThumbnailSVG, cubeThumbnailSVG, cubeAnimationURI, proposedAnimationURI, loadOwnedCubes,
@@ -341,15 +341,31 @@ async function openSheet() {
 // LOAD MORE press, working down the chain queue (ethereum → base → shape) — the
 // old flow drained the ENTIRE inventory of all three chains up-front (a page per
 // 200 NFTs × 3 chains) before a single tile rendered.
-const sheetPager = { owner: null, viaVault: false, queue: [], items: [], busy: false };
+// Search modes:
+//   textFilter — instant CLIENT-side filter over already-loaded items (0 API calls);
+//                LOAD MORE keeps fetching pages, the filter re-applies as they land.
+//   contract   — a pasted 0x address flips to a SERVER-side targeted listing:
+//                contract → collection slug (1 light call per chain, cached on the
+//                queue entry), then the wallet's NFTs in JUST that collection.
+//                Cheapest possible way to find one collection in a huge wallet.
+const sheetPager = { owner: null, viaVault: false, queue: [], items: [], busy: false,
+  textFilter: '', contract: null };
+
+function resetSheetQueue() {
+  sheetPager.queue = DEFAULT_WALLET_CHAINS.map(chain => ({ chain, cursor: null, done: false, slug: undefined }));
+  sheetPager.items = [];
+  state.walletNfts = [];
+  els.walletgrid.innerHTML = '';
+}
 
 async function listSheetNfts(address, viaVault) {
   sheetPager.owner = address;
   sheetPager.viaVault = !!viaVault;
-  sheetPager.queue = DEFAULT_WALLET_CHAINS.map(chain => ({ chain, cursor: null, done: false }));
-  sheetPager.items = [];
-  state.walletNfts = [];
-  els.walletgrid.innerHTML = '';
+  sheetPager.textFilter = '';
+  sheetPager.contract = null;
+  const si = $('art-search'); if (si) si.value = '';
+  const sc = $('art-search-clear'); if (sc) sc.style.display = 'none';
+  resetSheetQueue();
   els.sheet_status.textContent = viaVault ? 'loading vault NFTs…' : 'loading your NFTs…';
   await loadMoreSheetArt();
 }
@@ -366,11 +382,18 @@ async function loadMoreSheetArt() {
     for (let hops = 0; hops < DEFAULT_WALLET_CHAINS.length; hops++) {
       const entry = sheetPager.queue.find(c => !c.done);
       if (!entry) break;
-      const page = await fetchWalletNftsPage(sheetPager.owner, entry.chain, entry.cursor);
+      let collection = null;
+      if (sheetPager.contract) {
+        if (entry.slug === undefined) entry.slug = await resolveCollectionSlug(sheetPager.contract, entry.chain);
+        if (entry.slug === null) { entry.done = true; continue; } // contract unknown on this chain
+        collection = entry.slug;
+      }
+      const page = await fetchWalletNftsPage(sheetPager.owner, entry.chain, entry.cursor, collection);
       entry.cursor = page.next;
       entry.done = !page.next;
       const add = page.nfts
         .filter(n => n.imageUrl) // no image → nothing to flatten, don't show it
+        .filter(n => !sheetPager.contract || String(n.contract).toLowerCase() === sheetPager.contract) // belt-and-braces
         .map(n => (sheetPager.viaVault ? { ...n, viaVault: true } : n));
       sheetPager.items.push(...add);
       if (add.length) break;
@@ -384,19 +407,70 @@ async function loadMoreSheetArt() {
   }
 }
 
+function sheetMatchesText(n, q) {
+  return String(n.name || '').toLowerCase().includes(q)
+    || String(n.collection || '').toLowerCase().includes(q)
+    || String(n.contract || '').toLowerCase().includes(q);
+}
+
 function renderSheetGrid() {
   const more = sheetPager.queue.some(c => !c.done);
-  state.walletNfts = sheetPager.items;
-  els.walletgrid.innerHTML = sheetPager.items.map((n, i) =>
+  const q = sheetPager.textFilter;
+  const visible = q ? sheetPager.items.filter(n => sheetMatchesText(n, q)) : sheetPager.items;
+  state.walletNfts = visible; // grid indexes must match what's rendered
+  els.walletgrid.innerHTML = visible.map((n, i) =>
     `<div class="nft" data-i="${i}"><img loading="lazy" src="${esc(n.imageUrl || '')}" alt=""><span class="lab">${n.viaVault ? '🔗 ' : ''}${esc(n.name || ('#' + n.tokenId))}</span></div>`).join('');
-  const base = sheetPager.items.length
+  let label;
+  if (q) label = `${visible.length} of ${sheetPager.items.length} loaded match “${q}”`;
+  else if (sheetPager.contract) label = visible.length
+    ? `${visible.length} items in that collection`
+    : 'none of that collection in this wallet';
+  else label = sheetPager.items.length
     ? `${sheetPager.items.length} items`
     : (sheetPager.viaVault ? 'no NFTs found in that vault' : 'no NFTs found');
-  els.sheet_status.textContent = base
+  els.sheet_status.textContent = label
     + (sheetPager.viaVault ? ' · via vault ' + short(sheetPager.owner) + ' — delegation checked on pick' : '')
-    + (more ? ' · more available' : '');
+    + (more ? (q ? ' · LOAD MORE scans further' : ' · more available') : '');
   const btn = $('sheet-more');
   if (btn) btn.style.display = more ? '' : 'none';
+}
+
+// Search box: 0x address → targeted server-side collection listing; anything
+// else → instant client-side filter (no API spend at all).
+async function runArtSearch() {
+  const raw = String($('art-search').value || '').trim();
+  $('art-search-clear').style.display = raw ? '' : 'none';
+  if (!raw) { await clearArtSearch(); return; }
+  if (/^0x[0-9a-fA-F]{40}$/.test(raw)) {
+    sheetPager.contract = raw.toLowerCase();
+    sheetPager.textFilter = '';
+    resetSheetQueue();
+    els.sheet_status.textContent = 'searching that collection…';
+    await loadMoreSheetArt();
+  } else {
+    sheetPager.textFilter = raw.toLowerCase();
+    if (sheetPager.contract) { // leaving contract mode — reload the normal listing
+      sheetPager.contract = null;
+      resetSheetQueue();
+      await loadMoreSheetArt();
+    } else {
+      renderSheetGrid();
+    }
+  }
+}
+
+async function clearArtSearch() {
+  $('art-search').value = '';
+  $('art-search-clear').style.display = 'none';
+  sheetPager.textFilter = '';
+  if (sheetPager.contract) { // contract mode replaced the item list — reload page 1
+    sheetPager.contract = null;
+    resetSheetQueue();
+    els.sheet_status.textContent = 'loading…';
+    await loadMoreSheetArt();
+  } else {
+    renderSheetGrid();
+  }
 }
 function closeSheet() { els.scrim.classList.remove('on'); els.sheet.classList.remove('on'); }
 
@@ -425,6 +499,16 @@ function wireStatic() {
     const acct = walletAccount(); if (acct) await listSheetNfts(acct, false);
   };
   $('sheet-more').onclick = loadMoreSheetArt;
+  $('art-search-go').onclick = runArtSearch;
+  $('art-search-clear').onclick = clearArtSearch;
+  $('art-search').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); runArtSearch(); } });
+  // Text filtering is FREE (client-side) — apply it live as they type.
+  $('art-search').addEventListener('input', () => {
+    const raw = String($('art-search').value || '').trim();
+    $('art-search-clear').style.display = raw ? '' : 'none';
+    if (/^0x[0-9a-fA-F]{40}$/.test(raw)) return; // full address → wait for Search/Enter
+    if (!sheetPager.contract) { sheetPager.textFilter = raw.toLowerCase(); renderSheetGrid(); }
+  });
 
   const cmp = $('compare');
   const hold = on => {

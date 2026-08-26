@@ -176,9 +176,10 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const RETRYABLE_STATUS = new Set([404, 408, 425, 429, 500, 502, 503, 504]);
 const MAX_PAGE_ATTEMPTS = 4;
 
-async function fetchWalletPage(address, chain, cursor) {
+async function fetchWalletPage(address, chain, cursor, collection = null) {
   const url = new URL(`/api/opensea/chain/${chain}/account/${address}/nfts`, window.location.origin);
   url.searchParams.set('limit', '200');
+  if (collection) url.searchParams.set('collection', collection);
   if (cursor) url.searchParams.set('next', cursor);
 
   let lastError = null;
@@ -216,12 +217,26 @@ async function fetchNftDetail(nft) {
 
 // ONE OpenSea page (≤200 items), normalized — for callers that paginate on demand
 // (the Update page's picker) instead of draining the whole inventory up-front.
-export async function fetchWalletNftsPage(address, chain = 'ethereum', cursor = null) {
+// `collection` (an OpenSea slug) narrows the listing server-side — the wallet+
+// collection query is how "search by contract" stays cheap on huge wallets.
+export async function fetchWalletNftsPage(address, chain = 'ethereum', cursor = null, collection = null) {
   const cleanAddress = String(address || '').trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(cleanAddress))
     throw new Error('Enter a valid Ethereum wallet address');
-  const page = await fetchWalletPage(cleanAddress, chain, cursor);
+  const page = await fetchWalletPage(cleanAddress, chain, cursor, collection);
   return { nfts: (page.nfts || []).map(n => normalizeNft(n, chain)), next: page.next || null };
+}
+
+// Contract address -> OpenSea collection slug on one chain (null if unknown there).
+// One light API call; callers cache the result per (chain, contract).
+export async function resolveCollectionSlug(contract, chain = 'ethereum') {
+  try {
+    const res = await fetch(`/api/opensea/chain/${chain}/contract/${String(contract).toLowerCase()}`);
+    if (!res.ok) return null;
+    const j = await res.json();
+    const slug = j.collection || j.collection_slug || j.nft_contract?.collection || null;
+    return typeof slug === 'string' && slug ? slug : null;
+  } catch (_) { return null; }
 }
 
 export async function loadWalletNfts(address, chain = 'ethereum') {

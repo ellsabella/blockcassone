@@ -160,6 +160,11 @@
     <h2>Pick art from your wallet</h2>
     <div class="warn">⚠ Use only art you own the rights to. Re-basing onto infringing artwork is your responsibility.</div>
     <div class="vault-row">
+      <input id="art-search" placeholder="search: collection name, or paste 0x contract" spellcheck="false" autocomplete="off">
+      <button id="art-search-go">Search</button>
+      <button id="art-search-clear" style="display:none">✕</button>
+    </div>
+    <div class="vault-row">
       <input id="vault-addr" placeholder="vault address (delegate.xyz) 0x…" spellcheck="false" autocomplete="off">
       <button id="vault-load">Load vault</button>
       <button id="vault-clear" style="display:none">My wallet</button>
@@ -172,6 +177,6 @@
   <div class="toast" id="toast"></div>
 
   <script src="/viewer/vendor/wallet-widget.js?v=20260825-3"></script>
-  <script type="module" src="./update-cube.js?v=20260825-4"></script>
+  <script type="module" src="./update-cube.js?v=20260826-1"></script>
 </body>
 </html>
