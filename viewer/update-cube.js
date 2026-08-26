@@ -140,7 +140,7 @@ async function guardProposal(nft) {
   if (!avail.ok) return avail.reason;
   if (nft.viaVault) {
     if (String(nft.chain || 'ethereum') !== 'ethereum') return 'vault art is mainnet-only for now';
-    const usable = await checkSourceUsable(acct, nft.contract, nft.tokenId);
+    const usable = await checkSourceUsable(acct, nft.contract, nft.tokenId, nft.vault);
     if (!usable.ok) return usable.reason;
   }
   return null;
@@ -157,7 +157,7 @@ async function setProposalWallet(nft) {
     const payload = gridToTonalPayload(grid);
     state.proposal = { kind: 'wallet', sourceContract: nft.contract, sourceTokenId: nft.tokenId,
       payload, art: nft.imageUrl, label: (nft.name || ('#' + nft.tokenId)) + (nft.viaVault ? ' (vault)' : ''),
-      viaVault: !!nft.viaVault, chain: nft.chain || 'ethereum' };
+      viaVault: !!nft.viaVault, vault: nft.vault || null, chain: nft.chain || 'ethereum' };
     state.proposedSvg = null; state.holding = false;
     render();
     fetchProposed2D(); fetchProposed3D();
@@ -220,10 +220,10 @@ async function commit() {
     if (p.kind === 'wallet') {
       // Re-run the launch-safety guard right before the tx — pool claims and
       // delegations can change between picking the art and committing it.
-      const blocked = await guardProposal({ contract: p.sourceContract, tokenId: p.sourceTokenId, viaVault: p.viaVault, chain: p.chain })
+      const blocked = await guardProposal({ contract: p.sourceContract, tokenId: p.sourceTokenId, viaVault: p.viaVault, vault: p.vault, chain: p.chain })
         .catch(e => 'source re-check failed: ' + msg(e));
       if (blocked) { toast(blocked, true); return; }
-      await customizeCube({ cubeId: c.cubeId, owner, sourceContract: p.sourceContract, sourceTokenId: p.sourceTokenId, payload: p.payload });
+      await customizeCube({ cubeId: c.cubeId, owner, sourceContract: p.sourceContract, sourceTokenId: p.sourceTokenId, payload: p.payload, vault: p.vault });
     } else {
       await rebaseToPoolSource({ cubeId: c.cubeId, owner, sourceContract: p.sourceContract, sourceTokenId: p.sourceTokenId });
     }
@@ -445,7 +445,7 @@ async function loadMoreSheetArt(initial) {
         .filter(n => n.imageUrl) // no image → nothing to flatten, don't show it
         .filter(n => !hidden.has(String(n.contract).toLowerCase())) // genesis source collections — never usable
         .filter(n => !sheetPager.contract || String(n.contract).toLowerCase() === sheetPager.contract) // belt-and-braces
-        .map(n => (sheetPager.viaVault ? { ...n, viaVault: true } : n));
+        .map(n => (sheetPager.viaVault ? { ...n, viaVault: true, vault: sheetPager.owner } : n));
       sheetPager.items.push(...add);
       if (add.length) break;
     }

@@ -111,7 +111,7 @@ function encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, si
 // wallet token (sourceContract,sourceTokenId), minted by `owner`. Shared by both
 // the fresh external mint and the re-base (customize). Dev flow: the node signs
 // with the unlocked attestationSigner. Returns { att, signature }.
-async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTokenId, payload }) {
+async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTokenId, payload, vault }) {
   // On-chain hashTonalBands2Bit = keccak256(abi.encode(DOMAIN, payload)). Rebuild
   // that exact preimage (domain word + bytes offset/length/data) and hash it
   // client-side so attestation.payloadHash matches byte-for-byte — no RPC round
@@ -183,7 +183,10 @@ async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTok
   } else {
     // Sepolia / prod: the signer key lives server-side behind /api/attest. Send the
     // EXACT typed data we'll submit so the returned signature covers this att verbatim.
-    signature = await attestViaService(typedData);
+    // `vault` rides along as a VERIFICATION HINT for delegated ERC-1155 art (1155s
+    // have no on-chain owner for the service to discover) — the service verifies
+    // the vault's balance + delegation itself; the hint is never trusted blindly.
+    signature = await attestViaService(typedData, vault);
   }
   return { att, signature };
 }
@@ -191,11 +194,11 @@ async function signFlatteningAttestation(cfg, { owner, sourceContract, sourceTok
 // POST the EIP-712 typed data to the server-side signer service and return the
 // signature. Used on any non-directRpc chain (Sepolia/prod) where no unlocked signer
 // exists. See renderer/server.js /api/attest.
-async function attestViaService(typedData) {
+async function attestViaService(typedData, vault) {
   const res = await fetch('/api/attest', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ typedData }),
+    body: JSON.stringify(vault ? { typedData, vault } : { typedData }),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || j.error) {
@@ -208,12 +211,12 @@ async function attestViaService(typedData) {
 // Re-base cube `cubeId` (owned by `owner`) onto the wallet token
 // (sourceContract,sourceTokenId) with the flattened `payload`. Dev flow: Anvil
 // signs the EIP-712 attestation (unlocked signer) and sends the tx (unlocked owner).
-export async function customizeCube({ cubeId, owner, sourceContract, sourceTokenId, payload }) {
+export async function customizeCube({ cubeId, owner, sourceContract, sourceTokenId, payload, vault }) {
   const cfg = await loadConfig();
   if (!cfg.cubeMintController || !cfg.flatteningAttestation || !cfg.attestationSigner) {
     throw new Error('chain-config.json missing customize addresses — redeploy with the customize stack');
   }
-  const { att, signature } = await signFlatteningAttestation(cfg, { owner, sourceContract, sourceTokenId, payload });
+  const { att, signature } = await signFlatteningAttestation(cfg, { owner, sourceContract, sourceTokenId, payload, vault });
   const data = encodeCustomize(cubeId, sourceContract, sourceTokenId, payload, att, signature);
   return sendTx(cfg, owner, cfg.cubeMintController, data, 'customizeCube');
 }
@@ -622,23 +625,40 @@ export async function checkSourceAvailable(sourceContract, sourceTokenId) {
 // owner, or hold a delegate.xyz Registry-V2 delegation from the owner (token, contract
 // or wallet-wide — checkDelegateForERC721 resolves all three). Mainnet reads only —
 // callers should skip it for NFTs enumerated on other chains.
-export async function checkSourceUsable(wallet, sourceContract, sourceTokenId) {
+export async function checkSourceUsable(wallet, sourceContract, sourceTokenId, vault) {
   const cfg = await loadConfig();
-  let owner;
+  // ERC-721 path: single owner → owner match or a 721 delegation from the owner.
+  let owner = null;
   try {
     const ret = await ethCall(cfg, sourceContract, '0x6352211e' + word(sourceTokenId)); // ownerOf(uint256)
-    owner = '0x' + String(ret).replace(/^0x/, '').slice(-40);
-  } catch (_) {
-    return { ok: false, reason: 'could not read that token’s owner on-chain' };
+    if (ret && ret !== '0x' && !/^0x0*$/.test(String(ret))) owner = '0x' + String(ret).replace(/^0x/, '').slice(-40);
+  } catch (_) { /* not a 721 — try the 1155 shape below */ }
+  if (owner) {
+    if (owner.toLowerCase() === String(wallet).toLowerCase()) return { ok: true, owner };
+    try {
+      const data = '0xb9f36874' // checkDelegateForERC721(address,address,address,uint256,bytes32)
+        + addrWord(wallet) + addrWord(owner) + addrWord(sourceContract) + word(sourceTokenId) + '0'.repeat(64);
+      const ret = await ethCall(cfg, DELEGATE_REGISTRY_V2, data);
+      if (!/^0x0*$/.test(String(ret))) return { ok: true, owner, viaDelegate: true };
+    } catch (_) { /* registry unreachable → fall through to the refusal */ }
+    return { ok: false, owner, reason: 'this wallet neither owns that token nor holds a delegate.xyz delegation from its owner' };
   }
-  if (owner.toLowerCase() === String(wallet).toLowerCase()) return { ok: true, owner };
+  // ERC-1155 path: no single owner — the wallet's own balance, or the named
+  // vault's balance + a delegate.xyz ERC-1155 delegation to the wallet.
+  const bal = async (who) => BigInt(await ethCall(cfg, sourceContract, '0x00fdd58e' + addrWord(who) + word(sourceTokenId)) || '0x0'); // balanceOf(address,uint256)
   try {
-    const data = '0xb9f36874' // checkDelegateForERC721(address,address,address,uint256,bytes32)
-      + addrWord(wallet) + addrWord(owner) + addrWord(sourceContract) + word(sourceTokenId) + '0'.repeat(64);
-    const ret = await ethCall(cfg, DELEGATE_REGISTRY_V2, data);
-    if (!/^0x0*$/.test(String(ret))) return { ok: true, owner, viaDelegate: true };
-  } catch (_) { /* registry unreachable → fall through to the refusal */ }
-  return { ok: false, owner, reason: 'this wallet neither owns that token nor holds a delegate.xyz delegation from its owner' };
+    if ((await bal(wallet)) > 0n) return { ok: true };
+    if (vault) {
+      const data = '0xb8705875' // checkDelegateForERC1155(address,address,address,uint256,bytes32) -> amount
+        + addrWord(wallet) + addrWord(vault) + addrWord(sourceContract) + word(sourceTokenId) + '0'.repeat(64);
+      const [vb, del] = await Promise.all([bal(vault), ethCall(cfg, DELEGATE_REGISTRY_V2, data)]);
+      if (vb > 0n && !/^0x0*$/.test(String(del))) return { ok: true, owner: vault, viaDelegate: true };
+      return { ok: false, reason: 'the vault holds no balance of that token, or has no delegate.xyz ERC-1155 delegation to this wallet' };
+    }
+    return { ok: false, reason: 'this wallet holds no balance of that ERC-1155 token' };
+  } catch (_) {
+    return { ok: false, reason: 'could not verify ownership of that token on-chain' };
+  }
 }
 
 // poolSources() minus any already claimed on-chain — the "spin the wheel" should only ever

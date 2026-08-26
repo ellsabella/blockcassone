@@ -573,7 +573,7 @@ function attestKeys(chainId, sourceContract, sourceTokenId) {
   return { storeKey: storeKey.slice(2), claimKey: claimKey.slice(2) };
 }
 
-async function verifyAttestRequest(typedData) {
+async function verifyAttestRequest(typedData, vaultHint) {
   const config = readChainConfig();
   const m = typedData.message || {};
   const d = typedData.domain || {};
@@ -614,24 +614,52 @@ async function verifyAttestRequest(typedData) {
     if (!ZERO_RET(r)) return fail('source is already claimed by a cube');
   }
 
-  // OWNER — find the token's chain, read its owner, accept owner or delegate.
+  // OWNER — find the token's chain and verify the minter controls it.
+  //   ERC-721:  ownerOf == minter, or a delegate.xyz ERC-721 delegation from the owner.
+  //   ERC-1155: balanceOf(minter, id) > 0, or — with the client's vault hint —
+  //             balanceOf(vault, id) > 0 plus a delegate.xyz ERC-1155 delegation
+  //             (1155s have no single owner to discover on-chain, so the vault
+  //             must be named by the requester; the hint is verified, not trusted).
   const chains = [{ name: 'ethereum', rpcUrl: config.rpcUrl }, ...ATTEST_ALT_CHAINS];
+  const vault = /^0x[0-9a-fA-F]{40}$/.test(String(vaultHint || '')) ? String(vaultHint) : null;
   const ownerData = '0x6352211e' + ATTEST_WORD(sourceTokenId); // ownerOf(uint256)
+  const balData = (who) => '0x00fdd58e' + ATTEST_ADDR(who) + ATTEST_WORD(sourceTokenId); // balanceOf(address,uint256)
   for (const chain of chains) {
-    let owner;
+    // ERC-721 path
+    let owner = null;
     try {
       const r = await ethCall(chain.rpcUrl, sourceContract, ownerData);
-      if (!r || r === '0x' || ZERO_RET(r)) continue;
-      owner = '0x' + String(r).replace(/^0x/, '').slice(-40);
-    } catch (_) { continue; } // not on this chain (or RPC hiccup) — try the next
-    if (owner.toLowerCase() === minter.toLowerCase()) return { ok: true };
+      if (r && r !== '0x' && !ZERO_RET(r)) owner = '0x' + String(r).replace(/^0x/, '').slice(-40);
+    } catch (_) { /* not a 721 on this chain — try 1155 below */ }
+    if (owner) {
+      if (owner.toLowerCase() === minter.toLowerCase()) return { ok: true };
+      try {
+        const del = await ethCall(chain.rpcUrl, ATTEST_DELEGATE_REGISTRY,
+          '0xb9f36874' + ATTEST_ADDR(minter) + ATTEST_ADDR(owner) + ATTEST_ADDR(sourceContract)
+          + ATTEST_WORD(sourceTokenId) + '0'.repeat(64)); // checkDelegateForERC721(...,rights=0)
+        if (!ZERO_RET(del)) return { ok: true };
+      } catch (_) { /* registry unreachable on this chain */ }
+      return fail('minter neither owns the source token nor holds a delegate.xyz delegation from its owner');
+    }
+    // ERC-1155 path
+    let minterBal = null;
     try {
-      const del = await ethCall(chain.rpcUrl, ATTEST_DELEGATE_REGISTRY,
-        '0xb9f36874' + ATTEST_ADDR(minter) + ATTEST_ADDR(owner) + ATTEST_ADDR(sourceContract)
-        + ATTEST_WORD(sourceTokenId) + '0'.repeat(64)); // checkDelegateForERC721(...,rights=0)
-      if (!ZERO_RET(del)) return { ok: true };
-    } catch (_) { /* registry unreachable on this chain */ }
-    return fail('minter neither owns the source token nor holds a delegate.xyz delegation from its owner');
+      const r = await ethCall(chain.rpcUrl, sourceContract, balData(minter));
+      if (r && r !== '0x') minterBal = BigInt(r);
+    } catch (_) { /* not an 1155 either — token isn't on this chain */ }
+    if (minterBal !== null) {
+      if (minterBal > 0n) return { ok: true };
+      if (vault) {
+        try {
+          const vb = BigInt(await ethCall(chain.rpcUrl, sourceContract, balData(vault)) || '0x0');
+          const del = await ethCall(chain.rpcUrl, ATTEST_DELEGATE_REGISTRY,
+            '0xb8705875' + ATTEST_ADDR(minter) + ATTEST_ADDR(vault) + ATTEST_ADDR(sourceContract)
+            + ATTEST_WORD(sourceTokenId) + '0'.repeat(64)); // checkDelegateForERC1155(...,rights=0) -> amount
+          if (vb > 0n && !ZERO_RET(del)) return { ok: true };
+        } catch (_) { /* fall through to the refusal */ }
+      }
+      return fail('minter holds no balance of that ERC-1155 token (and no verifiable vault delegation)');
+    }
   }
   return fail('source token not found on any supported chain');
 }
@@ -642,12 +670,12 @@ async function handleAttest(req, res) {
   try {
     const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (attestRateLimited(ip)) { sendJson(res, 429, { error: 'Too many attestation requests — try later' }); return; }
-    const { typedData } = JSON.parse(await readRequestBody(req, 4_000_000));
+    const { typedData, vault } = JSON.parse(await readRequestBody(req, 4_000_000));
     if (!typedData || !typedData.domain || !typedData.message || !typedData.primaryType) {
       sendJson(res, 400, { error: 'Missing typedData {domain, types, primaryType, message}' });
       return;
     }
-    const verdict = await verifyAttestRequest(typedData);
+    const verdict = await verifyAttestRequest(typedData, vault);
     if (!verdict.ok) { sendJson(res, 403, { error: 'Attestation refused', detail: verdict.reason }); return; }
     const account = getAttestAccount();
     const types = { ...typedData.types };
