@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260826-6';
+const VIEWER_BUILD = '20260826-7';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -807,8 +807,58 @@ async function ownerLabelFor(address) {
 }
 
 function loadedWalletAddress() {
+  // The CONNECTED wallet always wins. Before this check, the function read the
+  // legacy wallet-nfts state (only populated by the old "Load" inventory scan)
+  // and fell through to the hidden dev address input — whose hardcoded default
+  // hijacked "Show mine" for every visitor who had merely connected: the panel
+  // focused the dev wallet instead of theirs, so their cubes never appeared.
+  if (connectedAddress) return connectedAddress;
+  // The raw input value counts only once its legacy Load flow has actually run
+  // (wallet.loaded) — otherwise every visitor "was" the dev default address:
+  // wrong own-cube highlighting, and a Show-mine button that focused dev cubes.
   const wallet = getWalletState();
-  return normalizeAddress(wallet.loaded ? wallet.address : walletAddressInput?.value);
+  return wallet.loaded ? normalizeAddress(wallet.address) : '';
+}
+
+// Collection names for customized cubes: the genesis table only knows the six
+// source collections, so anything brought in by a customize labelled "Source".
+// Resolve unknown contracts via the OpenSea contract endpoint (one API call per
+// contract, cached in localStorage forever), then patch every affected record
+// and re-render the labels that showed the fallback.
+const _collNamePending = new Set();
+function externalCollectionName(n) {
+  const known = n.cc0ProjectName || n.collection;
+  if (known) return known;
+  const c = String(n.contract || '').toLowerCase();
+  if (!c || _collNamePending.has(c)) return '';
+  _collNamePending.add(c);
+  const cacheKey = 'coll-name:' + c;
+  let cached = null;
+  try { cached = localStorage.getItem(cacheKey); } catch (_) {}
+  const apply = (name) => {
+    if (!name) return;
+    for (const cube of getMintedCubes()) {
+      const nn = cube.nft;
+      if (nn && String(nn.contract || '').toLowerCase() === c && !nn.isNormie && !nn.collection) {
+        nn.collection = name;
+        nn.cc0ProjectName = nn.cc0ProjectName || name;
+        nn.name = `${name} #${nn.tokenId || '?'}`;
+      }
+    }
+    _ownerInvKey = ''; // bust the inventory diff-gate so the list re-renders with real names
+    refreshOwnerFocusLabel();
+    try { updateCubeDetailInfo(); } catch (_) {}
+  };
+  if (cached !== null) { if (cached) setTimeout(() => apply(cached), 0); return cached || ''; }
+  fetch(`/api/opensea/chain/${n.chain || 'ethereum'}/contract/${c}`)
+    .then(r => (r.ok ? r.json() : null))
+    .then(j => {
+      const name = (j && (j.name || j.collection)) || '';
+      try { localStorage.setItem(cacheKey, name); } catch (_) {}
+      apply(name);
+    })
+    .catch(() => { _collNamePending.delete(c); }); // transient failure → retry on a later render
+  return '';
 }
 
 function ownerAddressForSlot(slot) {
@@ -915,7 +965,7 @@ function updateOwnerInventory(ownerLabel) {
     const n = cube.nft || {};
     const source = cube.sourceKind === 'normie'
       ? `Normie #${n.normieId ?? n.tokenId ?? '?'}`
-      : `${n.cc0ProjectName || n.collection || 'Source'} #${n.tokenId ?? '?'}`;
+      : `${externalCollectionName(n) || 'Source'} #${n.tokenId ?? '?'}`;
     const slotEl = document.createElement('span');
     const sourceEl = document.createElement('span');
     slotEl.textContent = String(cube.slot);
@@ -4473,7 +4523,7 @@ function initMobileUI() {
       const n = cube.nft || {};
       titleEl.textContent = n.isNormie
         ? `NORMIE #${n.normieId ?? '?'}`
-        : `${String(n.cc0ProjectName || n.collection || 'SOURCE').toUpperCase()} #${n.tokenId ?? '?'}`;
+        : `${String(externalCollectionName(n) || 'SOURCE').toUpperCase()} #${n.tokenId ?? '?'}`;
       subEl.textContent = `CUBE ${cube.cubeId} · STREET ${street} · ${env}`;
       const short = shortAddress(cube.wallet);
       sheet.querySelector('.m-owner-name').textContent = short;
@@ -4484,7 +4534,7 @@ function initMobileUI() {
           sheet.querySelector('.m-r-owner').textContent = label;
         }
       }).catch(() => {});
-      sheet.querySelector('.m-r-coll').textContent = n.isNormie ? 'Normies' : (n.cc0ProjectName || n.collection || '?');
+      sheet.querySelector('.m-r-coll').textContent = n.isNormie ? 'Normies' : (externalCollectionName(n) || '?');
       sheet.querySelector('.m-share').style.display = '';
       // Owner chip strip
       const owned = getMintedCubes().filter(c2 => c2.wallet === cube.wallet).sort((a, b) => a.slot - b.slot);
