@@ -77,14 +77,16 @@
     .sheet .grab{width:38px;height:4px;border-radius:99px;background:#33333c;margin:9px auto 4px}
     .sheet h2{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);padding:6px 16px;font-weight:800}
     .warn{margin:2px 16px 10px;padding:9px 11px;border:1px solid rgba(255,93,108,.4);background:rgba(255,93,108,.07);border-radius:9px;color:#ff9aa4;font-size:11px;line-height:1.45}
-    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:4px 16px 24px;overflow-y:auto}
-    @media(min-width:520px){.grid{grid-template-columns:repeat(4,1fr)}}
-    /* Square tiles: a padding-top:100% spacer forces the 1:1 box (grid-stretch
-       ignores aspect-ratio on the container — learned the hard way); the image
-       absolutely fills it, so a slow/odd/missing image can never squash the cell. */
+    /* NOT css-grid: inside the height-capped scrolling sheet, grid row sizing
+       collapsed the tiles' derived heights to ~0 and then stretched rows to
+       share the container height — the more tiles, the thinner each row (the
+       "sliver" bug, twice). Flex-wrap with an explicit basis cannot do that:
+       line height = tallest in-flow item = the image's 1:1 box. */
+    .grid{display:flex;flex-wrap:wrap;align-content:flex-start;gap:10px;padding:4px 16px 24px;overflow-y:auto}
+    .grid .nft{flex:0 0 calc((100% - 20px)/3)}
+    @media(min-width:520px){.grid .nft{flex:0 0 calc((100% - 30px)/4)}}
     .nft{border:2px solid transparent;border-radius:11px;overflow:hidden;background:#0b0b11;cursor:pointer;position:relative}
-    .nft::before{content:"";display:block;padding-top:100%}
-    .nft img,.nft svg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+    .nft img,.nft svg{display:block;width:100%;aspect-ratio:1/1;object-fit:cover}
     .nft:hover{border-color:var(--pink)}
     .nft .lab{position:absolute;left:0;right:0;bottom:0;font-size:9px;padding:3px 5px;color:var(--ink);background:linear-gradient(transparent,rgba(0,0,0,.8));font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .sheet .status{color:var(--faint);font-size:11px;padding:0 16px 18px}
