@@ -412,9 +412,20 @@ function scoreTransitionGrid(positions, length, cells) {
 function inferGridAxisFromTransitions(positions, length) {
   const maxCells = Math.max(MIN_PIXEL_GRID, Math.min(MAX_PIXEL_GRID, Math.floor(length / 2)));
   let best = { cells: 0, score: 0, fit: 0, coverage: 0 };
+  const all = [];
   for (let cells = MIN_PIXEL_GRID; cells <= maxCells; cells++) {
     const candidate = scoreTransitionGrid(positions, length, cells);
+    all.push(candidate);
     if (candidate.score > best.score) best = candidate;
+  }
+  // Prefer the COARSEST grid within a whisker of the best score: every finer
+  // multiple of the true pitch fits the transitions just as well (a 10px line
+  // is also a 5px line), and the common-grid boost could lift e.g. 36 over the
+  // true 18 (MoonCats) — doubling the grid renders the sprite stretched. A
+  // genuinely-wrong coarser grid misses half the transitions and drops far
+  // below the whisker, so this cannot over-coarsen.
+  for (const candidate of all) {
+    if (candidate.score >= best.score - 0.09) return candidate;
   }
   return best;
 }
@@ -1004,7 +1015,15 @@ export async function imageUrlToBinaryGrid(imageUrl) {
   const cropDiag = cropResult.cropped
     ? { from: cropResult.originalSize, to: cropResult.croppedSize, contentRatio: Number(cropResult.contentRatio.toFixed(3)) }
     : { skipped: cropResult.reason, ...(cropResult.contentRatio !== undefined ? { contentRatio: Number(cropResult.contentRatio.toFixed(3)) } : {}) };
-  const pixelGrid = inferPixelGrid(sample);
+  // Pixel-grid inference runs on the UNCROPPED frame first (MoonCat bug):
+  // sprites are rendered phase-aligned to the full image (MoonCats: 10px pitch
+  // from x=0 with a 20px transparent border), and cropping to content + margin
+  // shifts that phase so NO integer grid fits the cropped sample — the true
+  // pitch scored terribly while junk fine grids (which fit anything) passed,
+  // moiréing the art into noise. Cropped inference stays as the fallback for
+  // sprites with odd framing; border cells just become background either way.
+  let pixelGrid = inferPixelGrid(rawSample);
+  if (!pixelGrid.isPixelArt && cropResult.cropped) pixelGrid = inferPixelGrid(sample);
   if (!pixelGrid.isPixelArt) {
     const smooth = colorGridFromImage(img, SMOOTH_GRID_SIZE);
     const smoothStats = grayscaleStats(smooth.grayscale);
