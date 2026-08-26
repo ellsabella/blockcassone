@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260826-5';
+const VIEWER_BUILD = '20260826-6';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -3932,6 +3932,8 @@ if (CINEMATIC && typeof document !== 'undefined' && document.body) {
 //   ?rec=street-line  line-follow along one populated street
 //   ?rec=cube-line    same street, camera right down at cube level
 //   ?rec=coaster      rollercoaster: zoom fully out, dive through cube middles, back out
+//   ?rec=thru-line    dead-straight one-way flythrough of an INTERIOR cube row
+//                     (adjacent cubes flank the path on all four sides)
 // Extras: &start=<slot> &dur=<seconds> &fps=<30|60> &w=1920 &h=1080
 // Frames render on a FIXED virtual clock (performance.now is overridden while
 // capturing, so camera + shader time are exactly 1/fps per frame regardless of
@@ -4024,6 +4026,40 @@ function setupWalk() {
           durationMs: _walkDurationMs, heightOffset: cs * 1.1,
           lookAheadLen: cs * 3.2, near: cs * 0.01, far: cs * 220,
         });
+  } else if (REC_SHOT === 'thru-line') {
+    const nb = startParam !== null ? Math.floor(startParam / NEIGHBOURHOOD_SIZE) : _recScoutNbhd();
+    focus = nb * NEIGHBOURHOOD_SIZE;
+    scope = 'neighbourhood';
+    // Straight single-direction flythrough: lattice-sort the neighbourhood's slot
+    // centres, keep only INTERIOR rows (y and z strictly inside the block, so
+    // adjacent cubes flank the path on all four sides), then fly dead-straight
+    // through the middle of every cube in the row with the most minted art.
+    const centers = [];
+    for (let m = focus; m < focus + NEIGHBOURHOOD_SIZE; m++) centers.push({ m, c: centerOfAABB(cubeAABBFor(m)) });
+    const uniq = (vals) => [...new Set(vals.map(v => Math.round(v * 1000) / 1000))].sort((a, b) => a - b);
+    const ys = uniq(centers.map(p => p.c[1])), zs = uniq(centers.map(p => p.c[2]));
+    let bestRow = null, bestScore = -1;
+    for (const y of ys.slice(1, -1)) for (const z of zs.slice(1, -1)) {
+      const row = centers.filter(p => Math.abs(p.c[1] - y) < 0.001 && Math.abs(p.c[2] - z) < 0.001);
+      if (row.length < 2) continue;
+      const minted = row.filter(p => isMintedSlot(p.m)).length;
+      if (minted > bestScore) { bestScore = minted; bestRow = { row, y, z }; }
+    }
+    if (!bestRow) { log('rec: no interior row found in that neighbourhood'); return; }
+    bestRow.row.sort((a, b) => a.c[0] - b.c[0]);
+    const first = bestRow.row[0].c[0], last = bestRow.row[bestRow.row.length - 1].c[0];
+    const lead = cs * 2.5; // enter before the block face, exit past the far one
+    points = [
+      { x: first - lead, y: bestRow.y, z: bestRow.z },
+      { x: last + lead, y: bestRow.y, z: bestRow.z },
+    ];
+    log(`rec: thru-line nb${nb} — row y=${bestRow.y.toFixed(2)} z=${bestRow.z.toFixed(2)}, ${bestRow.row.length} cubes (${bestScore} minted)`);
+    _walkName = `thru-line-nb${nb}`;
+    _walkDurationMs = (durS || 12) * 1000;
+    _walk = createHilbertWalk(orbit, points, {
+      durationMs: _walkDurationMs, heightOffset: 0, lookAheadLen: cs * 1.2,
+      near: cs * 0.005, far: cs * 200,
+    });
   } else if (REC_SHOT === 'street-line' || REC_SHOT === 'cube-line') {
     const st = startParam !== null ? Math.floor(startParam / STREET_SIZE) : _recScoutStreet();
     focus = st * STREET_SIZE;
