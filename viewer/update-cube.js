@@ -7,6 +7,7 @@
 
 import { fetchWalletNftsPage, resolveCollectionSlug, DEFAULT_WALLET_CHAINS } from './wallet-nfts.js';
 import { loadSnapshotOwnership } from './chain-cubes.js';
+import { GENESIS_SOURCE_CONTRACTS } from './mint-simulator.js';
 // Versioned import: the flattener changes behaviour (MoonCat fixes) and a stale
 // cached copy silently produces garbage payloads — pin the version so a deploy
 // always reaches the browser. Keep in lockstep with wallet-nfts.js's import.
@@ -352,24 +353,22 @@ async function openSheet() {
 //                contract → collection slug (1 light call per chain, cached on the
 //                queue entry), then the wallet's NFTs in JUST that collection.
 //                Cheapest possible way to find one collection in a huge wallet.
-// Genesis source collections are hidden from the picker entirely: their tokens
-// can never be a customize source (the pool guard would reject them), so
-// showing them just sets users up for a rejection. The set is DERIVED from the
-// world snapshot (every distinct source contract — all six collections) plus
-// the Normies contract; zero RPC, and it tracks reality as mints continue.
+// The six GENESIS source collections are hidden from the picker entirely: their
+// tokens are mint-pool art and can never be a customize source (the pool guard
+// would reject them), so showing them just sets users up for a rejection.
+// Explicit table, NOT derived from the snapshot: once customizes land, arbitrary
+// collections become "source contracts" of live cubes, and a snapshot-derived
+// set wrongly hid those whole collections (cube #213 → 0x724d…5774 did exactly
+// that). The pick/commit guards still enforce the real rule per token.
 let _hiddenContractsP = null;
 function hiddenSourceContracts() {
   if (!_hiddenContractsP) {
     _hiddenContractsP = (async () => {
-      const set = new Set();
+      const set = new Set(GENESIS_SOURCE_CONTRACTS);
       try {
         const snap = await loadSnapshotOwnership();
-        for (const r of (snap && snap.records) || []) {
-          const c = r.source && r.source.contract;
-          if (c) set.add(String(c).toLowerCase());
-        }
         if (snap && snap.config && snap.config.normies) set.add(String(snap.config.normies).toLowerCase());
-      } catch (_) { /* no snapshot → the pick/commit guards still protect */ }
+      } catch (_) { /* table alone is complete; config just double-checks Normies */ }
       return set;
     })();
   }

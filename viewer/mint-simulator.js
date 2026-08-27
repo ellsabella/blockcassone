@@ -38,6 +38,9 @@ const CC0_COLLECTIONS = [
   { key: 'kevin', name: 'OnChainKevin', contract: '0x17b19c70bfca098da3f2efef6e7fa3a1c42f5429', cap: 123, model: 'external' },
 ];
 const GENESIS_COLLECTIONS = [NORMIE_COLLECTION, ...CC0_COLLECTIONS];
+// Lower-cased contracts of the six genesis source collections — the ONLY
+// collections the Update picker hides (their tokens are mint-pool art).
+export const GENESIS_SOURCE_CONTRACTS = Object.freeze(GENESIS_COLLECTIONS.map(c => String(c.contract).toLowerCase()));
 
 // Real flattened CC0 art, grouped by source contract, loaded once from the baked
 // world snapshot (data/world-snapshot.json). The sim cycles a collection's samples
