@@ -27,6 +27,7 @@ export function loadConfig() {
     thumbnailRenderer: raw.thumbnailRenderer || null,
     cubeMintController: raw.cubeMintController || null,
     normieStorage: raw.normieStorage || null,
+    normies: raw.normies ? String(raw.normies).toLowerCase() : null, // Normies token — decides sourceKind on re-base
     nonNormieStore: raw.nonNormieStore || null,   // NonNormieArtStore (external/CC0 tonal art)
     // Backfill window. Default 0n; override for big/mainnet forks to skip the
     // pre-deploy range (INDEXER_FROM_BLOCK=<deploy block>).

@@ -22,6 +22,15 @@ export class WorldState {
     this.payloadHashByCube = new Map();   // cubeId(str) -> per-cube override tonal hash (customize/re-base)
     this.payloadHashBySource = new Map(); // sourceKey -> source-keyed tonal hash (genesis CC0 pool)
     this.history = new Map();      // cubeId(str) -> ordered [entries] (mint | rebase | move)
+    this.normies = null;           // Normies contract (lowercased) — see setNormiesContract
+  }
+
+  // CubeCustomized doesn't emit sourceKind, so the fold derives it from the new
+  // source contract: Normies → 'normie', anything else → 'external' (that is what
+  // CubeNFT.customizeCubeSource / rebaseToPoolSource set on-chain). Without this
+  // a re-based cube kept its mint-time kind and the viewer rendered the WRONG art.
+  setNormiesContract(addr) {
+    this.normies = addr ? lc(addr) : null;
   }
 
   // A cube's current tonal art hash: per-cube override first (customize/re-base), else
@@ -111,14 +120,19 @@ export class WorldState {
         tx: l.transactionHash,
       });
     }
-    // NOTE (v1 limitation): CubeCustomized doesn't emit sourceKind, so a re-base
-    // that changes kind keeps the mint-time kind. Fold CubeCustomizedWithPayload
-    // (payloadHash) when the art cache lands.
+    // CubeCustomized doesn't emit sourceKind — derive it from the new source
+    // contract (see setNormiesContract). Bug history: keeping the mint-time kind
+    // left cube #402 (slot 1113) marked 'normie' after a re-base onto WGMribles
+    // #20030, so the viewer hydrated Normie #20030's art instead of the payload.
     for (const l of [...customized].sort(byOrder)) {
       const r = this.records.get(String(l.args.cubeId));
       if (r) {
-        r.source.contract = lc(l.args.sourceContract);
+        const contract = lc(l.args.sourceContract);
+        const isNormie = !!this.normies && contract === this.normies;
+        r.source.contract = contract;
         r.source.tokenId = String(l.args.sourceTokenId);
+        r.sourceKind = isNormie ? 'normie' : 'external';
+        r.sourceKindNumber = isNormie ? 1 : 2;
         r._chain.payloadVersion = Number(l.args.payloadVersion);
       }
       // Re-base entry — a new current source (art changed). The genesis origin stays

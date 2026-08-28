@@ -19,6 +19,7 @@ async function main() {
   const client = createPublicClient({ transport: http(cfg.rpcUrl), pollingInterval: POLL_MS });
 
   const ws = new WorldState();
+  ws.setNormiesContract(cfg.normies);
   const artCache = new NormieArtCache(cfg);
   const nonNormieArtCache = new NonNormieArtCache(cfg);
 

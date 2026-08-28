@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260826-7';
+const VIEWER_BUILD = '20260828-1';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -4445,6 +4445,9 @@ function initMobileUI() {
     `<button class="m-iconbtn m-close" aria-label="Close">${svgIcon('<path d="M4 4 L16 16"></path><path d="M16 4 L4 16"></path>')}</button>` +
     '<div class="m-brand">THE BLOCK</div>' +
     '<a class="m-item current" href="/viewer/">EXPLORER <span class="m-cur">CURRENT</span></a>' +
+    // Same on-chain gate as the desktop nav link (nav-gate.js reveals [data-gate]
+    // once customizesEnabled is confirmed) — the mobile menu simply never had it.
+    '<a class="m-item" href="/viewer/update.html" data-gate="customize" style="display:none">UPDATE</a>' +
     '<a class="m-item" href="/about">ABOUT</a>' +
     '<a class="m-item" href="https://opensea.io/collection/theblock-by-ella/overview" target="_blank" rel="noopener">OPENSEA &#8599;</a>' +
     '<div class="m-wallet"></div>' +
