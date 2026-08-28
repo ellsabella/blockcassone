@@ -10,7 +10,11 @@ export function fetchWorldSnapshot() {
     // of this file is actually honored — the viewer then reads it from cache and
     // the neighbourhood is ready the moment the fade lifts. The server caps
     // freshness via Cache-Control max-age.
-    _snapPromise = fetch('/data/world-snapshot.json', { cache: 'default' })
+    // ?fresh=1 (the Update page's "live in the Explorer" link) bypasses the 60s
+    // cache once so a just-re-based cube never shows its pre-update art.
+    let fresh = false;
+    try { fresh = new URLSearchParams(location.search).has('fresh'); } catch (_) {}
+    _snapPromise = fetch('/data/world-snapshot.json', { cache: fresh ? 'reload' : 'default' })
       .then(res => (res.ok ? res.json() : null))
       .catch(() => null);
   }

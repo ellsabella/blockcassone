@@ -234,8 +234,32 @@ async function commit() {
     render();
     toast('✓ Art updated on-chain');
     if (owner) loadOwnedCubes(owner).then(o => { state.owned = o; renderStrip(); }).catch(() => {});
+    watchForIndex(c, p.sourceContract, p.sourceTokenId);
   } catch (e) { toast('update failed: ' + msg(e), true); }
   finally { setBusy(false); }
+}
+
+// After a commit: poll the indexer snapshot (cache-bypassed, every 5s, up to 4 min)
+// until this cube reflects the new source, then hand out a cache-bypassing Explorer
+// deep link — turns the "is it live yet?" wait into a green light. Only ever runs
+// after a real on-chain commit, so it costs nothing on the browse path.
+async function watchForIndex(cube, sourceContract, sourceTokenId) {
+  const setHint = (html) => { const h = els.actions.querySelector('.hint'); if (h) h.innerHTML = html; };
+  setHint('⏳ waiting for the indexer to pick up your update (usually under a minute)…');
+  const want = String(sourceContract).toLowerCase() + '|' + String(sourceTokenId);
+  for (let i = 0; i < 48; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      const snap = await (await fetch('/data/world-snapshot.json', { cache: 'reload' })).json();
+      const r = (snap.records || []).find(x => Number(x.cubeId) === Number(cube.cubeId));
+      const have = r ? String(r.source?.contract || '').toLowerCase() + '|' + String(r.source?.tokenId) : '';
+      if (have === want) {
+        setHint(`✓ indexed · <a href="/viewer/?cube=${cube.slot}&fresh=1" style="color:var(--pink);font-weight:800;text-decoration:none">see it live in the Explorer →</a>`);
+        return;
+      }
+    } catch (_) { /* transient — keep polling */ }
+  }
+  setHint('the indexer is taking longer than usual — the Explorer will show your update once it catches up');
 }
 
 // ---------- render ----------
