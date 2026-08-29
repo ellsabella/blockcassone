@@ -552,6 +552,12 @@ function closeSheet() { els.scrim.classList.remove('on'); els.sheet.classList.re
 
 // ---------- static wiring ----------
 function wireStatic() {
+  // Mouse wheel over the cube strip scrolls it sideways (a vertical wheel on a
+  // horizontal scroller otherwise does nothing useful on desktop).
+  els.strip.addEventListener('wheel', e => {
+    if (els.strip.scrollWidth <= els.strip.clientWidth) return;
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); els.strip.scrollLeft += e.deltaY; }
+  }, { passive: false });
   els.strip.addEventListener('click', e => {
     const el = e.target.closest('.thumb'); if (!el) return;
     const id = el.dataset.id; if (state.cube && String(state.cube.cubeId) === id) return;
