@@ -486,15 +486,20 @@ export async function previewThumbnailSVG({ seed, slot, sourceContract, sourceTo
 // itself + its nav links when customizesEnabled is false; Streets/move use the others.
 export async function contractFlags() {
   const cfg = await loadConfig();
-  if (!cfg.cubeNft) return { customizesEnabled: false, movesEnabled: false, mergesEnabled: false };
+  if (!cfg.cubeNft) return { customizesEnabled: false, movesEnabled: false, mergesEnabled: false, baseFee: '500000000000000', premiumPerPoint: '3000000000000000' };
   const read = async (sel) => {
     try { return Boolean(BigInt(await ethCall(cfg, cfg.cubeNft, '0x' + sel) || '0x0')); }
     catch { return false; }
   };
-  const [customizesEnabled, movesEnabled, mergesEnabled] = await Promise.all([
+  const readUint = async (sel, fallback) => {
+    try { return BigInt(await ethCall(cfg, cfg.cubeNft, '0x' + sel) || '0x0').toString(); }
+    catch { return fallback; }
+  };
+  const [customizesEnabled, movesEnabled, mergesEnabled, baseFee, premiumPerPoint] = await Promise.all([
     read('c303b017'), read('bd593a6e'), read('41943a98'),
+    readUint('6ef25c3a', '500000000000000'), readUint('283e530d', '3000000000000000'),
   ]);
-  return { customizesEnabled, movesEnabled, mergesEnabled };
+  return { customizesEnabled, movesEnabled, mergesEnabled, baseFee, premiumPerPoint };
 }
 
 // Attestation-free re-base onto an UNUSED pool source (a Normie's live art, or a CC0 token

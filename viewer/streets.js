@@ -17,6 +17,10 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>'
 const msg = e => String((e && e.message) || e).slice(0, 160);
 const fmtEth = wei => { const n = Number(wei) / 1e18; return (n < 0.00005 ? '0' : n.toFixed(4).replace(/0+$/,'').replace(/\.$/,'')) + ' Ξ'; };
 const short = a => { const s = String(a || ''); return s.length > 10 ? s.slice(0,6)+'…'+s.slice(-4) : s; };
+// Live fee knobs from chain (contractFlags), so displayed estimates track any owner re-price.
+// Fallbacks match the post-mint schedule (baseFee 0.0005, premiumPerPoint 0.003).
+const feeBase = () => Number(S.flags?.baseFee ?? 5e14);
+const feePremium = () => Number(S.flags?.premiumPerPoint ?? 3e15);
 
 // on-brand cube glyph from a seed (fast; the detail view swaps in the real on-chain SVG)
 function rng(seed){let a=(seed>>>0)||1;return()=>{a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
@@ -80,7 +84,7 @@ function analyze(s){const c=count(s),me=c.me,rival=c.rival,vac=c.vac;
 function actionLine(s){const c=count(s),m=analyze(s),wf=s.biome.weight;
   if(m.kind==='ready') return {lead:'MERGE NOW → merged street',fee:'free'};
   if(m.kind==='fill') return {lead:`move in ${m.need} more → MERGE`,fee:''};
-  if(m.kind==='evict') return {lead:`evict ${c.rival} rival${c.rival>1?'s':''} → MERGE`,fee:'from '+fmtEth(1e15+(wf-1)*1e16)};
+  if(m.kind==='evict') return {lead:`evict ${c.rival} rival${c.rival>1?'s':''} → MERGE`,fee:'from '+fmtEth(feeBase()+(wf-1)*feePremium())};
   if(m.kind==='grow') return {lead:`move in ${m.need} to take control`,fee:''};
   return {lead:`you ${c.me}/8 · acquire more to act`,fee:''};}
 
@@ -187,7 +191,7 @@ function startEvict(i){ const s=S.detail; pickCube('Which of your cubes swaps in
 function stagedHTML(){ if(!S.staged) return ''; const st=S.staged,s=S.detail;
   const quoting='<span style="color:var(--faint)">quoting…</span>';
   if(st.type==='merge') return `<div class="confirm"><h3>Confirm merge</h3>
-    <div class="kv"><span>collapse into 1 merged street</span><b>7 slots burned</b></div>
+    <div class="kv"><span>collapse into 1 merged street</span><b>${count(s).me} cubes → 1 token</b></div>
     <div class="kv"><span>fee</span><b>${st.fee==null?quoting:fmtEth(st.fee)}</b></div>
     <div class="row" style="margin-top:10px"><button class="act ghost" id="discard">Discard</button><button class="act merge" id="commit">Merge on-chain →</button></div></div>`;
   if(st.type==='fill') return `<div class="confirm"><h3>Confirm move</h3>
@@ -243,7 +247,7 @@ function pickCube(title, street, slot, displacement, cb){
   // quote appears in the staged confirm). Shown in all cases — fill and evict alike.
   quoteMove({cubeId:avail[0].cubeId,newSlot:slot})
     .then(q=>{ feeTxt='≈ '+fmtEth(q.fee); if(els.sheetbody.querySelector('.cubegrid')) paint(); })
-    .catch(()=>{ feeTxt='~'+fmtEth(1e15); if(els.sheetbody.querySelector('.cubegrid')) paint(); });
+    .catch(()=>{ feeTxt='~'+fmtEth(feeBase()); if(els.sheetbody.querySelector('.cubegrid')) paint(); });
 }
 
 // ---------- MOVE A CUBE finder ----------
@@ -289,7 +293,7 @@ function renderMovePreview(){
     $('mpconfirm').onclick=confirmMove;
     quoteMove({cubeId:c.cubeId,newSlot:t.slot})
       .then(q=>{ if(S.moveTarget) S.moveTarget.fee=q.fee; const n=$('mpfee'); if(n&&tk===S.previewTok) n.textContent=fmtEth(q.fee); })
-      .catch(()=>{ const n=$('mpfee'); if(n&&tk===S.previewTok) n.textContent='~'+fmtEth(1e15); });
+      .catch(()=>{ const n=$('mpfee'); if(n&&tk===S.previewTok) n.textContent='~'+fmtEth(feeBase()); });
   }
 }
 async function confirmMove(){
@@ -329,7 +333,7 @@ function renderCands(){
   });
 }
 function candHTML(c){ return `<div class="cand${S.moveTarget&&S.moveTarget.slot===c.slot?' sel':''}" data-slot="${c.slot}"><div class="art">+</div>
-  <div class="meta"><div class="b">${c.biome.emoji} ${c.biome.name}</div><div>vacant · pop ${c.pop}/8</div><div class="fee">~${fmtEth(1e15)}</div></div></div>`;}
+  <div class="meta"><div class="b">${c.biome.emoji} ${c.biome.name}</div><div>vacant · pop ${c.pop}/8</div><div class="fee">~${fmtEth(feeBase())}</div></div></div>`;}
 async function moveToSlot(slot){
   if(!(S.flags?S.flags.movesEnabled:true)) return toast('moving is paused on-chain',true);
   const cube=S.moveCube, owner=walletAccount()||S.me;
