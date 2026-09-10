@@ -84,6 +84,50 @@ export function createHilbertWalk(orbit, points, opts = {}) {
   return { start, update, get total() { return total; } };
 }
 
+// Seamless cube→street→cube orbit loop. Constant yaw rate with an INTEGER number
+// of turns per loop, plus a smootherstep envelope that pulls target/distance/pitch
+// from a tight cube orbit out to a whole-street orbit and back:
+//   p ∈ [0, 1/3)   full 360° around the cube (target = cube centre)
+//   p ∈ [1/3, 1/2) pull out to the street (half a turn carried in transit)
+//   p ∈ [1/2, 5/6) full 360° around the whole street
+//   p ∈ [5/6, 1)   dive back to the cube (the other half turn)
+// p=0 and p=1 are the exact same pose, so capturing one loop is a seamless loop.
+// Distance zooms geometrically (feels linear to the eye across the scale jump).
+export function createOrbitLoop(orbit, cube, street, opts = {}) {
+  const durationMs = opts.durationMs || 30000;
+  const turns      = opts.turns ?? 3;
+  const near       = opts.near ?? 0.05;
+  const far        = opts.far  || 800;
+
+  let started = 0;
+  const start = now => { started = now; };
+  const ss = u => u * u * u * (u * (u * 6 - 15) + 10); // smootherstep 0..1
+
+  function env(p) { // 0 = at the cube, 1 = at the street
+    if (p < 1 / 3) return 0;
+    if (p < 1 / 2) return ss((p - 1 / 3) * 6);
+    if (p < 5 / 6) return 1;
+    return 1 - ss((p - 5 / 6) * 6);
+  }
+
+  function update(now) {
+    let p = (now - started) / durationMs;
+    p -= Math.floor(p); // wrap forever — seamless
+    const w = env(p);
+    const st = orbit.state;
+    st.target[0] = cube.center[0] + (street.center[0] - cube.center[0]) * w;
+    st.target[1] = cube.center[1] + (street.center[1] - cube.center[1]) * w;
+    st.target[2] = cube.center[2] + (street.center[2] - cube.center[2]) * w;
+    st.distance  = cube.dist * Math.pow(street.dist / cube.dist, w);
+    st.pitch     = cube.pitch + (street.pitch - cube.pitch) * w;
+    st.yaw       = p * turns * Math.PI * 2;
+    st.near      = near;
+    if (st.far < far) st.far = far;
+    return { progress: p, done: false };
+  }
+  return { start, update };
+}
+
 // "Rollercoaster": ride the Hilbert line THROUGH the middles of the cubes while a slow
 // breathing envelope pulls the eye radially out of the block (see it whole) and dives it
 // back onto the line (through cube interiors), pullCycles times per run. The eye's outward

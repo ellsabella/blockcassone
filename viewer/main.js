@@ -13,7 +13,7 @@ import {
   initNormiesManager, setDataReadyCallback, setBannerDataReadyCallback,
 } from './normies-manager.js';
 import { buildHilbertLines, buildFullHilbertPath, buildHilbertPathRange } from './hilbert-lines.js';
-import { createHilbertWalk, createCubeOrbit, createRollercoaster } from './hilbert-walk.js';
+import { createHilbertWalk, createCubeOrbit, createRollercoaster, createOrbitLoop } from './hilbert-walk.js';
 import { buildCubeCardioid }  from './cube-cardioid.js';
 import { buildStoneWalker }   from './materials/stone-walker.js';
 import { buildNonNormieArtworkPlane, buildNonNormieWalker, buildNonNormieBanner, buildNonNormieIdLabel, setNonNormieResolvers } from './non-normie-art-plane.js';
@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260828-2';
+const VIEWER_BUILD = '20260910-1';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -3983,6 +3983,7 @@ if (CINEMATIC && typeof document !== 'undefined' && document.body) {
 //   ?rec=cube-line    same street, camera right down at cube level
 //   ?rec=coaster      rollercoaster: zoom fully out, dive through cube middles, back out
 //   ?rec=thru-line    dead-straight one-way flythrough of an INTERIOR cube row
+//   ?rec=orbit-loop   SEAMLESS 30s loop: 360° round a Normie cube → 360° round its street → back
 //                     (adjacent cubes flank the path on all four sides)
 // Extras: &start=<slot> &dur=<seconds> &fps=<30|60> &w=1920 &h=1080
 // Frames render on a FIXED virtual clock (performance.now is overridden while
@@ -4124,8 +4125,40 @@ function setupWalk() {
       lookAheadLen: cs * (cubeLevel ? 0.9 : 2.0),
       near: cs * (cubeLevel ? 0.005 : 0.008), far: cs * (cubeLevel ? 60 : 120),
     });
+  } else if (REC_SHOT === 'orbit-loop') {
+    // Seamless 30s loop: full 360° around one Normie cube → pull out → full 360°
+    // around its whole street → dive back to the cube. Integer turns per loop +
+    // identical start/end pose = loops with no visible seam. &start=<slot> forces
+    // the cube; the scout wants a Normie on a street with company (≥3 minted).
+    let slot = startParam !== null ? startParam : -1;
+    if (slot < 0) {
+      for (let m = 0; m < WORLD_SIZE; m++) {
+        if (!isMintedSlot(m)) continue;
+        const cube = getMintedCubeForSlot(m);
+        if (!cube || cube.sourceKind !== 'normie') continue;
+        const s0 = streetIndexForMotif(m) * STREET_SIZE;
+        let minted = 0;
+        for (let k = s0; k < s0 + STREET_SIZE; k++) if (isMintedSlot(k)) minted++;
+        if (minted >= 3) { slot = m; break; }
+      }
+      if (slot < 0) { log('rec: no populated Normie street found — pass &start=<slot>'); return; }
+    }
+    focus = slot;
+    scope = 'street';
+    const cc = centerOfAABB(cubeAABBFor(slot));
+    const stIdx = streetIndexForMotif(slot);
+    const sAABB = aabbForMotifs(_motifRange(stIdx * STREET_SIZE, STREET_SIZE));
+    const sc = centerOfAABB(sAABB);
+    const ssz = sizeOfAABB(sAABB) || cs * 8;
+    _walkName = `orbit-loop-${slot}`;
+    _walkDurationMs = (durS || 30) * 1000;
+    _walk = createOrbitLoop(orbit,
+      { center: cc, dist: cs * 1.7, pitch: 0.26 },
+      { center: sc, dist: ssz * 1.25, pitch: 0.42 },
+      { durationMs: _walkDurationMs, turns: 3, near: cs * 0.006, far: ssz * 12 });
+    log(`rec: orbit-loop — Normie cube slot ${slot}, street ${stIdx} — seamless ${_walkDurationMs / 1000}s loop`);
   } else {
-    log(`rec: unknown shot "${REC_SHOT}" — use nbhd-line | street-line | cube-line | coaster`);
+    log(`rec: unknown shot "${REC_SHOT}" — use nbhd-line | street-line | cube-line | coaster | thru-line | orbit-loop`);
     return;
   }
 
