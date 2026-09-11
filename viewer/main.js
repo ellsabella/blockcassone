@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
 // Build stamp — bump alongside the ?v= query on the module script tags. If the console
 // shows an OLD value after reloading, the browser is still serving cached JS (open
 // DevTools → Network → tick "Disable cache", then reload).
-const VIEWER_BUILD = '20260910-1';
+const VIEWER_BUILD = '20260911-1';
 if (typeof window !== 'undefined') {
   console.log(
     `%cTheBLOCK EXPLORER — build ${VIEWER_BUILD}`,
@@ -4204,8 +4204,22 @@ async function _recSubmitFrame(px, w, h) {
     }
     ctx2.putImageData(img2, 0, 0);
     const blob = await new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('png encode failed'))), 'image/png'));
-    const r = await fetch(`/api/rec/frame?shot=${encodeURIComponent(_walkName)}&n=${_recFrame}`, { method: 'POST', body: blob });
-    if (!r.ok) throw new Error('frame upload HTTP ' + r.status);
+    // Upload with retries: a single hiccuped request out of ~1800 must not kill
+    // a multi-minute capture (that is exactly how the first batch of shots all
+    // ended up partial). 8 attempts with backoff rides out a dev-server restart.
+    let uploaded = false, lastErr = null;
+    for (let attempt = 0; attempt < 8 && !uploaded; attempt++) {
+      if (attempt) {
+        log(`rec: frame ${_recFrame} upload retry ${attempt}/7…`);
+        await new Promise(r2 => setTimeout(r2, 500 * attempt));
+      }
+      try {
+        const r = await fetch(`/api/rec/frame?shot=${encodeURIComponent(_walkName)}&n=${_recFrame}`, { method: 'POST', body: blob });
+        if (!r.ok) throw new Error('frame upload HTTP ' + r.status);
+        uploaded = true;
+      } catch (e) { lastErr = e; }
+    }
+    if (!uploaded) throw lastErr || new Error('frame upload failed');
     _recFrame++;
     _recNow += 1000 / _recFps;
     if (_recFrame % _recFps === 0) log(`rec: ${_recFrame} frames (${((_recNow - _walkStartT) / 1000).toFixed(1)}s / ${_walkDurationMs / 1000}s)`);
