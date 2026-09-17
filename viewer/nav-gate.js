@@ -52,17 +52,28 @@ function applyState(f, preview) {
 (async function gateNav() {
   const preview = new URLSearchParams(location.search).has('preview');
 
-  // Dropdown open/close (click-toggle works on desktop + mobile).
+  // Dropdown open/close (click-toggle works on desktop + mobile). #hud (the nav bar) is a
+  // fixed, overflow:hidden bar with backdrop-filter, which clips any dropdown inside it — so
+  // move the panel to <body> and position it under the button on open.
   const btn = document.getElementById('play-btn');
   const dd = document.getElementById('play-dropdown');
   if (btn && dd) {
+    document.body.appendChild(dd);
+    const place = () => {
+      const r = btn.getBoundingClientRect();
+      dd.style.top = (r.bottom + 8) + 'px';
+      dd.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    };
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const open = dd.hidden;
-      dd.hidden = !open;
+      const open = !dd.classList.contains('open');
+      if (open) place();
+      dd.classList.toggle('open', open);
       btn.setAttribute('aria-expanded', String(open));
     });
-    document.addEventListener('click', () => { dd.hidden = true; btn.setAttribute('aria-expanded', 'false'); });
+    dd.addEventListener('click', (e) => e.stopPropagation()); // clicks inside stay open (until a link navigates)
+    document.addEventListener('click', () => { dd.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); });
+    window.addEventListener('resize', () => { if (dd.classList.contains('open')) place(); });
   }
 
   let f;

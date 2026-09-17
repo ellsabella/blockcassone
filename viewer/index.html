@@ -180,9 +180,14 @@
        live once its on-chain switch is on, else shown with a "SOON" chip (nav-gate.js). */
     .nav-menu { position: relative; display: inline-flex; align-items: center; }
     #play-btn { background: none; border: 0; border-bottom: 2px solid transparent; }
-    .nav-dropdown { position: absolute; top: 100%; right: 0; margin-top: 8px; background: #0e0e13;
+    /* Moved to <body> at runtime (nav-gate.js) and positioned under the button, because #hud is
+       a fixed, overflow:hidden bar with backdrop-filter — a dropdown inside it gets clipped.
+       Hidden by default; shown via the .open class (not the [hidden] attr, which a display rule
+       overrides). */
+    .nav-dropdown { position: fixed; display: none; background: #0e0e13;
       border: 1px solid rgba(130,130,150,.28); border-radius: 12px; padding: 6px; min-width: 190px;
-      display: flex; flex-direction: column; gap: 2px; z-index: 60; box-shadow: 0 12px 34px rgba(0,0,0,.55); }
+      flex-direction: column; gap: 2px; z-index: 90; box-shadow: 0 12px 34px rgba(0,0,0,.55); }
+    .nav-dropdown.open { display: flex; }
     .nav-dropdown .nav-item { font-family: 'NormiesFont', ui-monospace, monospace; color: #fff;
       text-decoration: none; font-size: 13px; letter-spacing: .04em; text-transform: uppercase;
       padding: 9px 11px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between;
@@ -895,7 +900,7 @@
       <a href="https://opensea.io/collection/theblock-by-ella/overview" target="_blank" rel="noopener" class="nav-link">OPENSEA &#8599;</a>
       <div id="play-menu" class="nav-menu" style="display:none">
         <button type="button" class="nav-link" id="play-btn" aria-haspopup="true" aria-expanded="false">PLAY &#9662;</button>
-        <div class="nav-dropdown" id="play-dropdown" hidden>
+        <div class="nav-dropdown" id="play-dropdown">
           <a href="/viewer/update.html" class="nav-item" data-gate="customize">Update Cube</a>
           <a href="/viewer/streets.html" class="nav-item" data-gate="streets">Move / Merge</a>
         </div>
