@@ -136,14 +136,12 @@ async function loadCurrent(c) {
 // LAUNCH SAFETY: both rules are UI-enforced (no contract guard exists) — a source
 // must not be mint-pool art, and vault-held art must carry a live delegation.
 async function guardProposal(nft) {
-  const acct = walletAccount();
   const avail = await checkSourceAvailable(nft.contract, nft.tokenId);
-  if (!avail.ok) return avail.reason;
-  if (nft.viaVault) {
-    if (String(nft.chain || 'ethereum') !== 'ethereum') return 'vault art is mainnet-only for now';
-    const usable = await checkSourceUsable(acct, nft.contract, nft.tokenId, nft.vault);
-    if (!usable.ok) return usable.reason;
-  }
+  if (!avail.ok) return avail.reason; // pool art stays blocked — protects the mint/collection
+  if (nft.viaVault && String(nft.chain || 'ethereum') !== 'ethereum') return 'vault art is mainnet-only for now';
+  // Ownership/delegation check DROPPED (2026-09-17 product decision): you may re-base onto art
+  // in a different wallet you own without a delegate.xyz setup. Rights are your responsibility
+  // (see the warning banner). The pool guard above still applies.
   return null;
 }
 
@@ -505,7 +503,7 @@ function renderSheetGrid() {
     ? `showing ${shown.length} of ${sheetPager.items.length} loaded`
     : (sheetPager.viaVault ? 'no NFTs found in that vault' : 'no NFTs found');
   els.sheet_status.textContent = label
-    + (sheetPager.viaVault ? ' · via vault ' + short(sheetPager.owner) + ' — delegation checked on pick' : '')
+    + (sheetPager.viaVault ? ' · art from ' + short(sheetPager.owner) + ' — use only art you have rights to' : '')
     + (more ? (q ? ' · LOAD MORE scans further' : ' · more available') : '');
   const btn = $('sheet-more');
   if (btn) btn.style.display = more ? '' : 'none';

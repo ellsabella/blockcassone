@@ -24,6 +24,12 @@ export const CUBE_CUSTOMIZED = parseAbiItem(
 export const TRANSFER = parseAbiItem(
   'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'
 );
+// A street merge burns its plots (Transfer→0) and mints ONE anchored street token. That
+// mint fires no CubeMinted (only this event + a Transfer 0→owner), so without folding
+// StreetMerged the merged token has an owner but no record and drops out of the snapshot.
+export const STREET_MERGED = parseAbiItem(
+  'event StreetMerged(uint256 indexed streetTokenId, address indexed owner, uint32 indexed street, uint8 occupiedCount)'
+);
 
 // On the NonNormieArtStore address:
 //   NonNormiePayloadRecorded  — PER-CUBE art (post-mint customize / re-base override)

@@ -58,7 +58,7 @@ export class WorldState {
   // Apply a batch of logs. Safe for both the full-history backfill and later
   // incremental batches (later batches are later blocks, so last-write-wins on
   // owner/slot stays correct across calls).
-  applyLogs({ minted = [], moved = [], customized = [], transfers = [], payloadRecorded = [], sourcePayloadRecorded = [] }) {
+  applyLogs({ minted = [], moved = [], customized = [], transfers = [], merged = [], payloadRecorded = [], sourcePayloadRecorded = [] }) {
     for (const l of [...transfers].sort(byOrder)) {
       this.ownerByToken.set(String(l.args.tokenId), lc(l.args.to));
     }
@@ -106,6 +106,35 @@ export class WorldState {
           payloadVersion: 1,
           mintedAt: this.tsByBlock.get(String(l.blockNumber)) ?? 0,
         },
+      });
+    }
+    // A merged street token is minted with no CubeMinted event — build its record here so
+    // it survives into the snapshot (sourceKindNumber 3 → the viewer shows it as a MERGED
+    // street card and live-renders its art). Anchor slot = street*8 so floor(slot/8)=street;
+    // seed is a placeholder (the card renders the real on-chain art), source is unused.
+    for (const l of [...merged].sort(byOrder)) {
+      const a = l.args;
+      const id = String(a.streetTokenId);
+      const slot = Number(a.street) * 8;
+      this._pushHistory(id, {
+        t: 'mint', kind: 'merged', contract: '', tokenId: String(a.street),
+        slot, block: Number(l.blockNumber), ts: this._ts(l), tx: l.transactionHash,
+      });
+      this.records.set(id, {
+        cubeId: Number(a.streetTokenId),
+        slot,
+        wallet: lc(a.owner), // replaced with current owner in toSnapshot()
+        sourceKind: 'external', // mirrors recordFromChain (kind 3 → 'external' string, number 3)
+        sourceKindNumber: 3,
+        // ZERO_ADDRESS (not '') so the art-hydration sourceKey() encodes a valid address; it
+        // resolves to no payload → art stays null → the viewer live-renders the merged token.
+        source: { chain: '', chainId: 0, contract: ZERO_ADDRESS, tokenId: String(a.street) },
+        cc0: null,
+        agentic: false,
+        agentId: '',
+        seed: '0x' + BigInt(a.streetTokenId).toString(16).padStart(64, '0'),
+        art: null,
+        _chain: { rendererVersion: 1, payloadVersion: 1, mintedAt: this._ts(l) },
       });
     }
     for (const l of [...moved].sort(byOrder)) {
@@ -196,9 +225,9 @@ export class WorldState {
 }
 
 // One-shot convenience used by the backfill entry point.
-export function assembleSnapshot({ cfg, minted, moved, customized, transfers, tsByBlock }) {
+export function assembleSnapshot({ cfg, minted, moved, customized, transfers, merged, tsByBlock }) {
   const ws = new WorldState();
   ws.setBlockTimestamps(tsByBlock);
-  ws.applyLogs({ minted, moved, customized, transfers });
+  ws.applyLogs({ minted, moved, customized, transfers, merged });
   return ws.toSnapshot(cfg);
 }

@@ -241,6 +241,24 @@ async function handleThumbnail(req, res) {
       });
       res.end(svg);
     };
+    // Optional ?atslot=N — render this cube AS IF it sat at slot N (a proposed move), so the
+    // evict/merge face-picker previews a swapping-in cube with its DESTINATION colours/geometry.
+    const atSlotRaw = url.searchParams.get('atslot');
+    if (atSlotRaw != null) {
+      const atSlot = Number(atSlotRaw);
+      if (!Number.isInteger(atSlot) || atSlot < 0) { sendJson(res, 400, { error: 'bad atslot' }); return; }
+      const key = `${cubeId}@${atSlot}`;
+      const h2 = _thumbCache.get(key);
+      if (h2 && Date.now() - h2.ts < THUMB_TTL_MS) { sendSvg(h2.svg); return; }
+      const ret2 = await ethCall(cfg.rpcUrl, cfg.thumbnailRenderer,
+        '0xed957641' + pad32(BigInt(cubeId).toString(16)) + pad32(atSlot.toString(16))); // thumbnailSVGAtSlot(uint256,uint32)
+      const svg2 = decodeAbiString(ret2);
+      if (!svg2) { sendJson(res, 502, { error: 'empty thumbnail' }); return; }
+      if (_thumbCache.size >= THUMB_CACHE_MAX) _thumbCache.delete(_thumbCache.keys().next().value);
+      _thumbCache.set(key, { svg: svg2, ts: Date.now() });
+      sendSvg(svg2);
+      return;
+    }
     const hit = _thumbCache.get(cubeId);
     if (hit && Date.now() - hit.ts < THUMB_TTL_MS) { sendSvg(hit.svg); return; }
     // Indexer-baked thumbnail on disk → serve with zero RPC (the normal path).
@@ -614,7 +632,16 @@ async function verifyAttestRequest(typedData, vaultHint) {
     if (!ZERO_RET(r)) return fail('source is already claimed by a cube');
   }
 
-  // OWNER — find the token's chain and verify the minter controls it.
+  // OWNER — ownership/delegation of the source token.
+  //
+  // PRODUCT DECISION (2026-09-17): this check is DROPPED by default so someone whose cube and
+  // intended artwork are in DIFFERENT wallets can re-base without a delegate.xyz setup. The UI
+  // warns "use only art you own the rights to" — rights are the user's responsibility. The POOL
+  // checks above still stand (no grabbing the collection's own Normie / reserved / in-use art),
+  // so the mint stays protected. Set BLOCKCASSONE_REQUIRE_SOURCE_OWNERSHIP=1 to restore the
+  // strict ownership/delegation gate below.
+  if (process.env.BLOCKCASSONE_REQUIRE_SOURCE_OWNERSHIP !== '1') return { ok: true };
+
   //   ERC-721:  ownerOf == minter, or a delegate.xyz ERC-721 delegation from the owner.
   //   ERC-1155: balanceOf(minter, id) > 0, or — with the client's vault hint —
   //             balanceOf(vault, id) > 0 plus a delegate.xyz ERC-1155 delegation

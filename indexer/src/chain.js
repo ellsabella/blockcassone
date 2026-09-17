@@ -1,21 +1,22 @@
 // Shared chain helpers used by both the one-shot backfill and the live watcher.
 import { writeFileSync } from 'node:fs';
-import { CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER, NON_NORMIE_PAYLOAD_RECORDED, SOURCE_PAYLOAD_RECORDED } from './events.js';
+import { CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER, STREET_MERGED, NON_NORMIE_PAYLOAD_RECORDED, SOURCE_PAYLOAD_RECORDED } from './events.js';
 
 // Cube events live on the CubeNFT address; the payload events on the art store.
 export async function fetchLogs(client, cfg, fromBlock, toBlock) {
   const range = { fromBlock, toBlock };
   const cube = { ...range, address: cfg.cubeNft };
   const store = cfg.nonNormieStore ? { ...range, address: cfg.nonNormieStore } : null;
-  const [minted, moved, customized, transfers, payloadRecorded, sourcePayloadRecorded] = await Promise.all([
+  const [minted, moved, customized, transfers, merged, payloadRecorded, sourcePayloadRecorded] = await Promise.all([
     client.getLogs({ ...cube, event: CUBE_MINTED }),
     client.getLogs({ ...cube, event: CUBE_MOVED }),
     client.getLogs({ ...cube, event: CUBE_CUSTOMIZED }),
     client.getLogs({ ...cube, event: TRANSFER }),
+    client.getLogs({ ...cube, event: STREET_MERGED }),
     store ? client.getLogs({ ...store, event: NON_NORMIE_PAYLOAD_RECORDED }) : Promise.resolve([]),
     store ? client.getLogs({ ...store, event: SOURCE_PAYLOAD_RECORDED }) : Promise.resolve([]),
   ]);
-  return { minted, moved, customized, transfers, payloadRecorded, sourcePayloadRecorded };
+  return { minted, moved, customized, transfers, merged, payloadRecorded, sourcePayloadRecorded };
 }
 
 // Block timestamps for the (deduped) blocks in a flat log array. Used for mintedAt AND
@@ -28,12 +29,13 @@ export async function fetchBlockTimestamps(client, logs) {
 
 // Partition a mixed watchEvent batch by event name.
 export function groupByEvent(logs) {
-  const g = { minted: [], moved: [], customized: [], transfers: [], payloadRecorded: [], sourcePayloadRecorded: [] };
+  const g = { minted: [], moved: [], customized: [], transfers: [], merged: [], payloadRecorded: [], sourcePayloadRecorded: [] };
   for (const l of logs) {
     if (l.eventName === 'CubeMinted') g.minted.push(l);
     else if (l.eventName === 'CubeMoved') g.moved.push(l);
     else if (l.eventName === 'CubeCustomized') g.customized.push(l);
     else if (l.eventName === 'Transfer') g.transfers.push(l);
+    else if (l.eventName === 'StreetMerged') g.merged.push(l);
     else if (l.eventName === 'NonNormiePayloadRecorded') g.payloadRecorded.push(l);
     else if (l.eventName === 'SourcePayloadRecorded') g.sourcePayloadRecorded.push(l);
   }

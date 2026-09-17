@@ -8,7 +8,7 @@
 import { createPublicClient, http } from 'viem';
 import { loadConfig } from './config.js';
 import { WorldState } from './snapshot.js';
-import { CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER, NON_NORMIE_PAYLOAD_RECORDED, SOURCE_PAYLOAD_RECORDED } from './events.js';
+import { CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER, STREET_MERGED, NON_NORMIE_PAYLOAD_RECORDED, SOURCE_PAYLOAD_RECORDED } from './events.js';
 import { fetchLogs, fetchBlockTimestamps, groupByEvent, buildAndWriteSnapshot } from './chain.js';
 import { NormieArtCache, NonNormieArtCache } from './art.js';
 
@@ -55,7 +55,7 @@ async function main() {
   // Cube lifecycle events live on the token; art-payload events on the store.
   client.watchEvent({
     address: cfg.cubeNft,
-    events: [CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER],
+    events: [CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER, STREET_MERGED],
     pollingInterval: POLL_MS, onLogs, onError,
   });
   if (cfg.nonNormieStore) {
