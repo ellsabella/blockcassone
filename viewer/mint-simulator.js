@@ -129,6 +129,10 @@ function cubeFromRecord(record) {
     nft,
     sourceKey: sourceKeyFromRecord(record),
     sourceKind,
+    // Merged-street token (sourceKindNumber 3): one token that IS a whole street. Both it and a
+    // plain external cube map to sourceKind 'external', so carry the number as an explicit flag.
+    merged: Number(record.sourceKindNumber) === 3,
+    street: Number(record.sourceKindNumber) === 3 ? Math.floor(Number(record.slot) / 8) : null,
     seed: record.seed || null, // on-chain cube seed (real mints only) for edge-point parity
   };
 }

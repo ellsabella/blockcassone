@@ -470,6 +470,9 @@
       box-shadow: 0 0 16px rgba(255, 58, 184, 0.18);
     }
     #cube-detail-title { color: #fff; font-size: 13px; font-weight: 800; padding: 0 7px; text-shadow: 0 0 10px rgba(255, 58, 184, 0.45); }
+    /* Merged-street token selected → gold-accent the panel (mirrors the gold list row). */
+    #cube-detail.merged { border-color: rgba(255, 207, 106, 0.6); box-shadow: 0 0 22px rgba(255, 207, 106, 0.16); }
+    #cube-detail.merged #cube-detail-title { color: #ffe6a8; text-shadow: 0 0 10px rgba(255, 207, 106, 0.55); }
     #cube-detail-close, #mint-success-close { min-width: 34px; }
     #cube-detail-share {
       font-size: 11px; font-weight: 800; letter-spacing: .03em; padding: 4px 9px;
@@ -733,6 +736,20 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    /* Merged-street tokens: one token = a whole street → painted gold (wins over the
+       "mine" green too). */
+    #owner-inventory .owner-inventory-item.merged {
+      border-color: rgba(255, 207, 106, 0.55);
+      color: #ffe6a8;
+      background: rgba(40, 30, 8, 0.62);
+    }
+    #owner-inventory .owner-inventory-item.merged:hover,
+    #owner-inventory .owner-inventory-item.merged.active {
+      border-color: rgba(255, 207, 106, 0.95);
+      background: rgba(60, 44, 10, 0.82);
+      box-shadow: 0 0 14px rgba(255, 207, 106, 0.32);
+    }
+    #owner-inventory .owner-inventory-item.merged span:last-child { color: rgba(255, 226, 160, 0.92); }
     #selection-link {
       position: fixed;
       inset: 0;

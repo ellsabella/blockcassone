@@ -958,17 +958,20 @@ function updateOwnerInventory(ownerLabel) {
   if (ownerInventoryMineEl) ownerInventoryMineEl.hidden = isMine || !me;
   for (const cube of cubes) {
     const button = document.createElement('button');
-    button.className = 'owner-inventory-item';
+    // Merged-street tokens are one token = a whole street; flag them so the list paints them gold.
+    button.className = 'owner-inventory-item' + (cube.merged ? ' merged' : '');
     button.dataset.slot = String(cube.slot);
     if (cube.slot === selectedMotifIdx) button.classList.add('active');
     button.type = 'button';
     const n = cube.nft || {};
-    const source = cube.sourceKind === 'normie'
-      ? `Normie #${n.normieId ?? n.tokenId ?? '?'}`
-      : `${externalCollectionName(n) || 'Source'} #${n.tokenId ?? '?'}`;
+    const source = cube.merged
+      ? `✦ Street ${cube.street}`
+      : cube.sourceKind === 'normie'
+        ? `Normie #${n.normieId ?? n.tokenId ?? '?'}`
+        : `${externalCollectionName(n) || 'Source'} #${n.tokenId ?? '?'}`;
     const slotEl = document.createElement('span');
     const sourceEl = document.createElement('span');
-    slotEl.textContent = String(cube.slot);
+    slotEl.textContent = '#' + cube.cubeId; // the TOKEN id (matches OpenSea) — not the slot
     sourceEl.textContent = source;
     button.append(slotEl, sourceEl);
     button.addEventListener('click', () => {
@@ -1047,7 +1050,17 @@ function updateCubeDetailInfo() {
   const minted = getMintedCubeForSlot(motifIdx);
   const owner = minted?.wallet || '';
   const street = streetIndexForMotif(motifIdx);
-  const rows = [
+  const merged = !!minted?.merged;
+  // A merged token IS a whole street — lead with the street identity; a normal cube leads with plot.
+  const rows = merged ? [
+    ['owner', owner ? shortAddress(owner) : 'empty slot'],
+    ['merged street', `Street ${street}`],
+    ['token', `#${minted.cubeId}`],
+    ['plots', 'whole street'],
+    ['neighbourhood', String(neighbourhoodIndexForMotif(motifIdx))],
+    ['region', String(regionIndexForMotif(motifIdx))],
+    ['environment', environmentForStreet(street)],
+  ] : [
     ['owner', owner ? shortAddress(owner) : 'empty slot'],
     ['plot', String(motifIdx)],
     ['street', String(street)],
@@ -1372,7 +1385,12 @@ function openCubeDetail(motifIdx, { preserveStreet = false } = {}) {
     selectedRegionIdx = null;
   }
   cubeDetailOpen = true;
-  if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube ${motifIdx}`;
+  if (cubeDetailTitleEl) {
+    const _c = getMintedCubeForSlot(motifIdx);
+    // Merged-street token → lead with the street (mirrors the token: it IS a whole street).
+    cubeDetailTitleEl.textContent = _c ? (_c.merged ? `✦ Street ${_c.street}` : `Cube #${_c.cubeId}`) : `Slot ${motifIdx}`;
+    if (cubeDetailEl) cubeDetailEl.classList.toggle('merged', !!(_c && _c.merged));
+  }
   if (cubeDetailEl) {
     if (!cubeDetailWidthPx && window.innerWidth > 860) {
       const initial = Math.min(520, Math.max(360, window.innerWidth * 0.34));
@@ -2084,7 +2102,7 @@ function driveFlyby(info) {
     selectedMotifIdx = cube.slot;
     cubeDetailOpen = true;
     if (cubeDetailEl) { cubeDetailEl.classList.add('open'); cubeDetailEl.setAttribute('aria-hidden', 'false'); }
-    if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube ${cube.slot}`;
+    if (cubeDetailTitleEl) cubeDetailTitleEl.textContent = `Cube #${cube.cubeId}`;
     recentreDetailOrbit();
     updateCubeDetailInfo();
     updateSvgThumb(cube.slot);
@@ -4571,10 +4589,16 @@ function initMobileUI() {
     const subEl = sheet.querySelector('.m-sub');
     if (cube) {
       const n = cube.nft || {};
-      titleEl.textContent = n.isNormie
-        ? `NORMIE #${n.normieId ?? '?'}`
-        : `${String(externalCollectionName(n) || 'SOURCE').toUpperCase()} #${n.tokenId ?? '?'}`;
-      subEl.textContent = `CUBE ${cube.cubeId} · STREET ${street} · ${env}`;
+      if (cube.merged) {
+        titleEl.textContent = `✦ STREET ${street}`;
+        subEl.textContent = `MERGED STREET · #${cube.cubeId} · ${env}`;
+      } else {
+        titleEl.textContent = n.isNormie
+          ? `NORMIE #${n.normieId ?? '?'}`
+          : `${String(externalCollectionName(n) || 'SOURCE').toUpperCase()} #${n.tokenId ?? '?'}`;
+        subEl.textContent = `CUBE ${cube.cubeId} · STREET ${street} · ${env}`;
+      }
+      sheet.classList.toggle('merged', !!cube.merged);
       const short = shortAddress(cube.wallet);
       sheet.querySelector('.m-owner-name').textContent = short;
       sheet.querySelector('.m-r-owner').textContent = short;
