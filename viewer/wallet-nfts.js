@@ -2,7 +2,23 @@ import { imageUrlToBinaryGrid } from './nft-art-grid.js?v=20260826-3';
 import { inflateGrid } from './art-snapshot.js';
 
 export const NORMIES_CONTRACT = '0x9eb6e2025b64f340691e424b7fe7022ffde12438';
-export const DEFAULT_WALLET_CHAINS = Object.freeze(['ethereum', 'base', 'shape']);
+// EVM chains scanned for a wallet's art. Keys are OpenSea v2 chain slugs (the /api/opensea path
+// param); values carry the real chainId so a source records/links to the right chain (not 0).
+// NOTE: "robinhood" (chainId 4663) is included per request — it only surfaces NFTs if OpenSea
+// indexes it under that slug; if not, that chain simply returns nothing (harmless).
+export const CHAIN_META = Object.freeze({
+  ethereum:  { chainId: 1 },
+  base:      { chainId: 8453 },
+  optimism:  { chainId: 10 },
+  arbitrum:  { chainId: 42161 },
+  matic:     { chainId: 137 },       // Polygon — OpenSea's slug is "matic"
+  zora:      { chainId: 7777777 },
+  blast:     { chainId: 81457 },
+  shape:     { chainId: 360 },
+  robinhood: { chainId: 4663 },      // Robin Hood (RH)
+});
+export const chainIdForSlug = (slug) => CHAIN_META[slug]?.chainId || 0;
+export const DEFAULT_WALLET_CHAINS = Object.freeze(Object.keys(CHAIN_META));
 
 let walletState = {
   loaded: false,
@@ -132,6 +148,7 @@ function normalizeNft(raw, chain) {
   const normal = {
     raw,
     chain,
+    chainId: chainIdForSlug(chain),
     contract: normalizeAddress(contract),
     tokenId: String(tokenId),
     name: raw.name || raw.nft?.name || `${collectionSlug || 'NFT'} #${tokenId}`,

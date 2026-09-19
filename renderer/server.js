@@ -568,9 +568,17 @@ function coerceTypedMessage(types, primaryType, message) {
 const ATTEST_WORD = (v) => BigInt(v).toString(16).padStart(64, '0');
 const ATTEST_ADDR = (a) => String(a).replace(/^0x/, '').toLowerCase().padStart(64, '0');
 const ATTEST_DELEGATE_REGISTRY = '0x00000000000000447e69651d841bD8D104Bed493';
-const ATTEST_ALT_CHAINS = [ // where else wallet art may live (viewer DEFAULT_WALLET_CHAINS)
+// Where else wallet art may live (mirrors the viewer's DEFAULT_WALLET_CHAINS). Only consulted
+// if BLOCKCASSONE_REQUIRE_SOURCE_OWNERSHIP=1 re-enables the ownership check (off by default).
+const ATTEST_ALT_CHAINS = [
   { name: 'base', rpcUrl: 'https://mainnet.base.org' },
+  { name: 'optimism', rpcUrl: 'https://mainnet.optimism.io' },
+  { name: 'arbitrum', rpcUrl: 'https://arb1.arbitrum.io/rpc' },
+  { name: 'matic', rpcUrl: 'https://polygon-rpc.com' },
+  { name: 'zora', rpcUrl: 'https://rpc.zora.energy' },
+  { name: 'blast', rpcUrl: 'https://rpc.blast.io' },
   { name: 'shape', rpcUrl: 'https://mainnet.shape.network' },
+  // robinhood (chainId 4663): add its RPC here if/when the ownership check is re-enabled.
 ];
 const ZERO_RET = (r) => /^0x0*$/.test(String(r || '0x0'));
 
