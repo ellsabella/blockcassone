@@ -84,18 +84,88 @@ async function onWallet(acct){
 async function loadWorld(){
   els.view.innerHTML=`<div class="empty">loading the world…</div>`;
   let recs=[]; try{ recs=((await loadChainMintRecords())||{}).records||[]; }catch(e){ toast('could not load cubes: '+msg(e),true); }
-  S.recs=recs; S.bySlot=new Map(); S.merged=new Set();
-  for (const r of recs){ S.bySlot.set(Number(r.slot), r); if (r.sourceKindNumber===3) S.merged.add(Math.floor(Number(r.slot)/8)); }
-  S.myCubes = recs.filter(r=>r.sourceKindNumber!==3 && String(r.wallet||'').toLowerCase()===S.me)
-    .map(r=>({cubeId:r.cubeId, slot:Number(r.slot), seed:r.seed, biome:biomeForStreet(Math.floor(Number(r.slot)/8))}));
-  // Merged streets you own — a whole street collapsed into one token (sourceKind 3). Shown
-  // as their own highlighted cards, not in the active-street list (they can't merge again).
-  S.myMerged = recs.filter(r=>r.sourceKindNumber===3 && String(r.wallet||'').toLowerCase()===S.me)
-    .map(r=>({sid:Math.floor(Number(r.slot)/8), cubeId:r.cubeId, seed:r.seed, biome:biomeForStreet(Math.floor(Number(r.slot)/8))}));
-  const sids=new Set(S.myCubes.map(c=>Math.floor(c.slot/8)).filter(sid=>!S.merged.has(sid)));
-  S.myStreets=[...sids].map(streetData);
+  deriveWorld(recs);
   S.mode==='mine'?renderMine():renderMove();
 }
+// Rebuild every derived view (bySlot, my cubes/streets/merged) from the raw records — the chain
+// snapshot on a load, or the locally-edited records after an optimistic move/merge.
+function deriveWorld(recs){
+  const mine=r=>String(r.wallet||'').toLowerCase()===S.me;
+  S.recs=recs; S.bySlot=new Map(); S.merged=new Set();
+  for (const r of recs){ S.bySlot.set(Number(r.slot), r); if (r.sourceKindNumber===3) S.merged.add(Math.floor(Number(r.slot)/8)); }
+  S.myCubes = recs.filter(r=>r.sourceKindNumber!==3 && mine(r))
+    .map(r=>({cubeId:r.cubeId, slot:Number(r.slot), seed:r.seed, biome:biomeForStreet(Math.floor(Number(r.slot)/8))}));
+  S.myMerged = recs.filter(r=>r.sourceKindNumber===3 && mine(r))
+    .map(r=>({sid:Math.floor(Number(r.slot)/8), cubeId:r.cubeId, seed:r.seed, biome:biomeForStreet(Math.floor(Number(r.slot)/8)), pending:!!r._optimistic}));
+  const sids=new Set(S.myCubes.map(c=>Math.floor(c.slot/8)).filter(sid=>!S.merged.has(sid)));
+  S.myStreets=[...sids].map(streetData);
+}
+function renderCurrent(){ S.mode==='mine'?renderMine():renderMove(); }
+
+// ---------- optimistic local updates (instant, indexer-independent) ----------
+// The acting user's own move/merge is reflected the moment the tx CONFIRMS, by editing the local
+// records — no wait for the indexer snapshot. reconcileAfter() then keeps the optimistic state
+// on screen (it does NOT let a stale snapshot overwrite it) until the snapshot actually reflects
+// the change, then adopts the real data. So: instant for the person acting, correct for everyone.
+function optimisticMove(cubeId, toSlot){
+  const rec=S.recs.find(r=>Number(r.cubeId)===Number(cubeId)); if(!rec) return;
+  const from=Number(rec.slot);
+  const occ=S.recs.find(r=>Number(r.slot)===Number(toSlot) && Number(r.cubeId)!==Number(cubeId));
+  if(occ) occ.slot=from;            // displacement → the occupant swaps to the mover's old slot
+  rec.slot=Number(toSlot);
+}
+function optimisticMerge(sid, leaderCubeId){
+  const plots=S.recs.filter(r=>Math.floor(Number(r.slot)/8)===Number(sid) && r.sourceKindNumber!==3);
+  if(!plots.length) return;
+  const leader=plots.find(r=>Number(r.cubeId)===Number(leaderCubeId)) || plots[0];
+  const ids=new Set(plots.map(r=>Number(r.cubeId)));
+  S.recs=S.recs.filter(r=>!ids.has(Number(r.cubeId)));   // plots are burned
+  // Placeholder merged token so the street shows as MERGED immediately (glyph art until the real
+  // token — with baked art — arrives on reconcile). Real id is unknown client-side; leader's is fine.
+  S.recs.push({ cubeId:leader.cubeId, slot:Number(sid)*8, wallet:S.me, sourceKind:'external',
+    sourceKindNumber:3, seed:leader.seed, source:leader.source||{chain:'ethereum',chainId:1,contract:'',tokenId:''}, art:null, _optimistic:true });
+}
+// True once the snapshot records reflect every pending op (so we can safely adopt the snapshot).
+function opsReflected(recs, ops){
+  const bySlot=new Map(), byCube=new Map();
+  for(const r of recs){ bySlot.set(Number(r.slot),r); byCube.set(Number(r.cubeId),r); }
+  for(const op of ops){
+    if(op.type==='move'){ const r=byCube.get(Number(op.cubeId)); if(!r || Number(r.slot)!==Number(op.toSlot)) return false; }
+    else if(op.type==='merge'){ const base=op.sid*8; for(let k=0;k<8;k++){ const r=bySlot.get(base+k); if(r && r.sourceKindNumber!==3) return false; } }
+  }
+  return true;
+}
+// Apply ops to the local records + render now (instant). Callers apply per-tx for progressive
+// feedback, or all at once, then call startReconcile once.
+function applyOps(ops){
+  for(const op of ops){ if(op.type==='move') optimisticMove(op.cubeId, op.toSlot); else if(op.type==='merge') optimisticMerge(op.sid, op.leaderCubeId); }
+  deriveWorld(S.recs); renderCurrent();
+}
+// Poll the snapshot in the background; KEEP the optimistic view until the snapshot reflects every
+// op (never let a stale snapshot overwrite it), then adopt the real data (picking up anyone else's
+// changes too). Gives up after ~2.5 min (covers the 120s indexer timer + slack).
+async function worldVersion(){ try{ const r=await fetch('/api/world-version',{cache:'no-store'}); return (await r.json()).version||0; }catch{ return 0; } }
+function startReconcile(ops){
+  // Poll the tiny /api/world-version marker every 5s (a few bytes, no RPC). Only when the snapshot
+  // ACTUALLY changed do we download the multi-MB file and check whether it reflects our ops — then
+  // adopt it. Keeps the optimistic view up meanwhile; gives up after ~3.5 min.
+  let tries=0, baseVer=null;
+  const tick=async()=>{
+    tries++;
+    const ver=await worldVersion();
+    if(baseVer==null){ baseVer=ver; setTimeout(tick,5000); return; }
+    const timedOut = tries>=42;
+    if((ver && ver!==baseVer) || timedOut){
+      invalidateWorldSnapshot();
+      let recs=null; try{ recs=((await loadChainMintRecords())||{}).records||[]; }catch{}
+      if(recs && (opsReflected(recs, ops) || timedOut)){ deriveWorld(recs); renderCurrent(); return; }
+      baseVer=ver; // this snapshot didn't include our change yet — wait for the next version
+    }
+    setTimeout(tick, 5000);
+  };
+  setTimeout(tick, 3000);
+}
+function commitOptimistic(ops){ applyOps(ops); startReconcile(ops); }
 
 function streetData(sid){
   const base=sid*8, plots=[];
@@ -176,11 +246,16 @@ function mergedCardHTML(s){
   // The merged token's server-rendered art fills the card as a background (reliable — the
   // on-chain 3D animation currently reverts for merged-street tokens). MERGED label + street
   // id overlaid; no merge button (nothing left to do). See loadMergedThumbs (disabled).
+  // `pending` = just merged this session, real token not in the snapshot yet → glyph art +
+  // "finalizing" (the burned leader can't be rendered on-chain); the reconcile swaps in the real card.
+  const bg = s.pending
+    ? `<div class="mgbg pendingart">${glyph(s.seed)}</div>`
+    : `<img class="mgbg" src="/api/thumbnail?cube=${s.cubeId}" alt="Street ${s.sid} merged" loading="lazy" decoding="async">`;
   return `<div class="card merged" data-sid="${s.sid}">
-    <img class="mgbg" src="/api/thumbnail?cube=${s.cubeId}" alt="Street ${s.sid} merged" loading="lazy" decoding="async">
+    ${bg}
     <div class="mgveil"></div>
     <div class="mgtop"><span class="mbadge">✦ MERGED</span><span class="mgbiome">${s.biome.emoji} ${capWord(s.biome.name)}</span></div>
-    <div class="mgbot"><span class="mgttl">Street ${s.sid}</span><span class="mgsub">one token · the whole street · #${s.cubeId}</span></div>
+    <div class="mgbot"><span class="mgttl">Street ${s.sid}</span><span class="mgsub">${s.pending?'merged · finalizing…':`one token · the whole street · #${s.cubeId}`}</span></div>
   </div>`; }
 function cardHTML(s){const c=count(s),m=analyze(s),a=actionLine(s),cls=m.kind==='ready'?'ready':(m.kind==='locked'?'locked':'');
   return `<div class="card ${cls}" data-sid="${s.sid}">
@@ -365,8 +440,10 @@ async function commitEvict(){ const st=S.staged,s=S.detail,owner=walletAccount()
   try{
     for(const step of st.steps){ if(btn)btn.textContent=`evicting ${done+1}/${st.steps.length}…`; await moveCube({cubeId:step.incoming.cubeId,owner,newSlot:step.slot}); done++; }
     if(willMerge){ if(btn)btn.textContent='merging…'; await mergeStreet({street:s.sid,owner,leaderCubeId:st.leader}); }
+    const ops=st.steps.map(step=>({type:'move', cubeId:step.incoming.cubeId, toSlot:step.slot}));
+    if(willMerge) ops.push({type:'merge', sid:s.sid, leaderCubeId:st.leader});
     toast(willMerge?'✦ Rivals evicted + merged':`✓ ${done} rival${done!==1?'s':''} evicted`, willMerge?'gold':undefined);
-    S.staged=null; closeSheet(); reloadWorldRepeatedly();
+    S.staged=null; closeSheet(); commitOptimistic(ops);
   }catch(err){ S.staged=null; toast(`stopped after ${done}/${st.steps.length}: ${msg(err)}`,true); closeSheet(); reloadWorldRepeatedly(); }
 }
 async function commitStaged(){ const st=S.staged,s=S.detail,owner=walletAccount()||S.me;
@@ -374,9 +451,10 @@ async function commitStaged(){ const st=S.staged,s=S.detail,owner=walletAccount(
   try{
     if(st.type==='merge') await mergeStreet({street:s.sid,owner,leaderCubeId:st.leader});
     else await moveCube({cubeId:st.incoming.cubeId,owner,newSlot:st.slot});
+    const op = st.type==='merge' ? {type:'merge', sid:s.sid, leaderCubeId:st.leader} : {type:'move', cubeId:st.incoming.cubeId, toSlot:st.slot};
     toast(st.type==='merge'?'✦ Merged into one street':(st.type==='evict'?'✓ Rival evicted + paid':'✓ Moved in'), st.type==='merge'?'gold':undefined);
     S.staged=null; closeSheet();
-    reloadWorldRepeatedly();
+    commitOptimistic([op]);
   }catch(e){ toast((st.type||'action')+' failed: '+msg(e),true); if(btn){btn.disabled=false;renderDetail();} }
 }
 
@@ -407,8 +485,10 @@ async function commitBatch(){
       await moveCube({cubeId:step.cube.cubeId,owner,newSlot:step.slot}); done++;
     }
     if(p.mergeAfter){ if(btn)btn.textContent='merging…'; await mergeStreet({street:s.sid,owner,leaderCubeId:st.leader}); }
+    const ops=p.steps.map(step=>({type:'move', cubeId:step.cube.cubeId, toSlot:step.slot}));
+    if(p.mergeAfter) ops.push({type:'merge', sid:s.sid, leaderCubeId:st.leader});
     toast(p.mergeAfter?'✦ Street merged into one token':`✓ ${done} move${done>1?'s':''} done`, p.mergeAfter?'gold':undefined);
-    S.staged=null; closeSheet(); reloadWorldRepeatedly();
+    S.staged=null; closeSheet(); commitOptimistic(ops);
   }catch(e){
     S.staged=null;
     toast(`stopped after ${done}/${p.steps.length}: ${msg(e)}`,true);
@@ -549,7 +629,8 @@ async function commitMoveQueue(){
   let done=0;
   try{
     for(const m of q){ if(btn)btn.textContent=`moving ${done+1}/${q.length}…`; await moveCube({cubeId:m.cube.cubeId,owner,newSlot:m.slot}); done++; S.moveQueue.shift(); }
-    toast(`✓ ${done} move${done>1?'s':''} done`); setTab('mine'); reloadWorldRepeatedly();
+    const ops=q.map(m=>({type:'move', cubeId:m.cube.cubeId, toSlot:m.slot}));
+    toast(`✓ ${done} move${done>1?'s':''} done`); setTab('mine'); commitOptimistic(ops);
   }catch(e){ toast(`stopped after ${done}/${q.length}: ${msg(e)}`,true); await loadWorld(); renderMove(); }
 }
 

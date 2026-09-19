@@ -1,5 +1,7 @@
 // Shared chain helpers used by both the one-shot backfill and the live watcher.
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { REPO_ROOT } from './config.js';
 import { CUBE_MINTED, CUBE_MOVED, CUBE_CUSTOMIZED, TRANSFER, STREET_MERGED, NON_NORMIE_PAYLOAD_RECORDED, SOURCE_PAYLOAD_RECORDED } from './events.js';
 
 // Cube events live on the CubeNFT address; the payload events on the art store.
@@ -21,10 +23,33 @@ export async function fetchLogs(client, cfg, fromBlock, toBlock) {
 
 // Block timestamps for the (deduped) blocks in a flat log array. Used for mintedAt AND
 // every history entry's `ts`, so pass all history-bearing logs (mints + moves + rebases).
+//
+// Block timestamps are IMMUTABLE, so they're cached to disk — a periodic re-fold then only
+// fetches timestamps for blocks it hasn't seen (was ~1600 getBlock calls EVERY run; now ~the
+// handful of new event-blocks). getBlock is chunked to avoid hammering the RPC with 429s.
+const BT_PATH = resolve(REPO_ROOT, process.env.INDEXER_BLOCK_TIMES_CACHE || 'data/block-times-cache.json');
+let _btCache = null;
+function btCache() {
+  if (_btCache) return _btCache;
+  _btCache = new Map();
+  try { if (existsSync(BT_PATH)) { const j = JSON.parse(readFileSync(BT_PATH, 'utf8')); for (const k of Object.keys(j)) _btCache.set(k, j[k]); } } catch { /* corrupt/missing → rebuild */ }
+  return _btCache;
+}
+function btSave() { try { const o = {}; for (const [k, v] of _btCache) o[k] = v; writeFileSync(BT_PATH, JSON.stringify(o)); } catch { /* best effort */ } }
+
 export async function fetchBlockTimestamps(client, logs) {
+  const cache = btCache();
   const blockNums = [...new Set(logs.map((l) => l.blockNumber))];
-  const blocks = await Promise.all(blockNums.map((bn) => client.getBlock({ blockNumber: bn })));
-  return new Map(blocks.map((b) => [b.number, Number(b.timestamp)]));
+  const missing = blockNums.filter((bn) => !cache.has(String(bn)));
+  if (missing.length) {
+    const CHUNK = 20;
+    for (let i = 0; i < missing.length; i += CHUNK) {
+      const blocks = await Promise.all(missing.slice(i, i + CHUNK).map((bn) => client.getBlock({ blockNumber: bn })));
+      for (const b of blocks) cache.set(String(b.number), Number(b.timestamp));
+    }
+    btSave();
+  }
+  return new Map(blockNums.map((bn) => [bn, cache.get(String(bn))]));
 }
 
 // Partition a mixed watchEvent batch by event name.

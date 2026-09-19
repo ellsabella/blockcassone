@@ -1330,6 +1330,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Tiny snapshot-version marker (mtime) so clients can poll cheaply and only download the
+  // multi-MB world-snapshot.json when it ACTUALLY changed. No RPC, a few bytes.
+  if (req.url === '/api/world-version') {
+    let version = 0;
+    try { version = Math.floor(fs.statSync(path.join(REPO_ROOT, 'data', 'world-snapshot.json')).mtimeMs); } catch (_) {}
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ version }));
+    return;
+  }
+
   if (req.url === '/api/chain-rpc') {
     proxyChainRpc(req, res);
     return;
