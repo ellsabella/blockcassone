@@ -153,6 +153,10 @@ function readChainConfig() {
       flatteningAttestation: String(parsed.flatteningAttestation || ''),
       normies: String(parsed.normies || ''),
       nonNormieStore: String(parsed.nonNormieStore || ''),
+      // Post-mint the six genesis collections MAY be used as customize sources. Default off
+      // (unblocked). Set "blockGenesisSources": true in chain-config to restore the mint-time
+      // reservation. Read by both the attest gate here and the client (served chain-config).
+      blockGenesisSources: Boolean(parsed.blockGenesisSources),
     };
   } catch (_) {
     return { rpcUrl: String(envRpc || 'http://127.0.0.1:8545'), chainId: 0, cubeNft: '', thumbnailRenderer: '' };
@@ -618,18 +622,22 @@ async function verifyAttestRequest(typedData, vaultHint) {
   let sourceTokenId;
   try { sourceTokenId = BigInt(m.sourceTokenId); } catch (_) { return fail('malformed sourceTokenId'); }
 
-  // POOL — never attest mint-pool art (mirrors CubeNFT's chain-blind sourceKey).
-  if (config.normies && sourceContract.toLowerCase() === config.normies.toLowerCase()) {
-    return fail('Normies are mint-pool art');
-  }
-  const { storeKey, claimKey } = attestKeys(config.chainId, sourceContract, sourceTokenId);
-  if (config.nonNormieStore) {
-    const r = await ethCall(config.rpcUrl, config.nonNormieStore, '0x65626080' + storeKey); // sourcePayloadHash(bytes32)
-    if (!ZERO_RET(r)) return fail('source is reserved by the mint pool');
-  }
-  if (config.cubeNft) {
-    const r = await ethCall(config.rpcUrl, config.cubeNft, '0xdd597020' + claimKey); // cubeForSourceKey(bytes32)
-    if (!ZERO_RET(r)) return fail('source is already claimed by a cube');
+  // POOL — the mint-time reservation of the six genesis collections. LIFTED post-mint (product
+  // decision 2026): the mint is closed, so those collections may now be used as customize sources.
+  // Set "blockGenesisSources": true in chain-config to restore all three sub-checks.
+  if (config.blockGenesisSources) {
+    if (config.normies && sourceContract.toLowerCase() === config.normies.toLowerCase()) {
+      return fail('Normies are mint-pool art');
+    }
+    const { storeKey, claimKey } = attestKeys(config.chainId, sourceContract, sourceTokenId);
+    if (config.nonNormieStore) {
+      const r = await ethCall(config.rpcUrl, config.nonNormieStore, '0x65626080' + storeKey); // sourcePayloadHash(bytes32)
+      if (!ZERO_RET(r)) return fail('source is reserved by the mint pool');
+    }
+    if (config.cubeNft) {
+      const r = await ethCall(config.rpcUrl, config.cubeNft, '0xdd597020' + claimKey); // cubeForSourceKey(bytes32)
+      if (!ZERO_RET(r)) return fail('source is already claimed by a cube');
+    }
   }
 
   // OWNER — ownership/delegation of the source token.

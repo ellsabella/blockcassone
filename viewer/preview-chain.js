@@ -606,6 +606,10 @@ const DELEGATE_REGISTRY_V2 = '0x00000000000000447e69651d841bD8D104Bed493';
 // wallet chain, not just mainnet. Fails CLOSED: an unverifiable source is blocked.
 export async function checkSourceAvailable(sourceContract, sourceTokenId) {
   const cfg = await loadConfig();
+  // Post-mint the six genesis collections are usable as customize sources; the whole pool guard
+  // is off unless chain-config re-enables it ("blockGenesisSources": true). The server /api/attest
+  // enforces the same flag, so this is only the UX mirror.
+  if (!cfg.blockGenesisSources) return { ok: true };
   if (cfg.normies && String(sourceContract).toLowerCase() === String(cfg.normies).toLowerCase()) {
     return { ok: false, reason: 'Normies are mint-pool art — they join TheBLOCK through the mint, not an update' };
   }

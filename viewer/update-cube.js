@@ -386,6 +386,11 @@ let _hiddenContractsP = null;
 function hiddenSourceContracts() {
   if (!_hiddenContractsP) {
     _hiddenContractsP = (async () => {
+      // Post-mint the six genesis collections are usable as customize sources → hide nothing,
+      // unless chain-config re-enables the mint-time reservation ("blockGenesisSources": true).
+      let block = false;
+      try { block = !!(await (await fetch('/data/chain-config.json', { cache: 'no-store' })).json()).blockGenesisSources; } catch (_) {}
+      if (!block) return new Set();
       const set = new Set(GENESIS_SOURCE_CONTRACTS);
       try {
         const snap = await loadSnapshotOwnership();
