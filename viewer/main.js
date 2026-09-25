@@ -4513,6 +4513,9 @@ function initMobileUI() {
     // Same on-chain gate as the desktop nav link (nav-gate.js reveals [data-gate]
     // once customizesEnabled is confirmed) — the mobile menu simply never had it.
     '<a class="m-item" href="/viewer/update.html" data-gate="customize" style="display:none">UPDATE</a>' +
+    // Move / Merge was in the desktop PLAY dropdown but missing from the compact menu, so on
+    // narrow viewports (~<1100px) there was no way to reach it. Same on-chain gate as the rest.
+    '<a class="m-item" href="/viewer/streets.html" data-gate="streets" style="display:none">MOVE / MERGE</a>' +
     '<a class="m-item" href="/about">ABOUT</a>' +
     '<a class="m-item" href="https://opensea.io/collection/theblock-by-ella/overview" target="_blank" rel="noopener">OPENSEA &#8599;</a>' +
     '<div class="m-wallet"></div>' +
